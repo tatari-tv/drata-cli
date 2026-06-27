@@ -4,7 +4,13 @@
 //! clap enum, typed create/update args, cursor-paginated list filtered through
 //! the 3-tier matcher, a `--example` skeleton, and questionnaire sub-commands.
 //! Writes (create/update/remove/send) go through the client, which enforces the
-//! write guardrail.
+//! write guardrail, then through the confirm gate.
+//!
+//! Phase 4 adds:
+//! - `--all` NDJSON streaming on list
+//! - `--expand` on list/get (spec: `expand[]` query param)
+//! - `--file` multipart upload on vendor documents
+//! - confirm-on-mutation gate (POST/PUT/DELETE ask before sending)
 //!
 //! Drata vendor JSON is camelCase (confirmed against
 //! `spec/drata-openapi-v2.json`): `renewalDate`, `recipientEmail`, etc. Bodies
@@ -13,10 +19,13 @@
 use crate::cli::{VendorAction, VendorQuestionnaireAction};
 use crate::client::DrataClient;
 use crate::config::Config;
+use crate::confirm::ConfirmFn;
+use crate::expand::append_expand;
 use crate::filter;
 use crate::output::print_value;
-use eyre::Result;
+use eyre::{Result, bail};
 use serde_json::{Value, json};
+use std::io;
 use tracing::{debug, instrument};
 
 /// JSON skeleton printed by `drata vendor create --example`. Generated from the
@@ -40,10 +49,10 @@ pub fn example_if_requested(action: &VendorAction) -> Option<&'static str> {
     }
 }
 
-pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config) -> Result<()> {
+pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     match action {
-        VendorAction::List { patterns } => list(client, config, patterns).await,
-        VendorAction::Get { id } => get(client, config, id).await,
+        VendorAction::List { patterns, all, expand } => list(client, config, patterns, *all, expand).await,
+        VendorAction::Get { id, expand } => get(client, config, id, expand).await,
         VendorAction::Create {
             name,
             category,
@@ -56,6 +65,7 @@ pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config
             create(
                 client,
                 config,
+                confirm,
                 name.as_deref(),
                 category.as_deref(),
                 risk.as_deref(),
@@ -77,6 +87,7 @@ pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config
             update(
                 client,
                 config,
+                confirm,
                 id,
                 name.as_deref(),
                 category.as_deref(),
@@ -87,8 +98,9 @@ pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config
             )
             .await
         }
-        VendorAction::Remove { id } => remove(client, config, id).await,
-        VendorAction::Questionnaire { action } => questionnaire(client, config, action).await,
+        VendorAction::Remove { id } => remove(client, config, confirm, id).await,
+        VendorAction::Upload { vendor_id, file } => upload(client, config, confirm, vendor_id, file).await,
+        VendorAction::Questionnaire { action } => questionnaire(client, config, confirm, action).await,
     }
 }
 
@@ -97,28 +109,41 @@ pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config
 // ---------------------------------------------------------------------------
 
 #[instrument(skip(client, config))]
-async fn list(client: &DrataClient, config: &Config, patterns: &[String]) -> Result<()> {
-    debug!(patterns_len = patterns.len(), "vendor list");
-    let all = client.get_all("/vendors").await?;
-    let filtered = filter::filter_into(all, patterns, vendor_name);
-    let result = json!({ "data": filtered });
-    print_value(&result, &config.output_format);
+async fn list(client: &DrataClient, config: &Config, patterns: &[String], all: bool, expand: &[String]) -> Result<()> {
+    debug!(
+        patterns_len = patterns.len(),
+        all,
+        expand_len = expand.len(),
+        "vendor list"
+    );
+    let base = append_expand("/vendors", expand);
+    if all {
+        let mut stdout = io::stdout();
+        client.stream_all(&base, &mut stdout).await?;
+    } else {
+        let raw = client.get_all(&base).await?;
+        let filtered = filter::filter_into(raw, patterns, vendor_name);
+        let result = json!({ "data": filtered });
+        print_value(&result, &config.output_format);
+    }
     Ok(())
 }
 
 #[instrument(skip(client, config))]
-async fn get(client: &DrataClient, config: &Config, id: &str) -> Result<()> {
-    debug!(id, "vendor get");
-    let resp = client.get(&format!("/vendors/{}", id)).await?;
+async fn get(client: &DrataClient, config: &Config, id: &str, expand: &[String]) -> Result<()> {
+    debug!(id, expand_len = expand.len(), "vendor get");
+    let path = append_expand(&format!("/vendors/{}", id), expand);
+    let resp = client.get(&path).await?;
     print_value(&resp, &config.output_format);
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(client, config))]
+#[instrument(skip(client, config, confirm))]
 async fn create(
     client: &DrataClient,
     config: &Config,
+    confirm: &ConfirmFn,
     name: Option<&str>,
     category: Option<&str>,
     risk: Option<&str>,
@@ -128,6 +153,9 @@ async fn create(
 ) -> Result<()> {
     let name = name.ok_or_else(|| eyre::eyre!("`drata vendor create` requires --name (or use --example)"))?;
     debug!(name, "vendor create");
+    if !confirm("POST", "/vendors")? {
+        bail!("aborted");
+    }
     let mut body = json!({ "name": name });
     set_opt(&mut body, "category", category);
     set_opt(&mut body, "risk", risk);
@@ -141,10 +169,11 @@ async fn create(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(client, config))]
+#[instrument(skip(client, config, confirm))]
 async fn update(
     client: &DrataClient,
     config: &Config,
+    confirm: &ConfirmFn,
     id: &str,
     name: Option<&str>,
     category: Option<&str>,
@@ -154,6 +183,9 @@ async fn update(
     notes: Option<&str>,
 ) -> Result<()> {
     debug!(id, "vendor update");
+    if !confirm("PUT", &format!("/vendors/{}", id))? {
+        bail!("aborted");
+    }
     let mut body = json!({});
     set_opt(&mut body, "name", name);
     set_opt(&mut body, "category", category);
@@ -167,10 +199,32 @@ async fn update(
     Ok(())
 }
 
-#[instrument(skip(client, config))]
-async fn remove(client: &DrataClient, config: &Config, id: &str) -> Result<()> {
+#[instrument(skip(client, config, confirm))]
+async fn remove(client: &DrataClient, config: &Config, confirm: &ConfirmFn, id: &str) -> Result<()> {
     debug!(id, "vendor remove");
+    if !confirm("DELETE", &format!("/vendors/{}", id))? {
+        bail!("aborted");
+    }
     let result = client.delete(&format!("/vendors/{}", id)).await?;
+    print_value(&result, &config.output_format);
+    Ok(())
+}
+
+#[instrument(skip(client, config, confirm))]
+async fn upload(
+    client: &DrataClient,
+    config: &Config,
+    confirm: &ConfirmFn,
+    vendor_id: &str,
+    file: &std::path::Path,
+) -> Result<()> {
+    debug!(vendor_id, file = %file.display(), "vendor upload document");
+    if !confirm("POST", &format!("/vendors/{}/documents", vendor_id))? {
+        bail!("aborted");
+    }
+    let result = client
+        .post_multipart(&format!("/vendors/{}/documents", vendor_id), file)
+        .await?;
     print_value(&result, &config.output_format);
     Ok(())
 }
@@ -179,8 +233,13 @@ async fn remove(client: &DrataClient, config: &Config, id: &str) -> Result<()> {
 // Questionnaire subresource
 // ---------------------------------------------------------------------------
 
-#[instrument(skip(client, config))]
-async fn questionnaire(client: &DrataClient, config: &Config, action: &VendorQuestionnaireAction) -> Result<()> {
+#[instrument(skip(client, config, confirm))]
+async fn questionnaire(
+    client: &DrataClient,
+    config: &Config,
+    confirm: &ConfirmFn,
+    action: &VendorQuestionnaireAction,
+) -> Result<()> {
     match action {
         VendorQuestionnaireAction::List { vendor_id } => {
             debug!(vendor_id, "questionnaire list");
@@ -211,6 +270,9 @@ async fn questionnaire(client: &DrataClient, config: &Config, action: &VendorQue
             email_subject,
         } => {
             debug!(vendor_id, questionnaire_id, "questionnaire send");
+            if !confirm("POST", &format!("/vendors/{}/questionnaires", vendor_id))? {
+                bail!("aborted");
+            }
             let mut body = json!({
                 "email": email,
                 "questionnaireId": questionnaire_id,

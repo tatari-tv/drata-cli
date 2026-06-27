@@ -4,19 +4,29 @@
 //! `/personnel/actions` (bulk action). Confirmed camelCase from spec:
 //! `employmentStatus`, `startedAt`, `separatedAt`, `notHumanReason`.
 //! Enum field promoted to `clap::ValueEnum`: `employmentStatus`.
+//!
+//! Phase 4 adds: `--all` NDJSON streaming, `--expand`, confirm-on-mutation.
 
 use crate::cli::{EmploymentStatus, PersonnelAction};
 use crate::client::DrataClient;
 use crate::config::Config;
+use crate::confirm::ConfirmFn;
+use crate::expand::append_expand;
 use crate::output::print_value;
-use eyre::Result;
+use eyre::{Result, bail};
 use serde_json::{Value, json};
+use std::io;
 use tracing::{debug, instrument};
 
-pub async fn handle(action: &PersonnelAction, client: &DrataClient, config: &Config) -> Result<()> {
+pub async fn handle(
+    action: &PersonnelAction,
+    client: &DrataClient,
+    config: &Config,
+    confirm: &ConfirmFn,
+) -> Result<()> {
     match action {
-        PersonnelAction::List => list(client, config).await,
-        PersonnelAction::Get { personnel_id } => get(client, config, personnel_id).await,
+        PersonnelAction::List { all, expand } => list(client, config, *all, expand).await,
+        PersonnelAction::Get { personnel_id, expand } => get(client, config, personnel_id, expand).await,
         PersonnelAction::Update {
             personnel_id,
             employment_status,
@@ -27,6 +37,7 @@ pub async fn handle(action: &PersonnelAction, client: &DrataClient, config: &Con
             update(
                 client,
                 config,
+                confirm,
                 personnel_id,
                 employment_status.as_ref(),
                 started_at.as_deref(),
@@ -43,26 +54,34 @@ pub async fn handle(action: &PersonnelAction, client: &DrataClient, config: &Con
 // ---------------------------------------------------------------------------
 
 #[instrument(skip(client, config))]
-async fn list(client: &DrataClient, config: &Config) -> Result<()> {
-    debug!("personnel list");
-    let all = client.get_all("/personnel").await?;
-    let result = json!({ "data": all });
-    print_value(&result, &config.output_format);
+async fn list(client: &DrataClient, config: &Config, all: bool, expand: &[String]) -> Result<()> {
+    debug!(all, expand_len = expand.len(), "personnel list");
+    let base = append_expand("/personnel", expand);
+    if all {
+        let mut stdout = io::stdout();
+        client.stream_all(&base, &mut stdout).await?;
+    } else {
+        let items = client.get_all(&base).await?;
+        let result = json!({ "data": items });
+        print_value(&result, &config.output_format);
+    }
     Ok(())
 }
 
 #[instrument(skip(client, config))]
-async fn get(client: &DrataClient, config: &Config, personnel_id: &str) -> Result<()> {
-    debug!(personnel_id, "personnel get");
-    let resp = client.get(&format!("/personnel/{}", personnel_id)).await?;
+async fn get(client: &DrataClient, config: &Config, personnel_id: &str, expand: &[String]) -> Result<()> {
+    debug!(personnel_id, expand_len = expand.len(), "personnel get");
+    let path = append_expand(&format!("/personnel/{}", personnel_id), expand);
+    let resp = client.get(&path).await?;
     print_value(&resp, &config.output_format);
     Ok(())
 }
 
-#[instrument(skip(client, config))]
+#[instrument(skip(client, config, confirm))]
 async fn update(
     client: &DrataClient,
     config: &Config,
+    confirm: &ConfirmFn,
     personnel_id: &str,
     employment_status: Option<&EmploymentStatus>,
     started_at: Option<&str>,
@@ -70,6 +89,9 @@ async fn update(
     not_human_reason: Option<&str>,
 ) -> Result<()> {
     debug!(personnel_id, "personnel update");
+    if !confirm("PUT", &format!("/personnel/{}", personnel_id))? {
+        bail!("aborted");
+    }
     let mut body = json!({});
     if let Some(es) = employment_status {
         body["employmentStatus"] = json!(employment_status_str(es));

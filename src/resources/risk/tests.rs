@@ -30,6 +30,8 @@ fn example_only_for_create_with_flag() {
 
     let list = RiskAction::List {
         register_id: "1".to_string(),
+        all: false,
+        expand: vec![],
     };
     assert!(example_if_requested(&list).is_none());
 }

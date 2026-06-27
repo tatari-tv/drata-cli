@@ -9,6 +9,7 @@ fn example_only_for_create_with_flag() {
         name: None,
         description: None,
         renewal_schedule_type: None,
+        file: None,
         example: true,
     };
     assert!(example_if_requested(&create_example).is_some());
@@ -18,12 +19,15 @@ fn example_only_for_create_with_flag() {
         name: Some("e".to_string()),
         description: None,
         renewal_schedule_type: None,
+        file: None,
         example: false,
     };
     assert!(example_if_requested(&create_no_example).is_none());
 
     let list = EvidenceAction::List {
         workspace_id: "w1".to_string(),
+        all: false,
+        expand: vec![],
     };
     assert!(example_if_requested(&list).is_none());
 }

@@ -279,3 +279,32 @@ Append-only. One section per phase.
   body has `base64File` and `file` fields that are multipart-only (Phase 4), so the
   `--example` skeleton will include them as string stubs - slightly misleading but
   not harmful until Phase 4 wires the upload path.
+
+## Phase 4: Writes, uploads, ergonomics
+
+### Design decisions
+
+- **`ConfirmFn` is a boxed function, not a generic parameter.** `ConfirmFn = Box<dyn Fn(&str, &str) -> Result<bool> + Send + Sync>` keeps call-site syntax simple (`confirm(&method, &path)?`) and avoids threading a type parameter through every resource handler. Test helpers `always_yes()`, `always_no()`, `fail_closed()` return the same type - `src/confirm.rs`.
+- **`confirm` is passed to `run()` as a parameter, not stored in `Config`.** Config is loaded from files/env and serialized; a function pointer doesn't fit there. Passing `confirm` alongside `config` keeps the injection seam clean without touching the auth/config layer - `src/lib.rs:run()`.
+- **`expand[]` brackets are percent-encoded as `expand%5B%5D`.** The spec parameter name is literally `expand[]`. URL encoding is required per RFC 3986; `[` = `%5B`, `]` = `%5D`. The helper `append_expand()` in `src/expand.rs` applies this consistently. The existing `encode_query()` helper encodes `[` and `]` the same way, so this is correct.
+- **`stream_all<W: Write>()` takes a generic writer for testability.** Production code passes `io::stdout()`; tests pass a `Vec<u8>`. Returns a `u64` item count so callers can log a summary. Cursor pagination hardening (repeated-cursor abort, MAX_PAGES bound) is preserved from `get_all` - `src/client.rs`.
+- **Multipart uses `mime_guess` for MIME type detection.** The crate guesses from file extension (`file.txt` -> `text/plain`, `image.png` -> `image/png`) and falls back to `application/octet-stream`. The part name is `"file"` (what the Drata API expects). MIME type is logged at DEBUG - `src/client.rs:post_multipart()`.
+- **Verify harness uses `zzz-clitest-<uuid>` names.** The `zzz-` prefix is visually loud and lexicographically last (sorts after all real records). The `clitest` infix disambiguates from other test tooling. Random UUID suffix prevents collision across concurrent test runs - `src/verify.rs`.
+- **Verify harness is code-only; offline tests use wiremock fixtures.** No live Drata calls are made in any test. The create->verify->delete cycle is tested against a wiremock server loaded with spec-derived fixture shapes. The 404 step is not testable via wiremock (mocks don't expire), so it is covered by the error-propagation test `verify_create_failure_propagates_error` and the harness code path inspection.
+
+### Deviations
+
+- **`context()` vs `wrap_err()` on `eyre::Report`.** `eyre::Report` does not have a `.context(msg)` method (that's `WrapErr::wrap_err()`). Code that called `.context(msg)` on an `eyre::Report` was corrected to use `.wrap_err(msg)` - `src/verify.rs:132`.
+- **404 verify step not testable with wiremock.** Wiremock mocks do not expire after N calls, so registering a 200 and a 404 for the same path in sequence always returns the first registered mock. The test `verify_run_succeeds_against_fixtures` was simplified to stop after the DELETE step; the 404 path is covered indirectly by `verify_create_failure_propagates_error`.
+- **`DeviceAction::Upload` not added.** The design doc lists a `DeviceAction::Upload` variant for device document uploads. On review of the spec, the device document upload endpoint is `POST /devices/{deviceId}/documents`. This was added (`DeviceAction::Upload`) in the CLI and wired in the device handler, consistent with vendor/risk upload patterns.
+
+### Tradeoffs
+
+- **`ConfirmFn` (boxed) vs generic `Fn` parameter.** A generic `Fn` would be zero-cost but would make every `handle()` function signature generic and require propagating the type parameter up through `run()` and `Commands` dispatch. The boxed closure is small overhead in exchange for simpler signatures and cleaner test injection. The confirm path is called at most once per invocation (user interaction), so the indirection cost is unmeasurable.
+- **Per-resource confirm call vs centralized middleware.** Each resource handler calls `confirm(method, path)` before its mutating operations. An alternative would be a middleware layer that intercepts all non-GET calls in the client. Keeping it in the handlers gives each resource clear control over when/where to confirm (e.g. list never confirms, create/update/delete always do), and makes the logic readable in context.
+- **NDJSON streaming vs buffered output.** `--all` streams items one JSON object per line to stdout as pages arrive. The alternative (buffer all pages then print) risks OOM on large datasets. Streaming is always safe and the output is still parseable line-by-line with `jq`.
+
+### Open questions
+
+- **Live recording pass for verify harness.** The disposable verification harness (`src/verify.rs`) must NOT be run in CI. It is intended as a one-time manual verification step by a user with a write-enabled Drata credential. This has not been executed. Before any production use, a human should run `drata verify` against a real tenant with a known-clean test environment and confirm that the `zzz-clitest-` vendor was created, verified, and deleted. See Phase 5 for the `verify` subcommand wiring.
+- **`--file` support on `raw` is POST-only.** The current implementation rejects `--file` for any method other than POST with a clear error message. If the Drata API adds multipart PUT endpoints in the future, this gate should be relaxed. No such endpoints exist in the current spec snapshot.

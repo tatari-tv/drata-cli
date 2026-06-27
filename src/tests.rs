@@ -9,6 +9,7 @@ fn cli_with(command: Commands) -> Cli {
         region: None,
         profile: None,
         allow_writes: false,
+        yes: false,
         output: None,
         log_level: None,
         command,
@@ -26,7 +27,11 @@ fn is_auth_command_detects_onboarding() {
         allow_writes: false,
     })));
     assert!(!is_auth_command(&cli_with(Commands::Vendor {
-        action: VendorAction::List { patterns: vec![] }
+        action: VendorAction::List {
+            patterns: vec![],
+            all: false,
+            expand: vec![]
+        }
     })));
 }
 
@@ -49,7 +54,11 @@ fn example_if_requested_for_vendor_create() {
 #[test]
 fn example_if_requested_none_for_list() {
     let cli = cli_with(Commands::Vendor {
-        action: VendorAction::List { patterns: vec![] },
+        action: VendorAction::List {
+            patterns: vec![],
+            all: false,
+            expand: vec![],
+        },
     });
     assert!(example_if_requested(&cli).is_none());
 }

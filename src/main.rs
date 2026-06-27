@@ -13,6 +13,7 @@ use tracing_subscriber::prelude::*;
 
 use drata_cli::cli::Cli;
 use drata_cli::config::{AuthDiagnostic, Config};
+use drata_cli::confirm;
 
 const PROJECT: &str = "drata";
 
@@ -76,7 +77,10 @@ async fn main() -> Result<()> {
 
     setup_tracing(&config.log_level).context("Failed to setup tracing")?;
 
-    drata_cli::run(&cli, &config).await.context("Command failed")?;
+    let confirm_fn = confirm::default_confirm(cli.yes);
+    drata_cli::run(&cli, &config, confirm_fn)
+        .await
+        .context("Command failed")?;
 
     Ok(())
 }

@@ -46,6 +46,7 @@ fn make_cli(api_key: Option<&str>) -> Cli {
         region: None,
         profile: None,
         allow_writes: false,
+        yes: false,
         output: None,
         log_level: None,
         command: Commands::Auth,

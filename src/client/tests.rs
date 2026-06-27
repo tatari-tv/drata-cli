@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+use std::io::Write;
+use tempfile::NamedTempFile;
 
 #[test]
 fn test_new_succeeds() {
@@ -90,4 +92,135 @@ fn test_format_api_error_no_message_surfaces_body_and_url() {
     assert!(msg.contains("too long"), "raw body must survive: {msg}");
     assert!(msg.contains(url));
     assert!(msg.contains("POST"));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: NDJSON streaming, multipart upload
+// ---------------------------------------------------------------------------
+
+use wiremock::matchers::{method, path, query_param, query_param_is_missing};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+async fn rw_client(server: &MockServer) -> DrataClient {
+    DrataClient::new("test-key".to_string(), "us", true)
+        .unwrap()
+        .with_base_url(server.uri())
+}
+
+async fn ro_client_for_stream(server: &MockServer) -> DrataClient {
+    DrataClient::new("test-key".to_string(), "us", false)
+        .unwrap()
+        .with_base_url(server.uri())
+}
+
+#[tokio::test]
+async fn stream_all_writes_ndjson_lines() {
+    let server = MockServer::start().await;
+    // Two-page response.
+    Mock::given(method("GET"))
+        .and(path("/vendors"))
+        .and(query_param("size", "50"))
+        .and(query_param_is_missing("cursor"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}],
+            "pagination": {"cursor": "next"}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/vendors"))
+        .and(query_param("size", "50"))
+        .and(query_param("cursor", "next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": [{"id": 3, "name": "C"}],
+            "pagination": {"cursor": null}
+        })))
+        .mount(&server)
+        .await;
+
+    let client = ro_client_for_stream(&server).await;
+    let mut out: Vec<u8> = Vec::new();
+    let count = client.stream_all("/vendors", &mut out).await.unwrap();
+    assert_eq!(count, 3, "should stream 3 items");
+
+    let text = String::from_utf8(out).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 3, "each item should be on its own line");
+
+    // Each line is valid JSON
+    for line in &lines {
+        let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert!(parsed["id"].is_number(), "each line has an id: {line}");
+    }
+
+    // Lines are in order
+    let ids: Vec<i64> = lines
+        .iter()
+        .map(|l| {
+            serde_json::from_str::<serde_json::Value>(l).unwrap()["id"]
+                .as_i64()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(ids, vec![1, 2, 3]);
+}
+
+#[tokio::test]
+async fn stream_all_aborts_on_repeated_cursor() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/items"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": [{"id": 1}],
+            "pagination": {"cursor": "stuck"}
+        })))
+        .mount(&server)
+        .await;
+
+    let client = ro_client_for_stream(&server).await;
+    let mut out: Vec<u8> = Vec::new();
+    // Should not hang; repeated cursor breaks out after seeing it twice.
+    let count = client.stream_all("/items", &mut out).await.unwrap();
+    // First page item + second page item (same cursor => abort before third)
+    assert!(count >= 1, "should have streamed at least one item");
+    assert!(count <= 5, "should not have looped forever: {count}");
+}
+
+#[tokio::test]
+async fn post_multipart_sends_file() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/vendors/1/documents"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({"id": 10, "fileName": "test.txt"})))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = rw_client(&server).await;
+
+    // Create a temp file to upload.
+    let mut tmp = NamedTempFile::new().unwrap();
+    writeln!(tmp, "hello drata").unwrap();
+    let path = tmp.path().to_path_buf();
+
+    let result = client.post_multipart("/vendors/1/documents", &path).await.unwrap();
+    assert_eq!(result["id"].as_u64(), Some(10));
+}
+
+#[tokio::test]
+async fn post_multipart_blocked_on_readonly_client() {
+    let server = MockServer::start().await;
+    let client = DrataClient::new("test-key".to_string(), "us", false)
+        .unwrap()
+        .with_base_url(server.uri());
+
+    let mut tmp = NamedTempFile::new().unwrap();
+    writeln!(tmp, "data").unwrap();
+
+    let err = client
+        .post_multipart("/vendors/1/documents", tmp.path())
+        .await
+        .unwrap_err();
+    let downcast = err.downcast_ref::<WriteGuardError>();
+    assert!(downcast.is_some(), "expected WriteGuardError, got: {err}");
 }

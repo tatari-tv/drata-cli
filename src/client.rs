@@ -13,11 +13,18 @@
 //! - **Write guardrail.** Any non-GET request fails closed unless the client
 //!   was built write-enabled (`allow_writes: true` on the resolved credential).
 //!   This is a property of the key, not the profile name.
+//! - **Multipart uploads.** `post_multipart` sends a `multipart/form-data`
+//!   request (for the 10 ops that require it) through the same write guardrail
+//!   and instrumentation machinery.
+//! - **NDJSON streaming.** `stream_all` drains cursor-paginated results,
+//!   writing one JSON object per line to a `Write` impl instead of buffering.
 
 use eyre::{Context, Result, bail};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use reqwest::{Client, Method, StatusCode};
 use serde_json::Value;
+use std::io::Write;
+use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
@@ -212,6 +219,76 @@ impl DrataClient {
         }
     }
 
+    /// Send a multipart/form-data POST request. Used for the 10 upload
+    /// operations identified by `spec::Operation.multipart`. The write guardrail
+    /// applies: the client must be write-enabled. The file is read from `file_path`
+    /// and sent as the `file` part; any extra JSON fields are sent as the `data`
+    /// part (a serialized JSON string).
+    #[instrument(skip(self, file_path), fields(%path))]
+    pub async fn post_multipart(&self, path: &str, file_path: impl AsRef<Path>) -> Result<Value> {
+        let file_path = file_path.as_ref();
+        debug!(path, file = %file_path.display(), "multipart POST");
+
+        if !self.allow_writes {
+            warn!(%path, "write blocked: credential not write-enabled");
+            return Err(WriteGuardError {
+                method: "POST".to_string(),
+                path: path.to_string(),
+            }
+            .into());
+        }
+
+        let file_bytes = std::fs::read(file_path)
+            .with_context(|| format!("Failed to read upload file `{}`", file_path.display()))?;
+        let file_name = file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("upload")
+            .to_string();
+        let mime = mime_guess::from_path(file_path).first_or_octet_stream().to_string();
+
+        debug!(bytes = file_bytes.len(), mime, "file loaded for multipart upload");
+
+        let part = reqwest::multipart::Part::bytes(file_bytes)
+            .file_name(file_name)
+            .mime_str(&mime)
+            .context("Failed to set MIME type on multipart part")?;
+        let form = reqwest::multipart::Form::new().part("file", part);
+
+        let url = format!("{}{}", self.base_url, path);
+        let resp = self
+            .http
+            .post(&url)
+            .header("Accept", "application/json")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .multipart(form)
+            .send()
+            .await
+            .context("Multipart HTTP request failed")?;
+
+        let status = resp.status();
+
+        if status == StatusCode::NO_CONTENT {
+            debug!("multipart 204 No Content");
+            return Ok(Value::Null);
+        }
+
+        if !status.is_success() {
+            let error_body = resp.text().await.unwrap_or_default();
+            debug!(%url, %status, body = %error_body, "multipart API request failed");
+            return Err(ApiError {
+                status,
+                formatted: format_api_error(&Method::POST, &url, status, &error_body),
+                body: error_body,
+            }
+            .into());
+        }
+
+        let json: Value = resp.json().await.context("Failed to parse multipart response JSON")?;
+        debug!(%status, "multipart request succeeded");
+        Ok(json)
+    }
+
     #[instrument(skip(self))]
     pub async fn get(&self, path: &str) -> Result<Value> {
         self.send_inner(Method::GET, path, None).await
@@ -312,6 +389,66 @@ impl DrataClient {
 
         debug!(total = all.len(), pages, "cursor pagination complete");
         Ok(all)
+    }
+
+    /// Stream all results from a cursor-paginated list endpoint as NDJSON.
+    /// Writes one JSON object per line to `writer` instead of buffering an
+    /// unbounded `Vec<Value>`. Same hardening as `get_all` (repeated-cursor
+    /// abort, max-page bound).
+    ///
+    /// This is the `--all` streaming path for large tenants where buffering the
+    /// full result set would be impractical.
+    #[instrument(skip(self, writer))]
+    pub async fn stream_all<W: Write>(&self, path: &str, writer: &mut W) -> Result<u64> {
+        let mut cursor: Option<String> = None;
+        let mut seen_cursors: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let sep = if path.contains('?') { '&' } else { '?' };
+        let mut pages = 0u32;
+        let mut total_items: u64 = 0;
+
+        loop {
+            pages += 1;
+            if pages > MAX_PAGES {
+                warn!(path, pages, "stream_all hit MAX_PAGES bound; partial results streamed");
+                break;
+            }
+
+            let paginated = match &cursor {
+                Some(c) => format!("{}{}size={}&cursor={}", path, sep, PAGINATION_SIZE, encode_query(c)),
+                None => format!("{}{}size={}", path, sep, PAGINATION_SIZE),
+            };
+            let resp = self.get(&paginated).await?;
+
+            if let Some(items) = resp.get("data").and_then(|v| v.as_array()) {
+                trace!(page = pages, items = items.len(), "streaming page");
+                for item in items {
+                    let line = serde_json::to_string(item).context("Failed to serialize item as NDJSON")?;
+                    writeln!(writer, "{}", line).context("Failed to write NDJSON line")?;
+                    total_items += 1;
+                }
+            }
+
+            let next = resp
+                .get("pagination")
+                .and_then(|p| p.get("cursor"))
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(String::from);
+
+            match next {
+                Some(n) => {
+                    if !seen_cursors.insert(n.clone()) {
+                        warn!(path, cursor = %n, "repeated cursor detected in stream_all; aborting");
+                        break;
+                    }
+                    cursor = Some(n);
+                }
+                None => break,
+            }
+        }
+
+        debug!(total_items, pages, "stream_all complete");
+        Ok(total_items)
     }
 }
 

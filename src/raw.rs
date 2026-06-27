@@ -7,16 +7,20 @@
 //! curated create.
 //!
 //! `--data` accepts inline JSON, `@file` (read a file), or `-` (read stdin).
+//! `--file <path>` sends a multipart/form-data request (for the 10 upload ops).
 //! `--query k=v` (repeated or space-separated) appends percent-encoded query
 //! parameters. `--example` prints the operation's request-body skeleton from
 //! the spec and exits before any API/auth setup.
+//!
+//! Phase 4: confirm-on-mutation gate (all non-GET through `raw` now prompts).
 
 use crate::cli::RawArgs;
 use crate::client::{DrataClient, encode_query};
 use crate::config::Config;
+use crate::confirm::ConfirmFn;
 use crate::output::print_value;
 use crate::spec;
-use eyre::{Context, Result, eyre};
+use eyre::{Context, Result, bail, eyre};
 use serde_json::Value;
 use std::io::Read;
 use tracing::{debug, instrument, warn};
@@ -58,14 +62,17 @@ fn example_skeleton(method: &str, path: &str) -> Result<String> {
 }
 
 /// Dispatch a `drata raw` invocation: build the path (with query params), read
-/// the body if any, and send through the client's generic `raw` verb.
-#[instrument(skip(client, config), fields(method = %args.method, path = %args.path))]
-pub async fn handle(args: &RawArgs, client: &DrataClient, config: &Config) -> Result<()> {
+/// the body if any, and send through the client's generic `raw` verb. Non-GET
+/// requests prompt for confirmation unless `--yes` was passed (confirm is
+/// already baked into the `ConfirmFn`).
+#[instrument(skip(client, config, confirm), fields(method = %args.method, path = %args.path))]
+pub async fn handle(args: &RawArgs, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     debug!(
         method = %args.method,
         path = %args.path,
         query_len = args.query.len(),
         has_data = args.data.is_some(),
+        has_file = args.file.is_some(),
         "raw request"
     );
 
@@ -76,7 +83,25 @@ pub async fn handle(args: &RawArgs, client: &DrataClient, config: &Config) -> Re
         warn!(method = %args.method, path = %args.path, "method+path not found in spec; sending anyway");
     }
 
+    // Confirm before any non-GET mutation.
+    let upper = args.method.to_uppercase();
+    if upper != "GET" && !confirm(&upper, &args.path)? {
+        bail!("aborted");
+    }
+
     let path = build_path(&args.path, &args.query)?;
+
+    // Multipart upload takes priority over --data when both somehow supplied.
+    if let Some(ref file_path) = args.file {
+        // Multipart path - only valid for POST.
+        if upper != "POST" {
+            bail!("--file (multipart upload) is only supported for POST requests");
+        }
+        let result = client.post_multipart(&path, file_path).await?;
+        print_value(&result, &config.output_format);
+        return Ok(());
+    }
+
     let body = match &args.data {
         Some(spec_data) => Some(read_data(spec_data).context("Failed to read --data")?),
         None => None,

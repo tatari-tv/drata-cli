@@ -8,6 +8,7 @@ fn example_only_for_create_with_flag() {
         name: None,
         owner_id: None,
         source_type: None,
+        file: None,
         example: true,
     };
     assert!(example_if_requested(&create_example).is_some());
@@ -16,11 +17,15 @@ fn example_only_for_create_with_flag() {
         name: Some("p".to_string()),
         owner_id: None,
         source_type: None,
+        file: None,
         example: false,
     };
     assert!(example_if_requested(&create_no_example).is_none());
 
-    let list = PolicyAction::List;
+    let list = PolicyAction::List {
+        all: false,
+        expand: vec![],
+    };
     assert!(example_if_requested(&list).is_none());
 }
 

@@ -94,6 +94,7 @@ fn example_if_requested_none_without_flag() {
         path: "/vendors".into(),
         query: vec![],
         data: None,
+        file: None,
         example: false,
     };
     assert!(example_if_requested(&args).is_none());
@@ -106,6 +107,7 @@ fn example_if_requested_some_with_flag() {
         path: "/vendors".into(),
         query: vec![],
         data: None,
+        file: None,
         example: true,
     };
     let out = example_if_requested(&args).unwrap().unwrap();

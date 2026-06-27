@@ -47,7 +47,11 @@ fn example_only_for_create_with_flag() {
     };
     assert!(example_if_requested(&create_no_example).is_none());
 
-    let list = VendorAction::List { patterns: vec![] };
+    let list = VendorAction::List {
+        patterns: vec![],
+        all: false,
+        expand: vec![],
+    };
     assert!(example_if_requested(&list).is_none());
 }
 

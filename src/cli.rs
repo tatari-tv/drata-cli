@@ -37,6 +37,10 @@ pub struct Cli {
     #[arg(long = "allow-writes", global = true)]
     pub allow_writes: bool,
 
+    /// Bypass confirmation prompts for mutating operations (POST/PUT/PATCH/DELETE)
+    #[arg(long, global = true)]
+    pub yes: bool,
+
     /// Output format
     #[arg(long, value_enum, global = true)]
     pub output: Option<OutputFormat>,
@@ -151,6 +155,9 @@ pub struct RawArgs {
     /// Request body: inline JSON, @file to read a file, or - for stdin
     #[arg(long)]
     pub data: Option<String>,
+    /// Path to a file to upload (for multipart operations)
+    #[arg(long)]
+    pub file: Option<std::path::PathBuf>,
     /// Print the operation's request-body skeleton from the spec and exit
     #[arg(long)]
     pub example: bool,
@@ -166,9 +173,20 @@ pub enum VendorAction {
     List {
         /// Zero or more name patterns
         patterns: Vec<String>,
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
     /// Get a vendor by ID
-    Get { id: String },
+    Get {
+        id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
+    },
     /// Create a vendor
     Create {
         /// Vendor name (required unless --example)
@@ -212,6 +230,14 @@ pub enum VendorAction {
     },
     /// Remove a vendor by ID
     Remove { id: String },
+    /// Upload a document for a vendor (multipart)
+    Upload {
+        /// Vendor ID
+        vendor_id: String,
+        /// Path to the file to upload
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
     /// Manage a vendor's questionnaires
     Questionnaire {
         #[command(subcommand)]
@@ -283,6 +309,12 @@ pub enum RiskAction {
     List {
         /// Risk register ID
         register_id: String,
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
     /// Get a single risk by ID
     Get {
@@ -290,6 +322,9 @@ pub enum RiskAction {
         register_id: String,
         /// Risk ID
         risk_id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
     /// Create a risk in a register
     Create {
@@ -341,6 +376,16 @@ pub enum RiskAction {
         /// Risk register ID
         register_id: String,
     },
+    /// Upload a document to a risk (multipart)
+    Upload {
+        /// Risk register ID
+        register_id: String,
+        /// Risk ID
+        risk_id: String,
+        /// Path to the file to upload
+        #[arg(long)]
+        file: std::path::PathBuf,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +398,12 @@ pub enum ControlAction {
     List {
         /// Workspace ID
         workspace_id: String,
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
     /// Get a control by ID
     Get {
@@ -360,8 +411,11 @@ pub enum ControlAction {
         workspace_id: String,
         /// Control ID
         control_id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
-    /// Create a control in a workspace
+    /// Create a control in a workspace (supports multipart --file)
     Create {
         /// Workspace ID
         workspace_id: String,
@@ -417,21 +471,42 @@ pub enum ControlAction {
 #[derive(Subcommand, Debug)]
 pub enum DeviceAction {
     /// List all devices
-    List,
+    List {
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
+    },
     /// Get a device by ID
     Get {
         /// Device ID
         device_id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
     /// List devices for a personnel member
     ForPersonnel {
         /// Personnel ID
         personnel_id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
     /// List apps installed on a device
     Apps {
         /// Device ID
         device_id: String,
+    },
+    /// Upload a document for a device (multipart)
+    Upload {
+        /// Device ID
+        device_id: String,
+        /// Path to the file to upload
+        #[arg(long)]
+        file: std::path::PathBuf,
     },
 }
 
@@ -457,11 +532,21 @@ pub enum EmploymentStatus {
 #[derive(Subcommand, Debug)]
 pub enum PersonnelAction {
     /// List all personnel
-    List,
+    List {
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
+    },
     /// Get a personnel record by ID
     Get {
         /// Personnel ID
         personnel_id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
     /// Update a personnel record
     Update {
@@ -496,13 +581,23 @@ pub enum PolicySourceType {
 #[derive(Subcommand, Debug)]
 pub enum PolicyAction {
     /// List all policies
-    List,
+    List {
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
+    },
     /// Get a policy by ID
     Get {
         /// Policy ID
         policy_id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
-    /// Create a policy
+    /// Create a policy (supports multipart --file for uploaded policies)
     Create {
         /// Policy name
         #[arg(long)]
@@ -513,6 +608,9 @@ pub enum PolicyAction {
         /// Source type
         #[arg(long, value_enum, ignore_case = true)]
         source_type: Option<PolicySourceType>,
+        /// Path to a file to upload (for UPLOADED source type; multipart)
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
         /// Print a JSON skeleton and exit (no API call)
         #[arg(long)]
         example: bool,
@@ -539,6 +637,9 @@ pub enum PolicyAction {
     Versions {
         /// Policy ID
         policy_id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
     /// Get a specific policy version
     Version {
@@ -571,6 +672,12 @@ pub enum EvidenceAction {
     List {
         /// Workspace ID
         workspace_id: String,
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
     /// Get an evidence library item by ID
     Get {
@@ -578,8 +685,11 @@ pub enum EvidenceAction {
         workspace_id: String,
         /// Evidence library item ID
         evidence_id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
-    /// Create an evidence library item
+    /// Create an evidence library item (supports multipart --file)
     Create {
         /// Workspace ID
         workspace_id: String,
@@ -592,11 +702,14 @@ pub enum EvidenceAction {
         /// Renewal schedule type
         #[arg(long, value_enum, ignore_case = true)]
         renewal_schedule_type: Option<RenewalScheduleType>,
+        /// Path to a file to upload (multipart)
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
         /// Print a JSON skeleton and exit (no API call)
         #[arg(long)]
         example: bool,
     },
-    /// Update an evidence library item
+    /// Update an evidence library item (supports multipart --file)
     Update {
         /// Workspace ID
         workspace_id: String,
@@ -608,6 +721,9 @@ pub enum EvidenceAction {
         description: Option<String>,
         #[arg(long, value_enum, ignore_case = true)]
         renewal_schedule_type: Option<RenewalScheduleType>,
+        /// Path to a file to upload (multipart)
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
     },
     /// Remove an evidence library item
     Remove {
@@ -624,6 +740,9 @@ pub enum EvidenceAction {
         evidence_id: String,
         /// Version ID
         version_id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
 }
 
@@ -689,11 +808,21 @@ pub enum AssetType {
 #[derive(Subcommand, Debug)]
 pub enum AssetAction {
     /// List all assets
-    List,
+    List {
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
+    },
     /// Get an asset by ID
     Get {
         /// Asset ID
         asset_id: String,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
     /// Create an asset
     Create {

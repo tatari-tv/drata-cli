@@ -7,13 +7,16 @@
 //! left to `raw` (they lack a framework-scoped path and are marked legacy in the spec).
 //! Confirmed camelCase: `shortName`, `frameworkId`, `requirementId`.
 //! No enum body fields for the create/update operations.
+//!
+//! Phase 4 adds: confirm-on-mutation.
 
 use crate::cli::FrameworkAction;
 use crate::client::DrataClient;
 use crate::config::Config;
+use crate::confirm::ConfirmFn;
 use crate::output::print_value;
 use crate::spec;
-use eyre::Result;
+use eyre::{Result, bail};
 use serde_json::{Value, json};
 use tracing::{debug, instrument};
 
@@ -31,7 +34,12 @@ fn example_skeleton(method: &str, path: &str) -> Result<String> {
         .ok_or_else(|| eyre::eyre!("operation `{} {}` has no JSON request body", method, path))
 }
 
-pub async fn handle(action: &FrameworkAction, client: &DrataClient, config: &Config) -> Result<()> {
+pub async fn handle(
+    action: &FrameworkAction,
+    client: &DrataClient,
+    config: &Config,
+    confirm: &ConfirmFn,
+) -> Result<()> {
     match action {
         FrameworkAction::List { workspace_id } => list(client, config, workspace_id).await,
         FrameworkAction::Create {
@@ -44,6 +52,7 @@ pub async fn handle(action: &FrameworkAction, client: &DrataClient, config: &Con
             create(
                 client,
                 config,
+                confirm,
                 workspace_id,
                 name.as_deref(),
                 short_name.as_deref(),
@@ -60,6 +69,7 @@ pub async fn handle(action: &FrameworkAction, client: &DrataClient, config: &Con
             update(
                 client,
                 config,
+                confirm,
                 workspace_id,
                 framework_id,
                 name.as_deref(),
@@ -89,46 +99,49 @@ async fn list(client: &DrataClient, config: &Config, workspace_id: &str) -> Resu
     Ok(())
 }
 
-#[instrument(skip(client, config))]
+#[instrument(skip(client, config, confirm))]
 async fn create(
     client: &DrataClient,
     config: &Config,
+    confirm: &ConfirmFn,
     workspace_id: &str,
     name: Option<&str>,
     short_name: Option<&str>,
     description: Option<&str>,
 ) -> Result<()> {
     debug!(workspace_id, "framework create");
+    let path = format!("/workspaces/{}/frameworks", workspace_id);
+    if !confirm("POST", &path)? {
+        bail!("aborted");
+    }
     let mut body = json!({});
     set_opt(&mut body, "name", name);
     set_opt(&mut body, "shortName", short_name);
     set_opt(&mut body, "description", description);
-    let result = client
-        .post(&format!("/workspaces/{}/frameworks", workspace_id), body)
-        .await?;
+    let result = client.post(&path, body).await?;
     print_value(&result, &config.output_format);
     Ok(())
 }
 
-#[instrument(skip(client, config))]
+#[instrument(skip(client, config, confirm))]
 async fn update(
     client: &DrataClient,
     config: &Config,
+    confirm: &ConfirmFn,
     workspace_id: &str,
     framework_id: &str,
     name: Option<&str>,
     description: Option<&str>,
 ) -> Result<()> {
     debug!(workspace_id, framework_id, "framework update");
+    let path = format!("/workspaces/{}/frameworks/{}", workspace_id, framework_id);
+    if !confirm("PUT", &path)? {
+        bail!("aborted");
+    }
     let mut body = json!({});
     set_opt(&mut body, "name", name);
     set_opt(&mut body, "description", description);
-    let result = client
-        .put(
-            &format!("/workspaces/{}/frameworks/{}", workspace_id, framework_id),
-            body,
-        )
-        .await?;
+    let result = client.put(&path, body).await?;
     print_value(&result, &config.output_format);
     Ok(())
 }

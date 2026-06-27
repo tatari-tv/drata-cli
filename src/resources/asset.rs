@@ -4,14 +4,19 @@
 //! Confirmed camelCase from spec: `assetType`, `assetProvider`, `removedAt`,
 //! `assetClassTypes`, `externalId`, `ownerId`.
 //! Enum field promoted to `clap::ValueEnum`: `assetType` (PHYSICAL/VIRTUAL).
+//!
+//! Phase 4 adds: `--all` NDJSON streaming, `--expand`, confirm-on-mutation.
 
 use crate::cli::{AssetAction, AssetType};
 use crate::client::DrataClient;
 use crate::config::Config;
+use crate::confirm::ConfirmFn;
+use crate::expand::append_expand;
 use crate::output::print_value;
 use crate::spec;
-use eyre::Result;
+use eyre::{Result, bail};
 use serde_json::{Value, json};
+use std::io;
 use tracing::{debug, instrument};
 
 pub fn example_if_requested(action: &AssetAction) -> Option<Result<String>> {
@@ -26,10 +31,10 @@ fn example_skeleton(method: &str, path: &str) -> Result<String> {
         .ok_or_else(|| eyre::eyre!("operation `{} {}` has no JSON request body", method, path))
 }
 
-pub async fn handle(action: &AssetAction, client: &DrataClient, config: &Config) -> Result<()> {
+pub async fn handle(action: &AssetAction, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     match action {
-        AssetAction::List => list(client, config).await,
-        AssetAction::Get { asset_id } => get(client, config, asset_id).await,
+        AssetAction::List { all, expand } => list(client, config, *all, expand).await,
+        AssetAction::Get { asset_id, expand } => get(client, config, asset_id, expand).await,
         AssetAction::Create {
             name,
             description,
@@ -40,6 +45,7 @@ pub async fn handle(action: &AssetAction, client: &DrataClient, config: &Config)
             create(
                 client,
                 config,
+                confirm,
                 name.as_deref(),
                 description.as_deref(),
                 asset_type.as_ref(),
@@ -57,6 +63,7 @@ pub async fn handle(action: &AssetAction, client: &DrataClient, config: &Config)
             update(
                 client,
                 config,
+                confirm,
                 asset_id,
                 name.as_deref(),
                 description.as_deref(),
@@ -65,7 +72,7 @@ pub async fn handle(action: &AssetAction, client: &DrataClient, config: &Config)
             )
             .await
         }
-        AssetAction::Remove { asset_id } => remove(client, config, asset_id).await,
+        AssetAction::Remove { asset_id } => remove(client, config, confirm, asset_id).await,
     }
 }
 
@@ -74,32 +81,44 @@ pub async fn handle(action: &AssetAction, client: &DrataClient, config: &Config)
 // ---------------------------------------------------------------------------
 
 #[instrument(skip(client, config))]
-async fn list(client: &DrataClient, config: &Config) -> Result<()> {
-    debug!("asset list");
-    let all = client.get_all("/assets").await?;
-    let result = json!({ "data": all });
-    print_value(&result, &config.output_format);
+async fn list(client: &DrataClient, config: &Config, all: bool, expand: &[String]) -> Result<()> {
+    debug!(all, expand_len = expand.len(), "asset list");
+    let base = append_expand("/assets", expand);
+    if all {
+        let mut stdout = io::stdout();
+        client.stream_all(&base, &mut stdout).await?;
+    } else {
+        let items = client.get_all(&base).await?;
+        let result = json!({ "data": items });
+        print_value(&result, &config.output_format);
+    }
     Ok(())
 }
 
 #[instrument(skip(client, config))]
-async fn get(client: &DrataClient, config: &Config, asset_id: &str) -> Result<()> {
-    debug!(asset_id, "asset get");
-    let resp = client.get(&format!("/assets/{}", asset_id)).await?;
+async fn get(client: &DrataClient, config: &Config, asset_id: &str, expand: &[String]) -> Result<()> {
+    debug!(asset_id, expand_len = expand.len(), "asset get");
+    let path = append_expand(&format!("/assets/{}", asset_id), expand);
+    let resp = client.get(&path).await?;
     print_value(&resp, &config.output_format);
     Ok(())
 }
 
-#[instrument(skip(client, config))]
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip(client, config, confirm))]
 async fn create(
     client: &DrataClient,
     config: &Config,
+    confirm: &ConfirmFn,
     name: Option<&str>,
     description: Option<&str>,
     asset_type: Option<&AssetType>,
     notes: Option<&str>,
 ) -> Result<()> {
     debug!("asset create");
+    if !confirm("POST", "/assets")? {
+        bail!("aborted");
+    }
     let mut body = json!({});
     set_opt(&mut body, "name", name);
     set_opt(&mut body, "description", description);
@@ -113,10 +132,11 @@ async fn create(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(client, config))]
+#[instrument(skip(client, config, confirm))]
 async fn update(
     client: &DrataClient,
     config: &Config,
+    confirm: &ConfirmFn,
     asset_id: &str,
     name: Option<&str>,
     description: Option<&str>,
@@ -124,6 +144,9 @@ async fn update(
     notes: Option<&str>,
 ) -> Result<()> {
     debug!(asset_id, "asset update");
+    if !confirm("PUT", &format!("/assets/{}", asset_id))? {
+        bail!("aborted");
+    }
     let mut body = json!({});
     set_opt(&mut body, "name", name);
     set_opt(&mut body, "description", description);
@@ -136,9 +159,12 @@ async fn update(
     Ok(())
 }
 
-#[instrument(skip(client, config))]
-async fn remove(client: &DrataClient, config: &Config, asset_id: &str) -> Result<()> {
+#[instrument(skip(client, config, confirm))]
+async fn remove(client: &DrataClient, config: &Config, confirm: &ConfirmFn, asset_id: &str) -> Result<()> {
     debug!(asset_id, "asset remove");
+    if !confirm("DELETE", &format!("/assets/{}", asset_id))? {
+        bail!("aborted");
+    }
     let result = client.delete(&format!("/assets/{}", asset_id)).await?;
     print_value(&result, &config.output_format);
     Ok(())

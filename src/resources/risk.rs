@@ -4,14 +4,20 @@
 //! Confirmed camelCase from spec: `treatmentPlan`, `identifiedAt`, `residualImpact`.
 //! Enum fields promoted to `clap::ValueEnum`: `treatmentPlan` (UNTREATED/ACCEPT/
 //! TRANSFER/AVOID/MITIGATE), `status` (ACTIVE/ARCHIVED/CLOSED).
+//!
+//! Phase 4 adds: `--all` NDJSON streaming, `--expand`, confirm-on-mutation,
+//! document upload (multipart POST).
 
 use crate::cli::{RiskAction, RiskStatus, RiskTreatmentPlan};
 use crate::client::DrataClient;
 use crate::config::Config;
+use crate::confirm::ConfirmFn;
+use crate::expand::append_expand;
 use crate::output::print_value;
 use crate::spec;
-use eyre::Result;
+use eyre::{Result, bail};
 use serde_json::{Value, json};
+use std::io;
 use tracing::{debug, instrument};
 
 pub fn example_if_requested(action: &RiskAction) -> Option<Result<String>> {
@@ -28,10 +34,18 @@ fn example_skeleton(method: &str, path: &str) -> Result<String> {
         .ok_or_else(|| eyre::eyre!("operation `{} {}` has no JSON request body", method, path))
 }
 
-pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config) -> Result<()> {
+pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     match action {
-        RiskAction::List { register_id } => list(client, config, register_id).await,
-        RiskAction::Get { register_id, risk_id } => get(client, config, register_id, risk_id).await,
+        RiskAction::List {
+            register_id,
+            all,
+            expand,
+        } => list(client, config, register_id, *all, expand).await,
+        RiskAction::Get {
+            register_id,
+            risk_id,
+            expand,
+        } => get(client, config, register_id, risk_id, expand).await,
         RiskAction::Create {
             register_id,
             title,
@@ -45,6 +59,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config) 
             create(
                 client,
                 config,
+                confirm,
                 register_id,
                 title.as_deref(),
                 description.as_deref(),
@@ -68,6 +83,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config) 
             update(
                 client,
                 config,
+                confirm,
                 register_id,
                 risk_id,
                 title.as_deref(),
@@ -80,6 +96,11 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config) 
             .await
         }
         RiskAction::Insights { register_id } => insights(client, config, register_id).await,
+        RiskAction::Upload {
+            register_id,
+            risk_id,
+            file,
+        } => upload(client, config, confirm, register_id, risk_id, file).await,
     }
 }
 
@@ -88,31 +109,35 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config) 
 // ---------------------------------------------------------------------------
 
 #[instrument(skip(client, config))]
-async fn list(client: &DrataClient, config: &Config, register_id: &str) -> Result<()> {
-    debug!(register_id, "risk list");
-    let all = client
-        .get_all(&format!("/risk-registers/{}/risks", register_id))
-        .await?;
-    let result = json!({ "data": all });
-    print_value(&result, &config.output_format);
+async fn list(client: &DrataClient, config: &Config, register_id: &str, all: bool, expand: &[String]) -> Result<()> {
+    debug!(register_id, all, expand_len = expand.len(), "risk list");
+    let base = append_expand(&format!("/risk-registers/{}/risks", register_id), expand);
+    if all {
+        let mut stdout = io::stdout();
+        client.stream_all(&base, &mut stdout).await?;
+    } else {
+        let items = client.get_all(&base).await?;
+        let result = json!({ "data": items });
+        print_value(&result, &config.output_format);
+    }
     Ok(())
 }
 
 #[instrument(skip(client, config))]
-async fn get(client: &DrataClient, config: &Config, register_id: &str, risk_id: &str) -> Result<()> {
-    debug!(register_id, risk_id, "risk get");
-    let resp = client
-        .get(&format!("/risk-registers/{}/risks/{}", register_id, risk_id))
-        .await?;
+async fn get(client: &DrataClient, config: &Config, register_id: &str, risk_id: &str, expand: &[String]) -> Result<()> {
+    debug!(register_id, risk_id, expand_len = expand.len(), "risk get");
+    let path = append_expand(&format!("/risk-registers/{}/risks/{}", register_id, risk_id), expand);
+    let resp = client.get(&path).await?;
     print_value(&resp, &config.output_format);
     Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(client, config))]
+#[instrument(skip(client, config, confirm))]
 async fn create(
     client: &DrataClient,
     config: &Config,
+    confirm: &ConfirmFn,
     register_id: &str,
     title: Option<&str>,
     description: Option<&str>,
@@ -122,6 +147,9 @@ async fn create(
     status: Option<&RiskStatus>,
 ) -> Result<()> {
     debug!(register_id, "risk create");
+    if !confirm("POST", &format!("/risk-registers/{}/risks", register_id))? {
+        bail!("aborted");
+    }
     let mut body = json!({});
     set_opt(&mut body, "title", title);
     set_opt(&mut body, "description", description);
@@ -145,10 +173,11 @@ async fn create(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(client, config))]
+#[instrument(skip(client, config, confirm))]
 async fn update(
     client: &DrataClient,
     config: &Config,
+    confirm: &ConfirmFn,
     register_id: &str,
     risk_id: &str,
     title: Option<&str>,
@@ -159,6 +188,9 @@ async fn update(
     status: Option<&RiskStatus>,
 ) -> Result<()> {
     debug!(register_id, risk_id, "risk update");
+    if !confirm("PUT", &format!("/risk-registers/{}/risks/{}", register_id, risk_id))? {
+        bail!("aborted");
+    }
     let mut body = json!({});
     set_opt(&mut body, "title", title);
     set_opt(&mut body, "description", description);
@@ -186,6 +218,25 @@ async fn insights(client: &DrataClient, config: &Config, register_id: &str) -> R
     debug!(register_id, "risk insights");
     let resp = client.get(&format!("/risk-registers/{}/insights", register_id)).await?;
     print_value(&resp, &config.output_format);
+    Ok(())
+}
+
+#[instrument(skip(client, config, confirm))]
+async fn upload(
+    client: &DrataClient,
+    config: &Config,
+    confirm: &ConfirmFn,
+    register_id: &str,
+    risk_id: &str,
+    file: &std::path::Path,
+) -> Result<()> {
+    debug!(register_id, risk_id, file = %file.display(), "risk upload document");
+    let path = format!("/risk-registers/{}/risks/{}/documents", register_id, risk_id);
+    if !confirm("POST", &path)? {
+        bail!("aborted");
+    }
+    let result = client.post_multipart(&path, file).await?;
+    print_value(&result, &config.output_format);
     Ok(())
 }
 

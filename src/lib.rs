@@ -5,15 +5,19 @@
 pub mod cli;
 pub mod client;
 pub mod config;
+pub mod confirm;
+pub mod expand;
 pub mod filter;
 pub mod output;
 pub mod raw;
 pub mod resources;
 pub mod spec;
+pub mod verify;
 
 use cli::{Cli, Commands};
 use client::DrataClient;
 use config::{AuthDiagnostic, Config, DEFAULT_PROFILE};
+use confirm::ConfirmFn;
 use eyre::Result;
 use tracing::instrument;
 
@@ -72,36 +76,36 @@ pub fn run_auth(cli: &Cli, diag: &AuthDiagnostic) -> Result<()> {
 }
 
 #[instrument(skip_all, fields(command = ?cli.command))]
-pub async fn run(cli: &Cli, config: &Config) -> Result<()> {
+pub async fn run(cli: &Cli, config: &Config, confirm: ConfirmFn) -> Result<()> {
     let client = DrataClient::new(config.api_key.clone(), &config.region, config.allow_writes)?;
 
     match &cli.command {
         Commands::Vendor { action } => {
-            resources::vendor::handle(action, &client, config).await?;
+            resources::vendor::handle(action, &client, config, &confirm).await?;
         }
         Commands::Risk { action } => {
-            resources::risk::handle(action, &client, config).await?;
+            resources::risk::handle(action, &client, config, &confirm).await?;
         }
         Commands::Control { action } => {
-            resources::control::handle(action, &client, config).await?;
+            resources::control::handle(action, &client, config, &confirm).await?;
         }
         Commands::Device { action } => {
-            resources::device::handle(action, &client, config).await?;
+            resources::device::handle(action, &client, config, &confirm).await?;
         }
         Commands::Personnel { action } => {
-            resources::personnel::handle(action, &client, config).await?;
+            resources::personnel::handle(action, &client, config, &confirm).await?;
         }
         Commands::Policy { action } => {
-            resources::policy::handle(action, &client, config).await?;
+            resources::policy::handle(action, &client, config, &confirm).await?;
         }
         Commands::Evidence { action } => {
-            resources::evidence::handle(action, &client, config).await?;
+            resources::evidence::handle(action, &client, config, &confirm).await?;
         }
         Commands::Framework { action } => {
-            resources::framework::handle(action, &client, config).await?;
+            resources::framework::handle(action, &client, config, &confirm).await?;
         }
         Commands::Asset { action } => {
-            resources::asset::handle(action, &client, config).await?;
+            resources::asset::handle(action, &client, config, &confirm).await?;
         }
         Commands::Company { action } => {
             resources::company::handle(action, &client, config).await?;
@@ -110,7 +114,7 @@ pub async fn run(cli: &Cli, config: &Config) -> Result<()> {
             resources::workspace::handle(action, &client, config).await?;
         }
         Commands::Raw(args) => {
-            raw::handle(args, &client, config).await?;
+            raw::handle(args, &client, config, &confirm).await?;
         }
         // Auth commands normally take the no-key bypass in main; if they reach
         // `run`, a key is configured. Re-derive the diagnostic to report source.
