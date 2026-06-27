@@ -26,6 +26,12 @@ use tracing::instrument;
 pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
     match &cli.command {
         Commands::Vendor { action } => resources::vendor::example_if_requested(action).map(|s| Ok(s.to_string())),
+        Commands::Risk { action } => resources::risk::example_if_requested(action),
+        Commands::Control { action } => resources::control::example_if_requested(action),
+        Commands::Policy { action } => resources::policy::example_if_requested(action),
+        Commands::Evidence { action } => resources::evidence::example_if_requested(action),
+        Commands::Framework { action } => resources::framework::example_if_requested(action),
+        Commands::Asset { action } => resources::asset::example_if_requested(action),
         Commands::Raw(args) => raw::example_if_requested(args),
         _ => None,
     }
@@ -72,6 +78,36 @@ pub async fn run(cli: &Cli, config: &Config) -> Result<()> {
     match &cli.command {
         Commands::Vendor { action } => {
             resources::vendor::handle(action, &client, config).await?;
+        }
+        Commands::Risk { action } => {
+            resources::risk::handle(action, &client, config).await?;
+        }
+        Commands::Control { action } => {
+            resources::control::handle(action, &client, config).await?;
+        }
+        Commands::Device { action } => {
+            resources::device::handle(action, &client, config).await?;
+        }
+        Commands::Personnel { action } => {
+            resources::personnel::handle(action, &client, config).await?;
+        }
+        Commands::Policy { action } => {
+            resources::policy::handle(action, &client, config).await?;
+        }
+        Commands::Evidence { action } => {
+            resources::evidence::handle(action, &client, config).await?;
+        }
+        Commands::Framework { action } => {
+            resources::framework::handle(action, &client, config).await?;
+        }
+        Commands::Asset { action } => {
+            resources::asset::handle(action, &client, config).await?;
+        }
+        Commands::Company { action } => {
+            resources::company::handle(action, &client, config).await?;
+        }
+        Commands::Workspace { action } => {
+            resources::workspace::handle(action, &client, config).await?;
         }
         Commands::Raw(args) => {
             raw::handle(args, &client, config).await?;

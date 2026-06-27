@@ -54,8 +54,48 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("category") && obj.contains_key("risk") {
         return Some(render_vendors);
     }
+    // Risk rows carry `treatmentPlan` + `riskId`.
+    if obj.contains_key("treatmentPlan") || obj.contains_key("riskId") {
+        return Some(render_risks);
+    }
+    // Control rows carry `code` + `question` (or just `code`).
+    if obj.contains_key("code") && (obj.contains_key("question") || obj.contains_key("activity")) {
+        return Some(render_controls);
+    }
+    // Device rows carry `serialNumber` or `isDeviceCompliant`.
+    if obj.contains_key("serialNumber") || obj.contains_key("isDeviceCompliant") {
+        return Some(render_devices);
+    }
+    // Personnel rows carry `employmentStatus`.
+    if obj.contains_key("employmentStatus") {
+        return Some(render_personnel);
+    }
+    // Policy rows carry `currentVersionId` or `scope`.
+    if obj.contains_key("currentVersionId") || obj.contains_key("scope") {
+        return Some(render_policies);
+    }
+    // Evidence library rows carry `evidenceTemplateCode`.
+    if obj.contains_key("evidenceTemplateCode") || obj.contains_key("implementationGuidance") {
+        return Some(render_evidence);
+    }
+    // Framework rows carry `numInScopeControls` or `shortName` (tag is unique to frameworks).
+    if obj.contains_key("numInScopeControls") || (obj.contains_key("shortName") && obj.contains_key("slug")) {
+        return Some(render_frameworks);
+    }
+    // Asset rows carry `assetType` + `assetProvider`.
+    if obj.contains_key("assetType") || obj.contains_key("assetProvider") {
+        return Some(render_assets);
+    }
+    // Workspace rows carry `primary` (bool) alongside `name`.
+    if obj.contains_key("primary") && obj.contains_key("name") {
+        return Some(render_workspaces);
+    }
     None
 }
+
+// ---------------------------------------------------------------------------
+// Per-resource renderers
+// ---------------------------------------------------------------------------
 
 fn render_vendors(rows: &[Value], width: usize) -> String {
     render_table(
@@ -83,6 +123,146 @@ fn render_questionnaires(rows: &[Value], width: usize) -> String {
             |r| str_field(r, "recipientEmail"),
             |r| bool_field(r, "isCompleted"),
             |r| str_field(r, "dateSent"),
+        ],
+        width,
+    )
+}
+
+fn render_risks(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "TITLE", "TREATMENT", "IMPACT", "LIKELIHOOD", "STATUS"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "title"),
+            |r| str_field(r, "treatmentPlan"),
+            |r| scalar_field(r, "impact"),
+            |r| scalar_field(r, "likelihood"),
+            |r| str_field(r, "status"),
+        ],
+        width,
+    )
+}
+
+fn render_controls(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "CODE", "NAME", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "code"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_devices(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "MODEL", "SERIAL", "OS", "COMPLIANT", "LAST_CHECKED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "model"),
+            |r| str_field(r, "serialNumber"),
+            |r| str_field(r, "osVersion"),
+            |r| bool_field(r, "isDeviceCompliant"),
+            |r| str_field(r, "lastCheckedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_personnel(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "EMAIL", "STATUS", "STARTED", "SEPARATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| {
+                r.get("user")
+                    .and_then(|u| u.get("email"))
+                    .and_then(|e| e.as_str())
+                    .map(String::from)
+                    .unwrap_or_default()
+            },
+            |r| str_field(r, "employmentStatus"),
+            |r| str_field(r, "startedAt"),
+            |r| str_field(r, "separatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_policies(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "STATUS", "RENEWAL", "PUBLISHED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "status"),
+            |r| str_field(r, "renewalDate"),
+            |r| str_field(r, "publishedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_evidence(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "TEMPLATE_CODE", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "evidenceTemplateCode"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_frameworks(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "SHORT_NAME", "ENABLED", "CONTROLS"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "shortName"),
+            |r| bool_field(r, "isEnabled"),
+            |r| scalar_field(r, "numInScopeControls"),
+        ],
+        width,
+    )
+}
+
+fn render_assets(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "TYPE", "PROVIDER", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "assetType"),
+            |r| str_field(r, "assetProvider"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_workspaces(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "PRIMARY", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| bool_field(r, "primary"),
+            |r| str_field(r, "createdAt"),
         ],
         width,
     )

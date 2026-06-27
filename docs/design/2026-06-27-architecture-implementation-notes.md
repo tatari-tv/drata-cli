@@ -186,3 +186,96 @@ Append-only. One section per phase.
 - **Should `raw` gain a `--validate` strict mode?** Today an unknown method+path
   warns and sends. A future flag could flip that to a hard error for users who
   want the spec to gate their `raw` calls. Deferred until there is demand.
+
+## Phase 3: Curate the high-traffic tags
+
+### Design decisions
+
+- **`example_skeleton` helper per module (not a shared util).** Each resource module that
+  exposes `example_if_requested` uses a local `fn example_skeleton(method, path) -> Result<String>`
+  that calls `spec::example_for_operation` and maps `Ok(None)` to an error. This
+  keeps the function-level return type `Option<Result<String>>` (matching Phase 2's
+  `raw::example_if_requested`) without a global utility. One function per module,
+  each with a hard-coded method+path matching the curated operation.
+  (`src/resources/risk.rs`, `control.rs`, `policy.rs`, `evidence.rs`, `framework.rs`, `asset.rs`)
+- **Enum fields promoted to `clap::ValueEnum` per-spec (not global).** Per the
+  carry-forward note from Phase 1, enum promotion is per-endpoint. Fields promoted:
+  `treatmentPlan` -> `RiskTreatmentPlan` (UNTREATED/ACCEPT/TRANSFER/AVOID/MITIGATE) and
+  `status` -> `RiskStatus` (ACTIVE/ARCHIVED/CLOSED) in risks;
+  `employmentStatus` -> `EmploymentStatus` (10 variants) in personnel;
+  `sourceType` -> `PolicySourceType` (UPLOADED/EXTERNAL) in policies;
+  `renewalScheduleType` -> `RenewalScheduleType` (7 variants) in evidence;
+  `assetType` -> `AssetType` (PHYSICAL/VIRTUAL) in assets.
+  Control, framework, company, workspace, device have no enum body fields.
+  All promoted enums use `ignore_case = true` on the arg.
+- **Field-sniffing table dispatch extended for 10 new shapes.** `output::table::pick_renderer`
+  now detects risks (`treatmentPlan`/`riskId`), controls (`code` + `question`/`activity`),
+  devices (`serialNumber`/`isDeviceCompliant`), personnel (`employmentStatus`),
+  policies (`currentVersionId`/`scope`), evidence (`evidenceTemplateCode`/`implementationGuidance`),
+  frameworks (`numInScopeControls` / `shortName`+`slug` combo), assets (`assetType`/`assetProvider`),
+  workspaces (`primary`+`name`). Personnel email is surfaced via `user.email` (nested field).
+  (`src/output/table.rs`)
+- **Curated ops count: 50 (from 8).** Phase 3 adds 42 curated ops across 10 tags.
+  The coverage-test baseline floor raised to 50. The
+  `reports_curated_coverage_percentage` test now reports 50/167 = 29.9%.
+- **Legacy framework-requirements endpoints left to `raw`.** The spec has
+  `/workspaces/{workspaceId}/framework-requirements` and its PUT variant flagged as
+  legacy (both carry no `frameworkId` in the path). The curated `framework requirements`
+  command uses the canonical `/workspaces/{workspaceId}/frameworks/{frameworkId}/requirements`
+  path instead. The legacy paths remain reachable via `raw`.
+- **Custom-connection device create/delete left to `raw`.** The paths
+  `POST /custom-connections/{connectionId}/devices` and
+  `DELETE /custom-connections/{connectionId}/devices/{deviceId}` use a different
+  prefix (`/custom-connections/`) and require a `connectionId` that normal device
+  workflows don't surface. Curated `device` only exposes read operations.
+
+### Deviations
+
+- **`--from-file` on body-bearing verbs deferred.** The design doc calls for
+  `--from-file <path|->` on body-bearing verbs. This is listed as Phase 4 scope
+  in "Writes, uploads, ergonomics" alongside `--yes` confirm-on-mutation and
+  multipart `--file`. Phase 3 implements create/update verbs but without
+  `--from-file`; Phase 4 will add it.
+- **`personnel actions` (`POST /personnel/actions`) not curated.** The bulk
+  personnel-action endpoint requires a free-form `action` body that varies by
+  type. Without a typed sub-action enum the UX is no better than `raw`. Left to
+  `raw`; the curated surface covers list/get/update.
+
+### Tradeoffs
+
+- **Field-sniffing vs. explicit resource tag from call site.** Phase 1 noted this
+  tradeoff: sniffing keeps renderers decoupled but risks misrouting on overlapping
+  field sets. Phase 3 added enough new shapes that ordering matters: risks are
+  checked before controls (both have `id`/`name`/`description`); frameworks check
+  for `numInScopeControls` first (unique to frameworks) before the `shortName`+`slug`
+  combo (to avoid colliding with other objects that might carry `shortName`). If a
+  future tag causes a sniffing collision, the call site should pass an explicit
+  resource tag into `print_value` (noted as the escape hatch in Phase 1 notes).
+- **No `--workspace` global flag yet.** 47 of 167 ops are workspace-scoped. Rather
+  than adding a global `--workspace` flag (which would require plumbing through
+  `Config`), workspace ID is passed as a positional argument to each workspace-scoped
+  command (e.g. `drata control list <workspace_id>`). A global flag would be cleaner
+  for repeated invocations; deferred to Phase 5 when ergonomics are polished.
+- **`evidence` as the module name, not `evidence-library`.** The spec tag is
+  "Evidence Library" (two words). Per the naming rule (decompose compound names),
+  `evidence` is the single-word module file and the CLI command. The `--help` text
+  says "Manage evidence library items" to preserve discoverability.
+
+### Open questions
+
+- **Casing surprises per endpoint (carry-forward from Phase 1 confirmed).** All 10
+  tags use camelCase body keys, consistent with Phase 1's findings.
+  Notable per-endpoint observations: risk body uses `treatmentPlan` (camelCase enum);
+  evidence body uses `renewalScheduleType` (camelCase enum ref); policy body uses
+  `ownerId` (number, not nested object); personnel body uses `employmentStatus`
+  (camelCase enum with 10 SCREAMING_SNAKE_CASE values). No snake_case or kebab-case
+  body keys found in Phase 3 endpoints.
+- **Risk register ID is not auto-discoverable.** The user must know their
+  `riskRegisterId` to use `drata risk list/get/create/update`. There is no curated
+  `drata risk-register list` command. A future phase could add it or expose a
+  convenience lookup.
+- **`--example` depth for evidence and control bodies.** The spec skeleton generator
+  (`MAX_DEPTH = 6`) handles Drata's current bodies without issue. The evidence-create
+  body has `base64File` and `file` fields that are multipart-only (Phase 4), so the
+  `--example` skeleton will include them as string stubs - slightly misleading but
+  not harmful until Phase 4 wires the upload path.

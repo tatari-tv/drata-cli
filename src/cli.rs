@@ -82,6 +82,56 @@ pub enum Commands {
         #[command(subcommand)]
         action: VendorAction,
     },
+    /// Manage risks in a risk register
+    Risk {
+        #[command(subcommand)]
+        action: RiskAction,
+    },
+    /// Manage controls in a workspace
+    Control {
+        #[command(subcommand)]
+        action: ControlAction,
+    },
+    /// Query devices (read-only; custom-connection devices via raw)
+    Device {
+        #[command(subcommand)]
+        action: DeviceAction,
+    },
+    /// Manage personnel records
+    Personnel {
+        #[command(subcommand)]
+        action: PersonnelAction,
+    },
+    /// Manage policies
+    Policy {
+        #[command(subcommand)]
+        action: PolicyAction,
+    },
+    /// Manage evidence library items in a workspace
+    Evidence {
+        #[command(subcommand)]
+        action: EvidenceAction,
+    },
+    /// Manage frameworks and requirements in a workspace
+    Framework {
+        #[command(subcommand)]
+        action: FrameworkAction,
+    },
+    /// Manage assets
+    Asset {
+        #[command(subcommand)]
+        action: AssetAction,
+    },
+    /// Get company information
+    Company {
+        #[command(subcommand)]
+        action: CompanyAction,
+    },
+    /// List workspaces
+    Workspace {
+        #[command(subcommand)]
+        action: WorkspaceAction,
+    },
     /// Generic passthrough to any operation: `raw <METHOD> <path> ...`
     Raw(RawArgs),
 }
@@ -105,6 +155,10 @@ pub struct RawArgs {
     #[arg(long)]
     pub example: bool,
 }
+
+// ---------------------------------------------------------------------------
+// Vendors
+// ---------------------------------------------------------------------------
 
 #[derive(Subcommand, Debug)]
 pub enum VendorAction {
@@ -199,4 +253,502 @@ pub enum VendorQuestionnaireAction {
         #[arg(long)]
         email_subject: Option<String>,
     },
+}
+
+// ---------------------------------------------------------------------------
+// Risks
+// ---------------------------------------------------------------------------
+
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RiskTreatmentPlan {
+    Untreated,
+    Accept,
+    Transfer,
+    Avoid,
+    Mitigate,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RiskStatus {
+    Active,
+    Archived,
+    Closed,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RiskAction {
+    /// List risks in a risk register
+    List {
+        /// Risk register ID
+        register_id: String,
+    },
+    /// Get a single risk by ID
+    Get {
+        /// Risk register ID
+        register_id: String,
+        /// Risk ID
+        risk_id: String,
+    },
+    /// Create a risk in a register
+    Create {
+        /// Risk register ID
+        register_id: String,
+        /// Risk title
+        #[arg(long)]
+        title: Option<String>,
+        /// Description
+        #[arg(long)]
+        description: Option<String>,
+        /// Treatment plan
+        #[arg(long, value_enum, ignore_case = true)]
+        treatment_plan: Option<RiskTreatmentPlan>,
+        /// Impact score (numeric)
+        #[arg(long)]
+        impact: Option<f64>,
+        /// Likelihood score (numeric)
+        #[arg(long)]
+        likelihood: Option<f64>,
+        /// Status
+        #[arg(long, value_enum, ignore_case = true)]
+        status: Option<RiskStatus>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
+    },
+    /// Update a risk
+    Update {
+        /// Risk register ID
+        register_id: String,
+        /// Risk ID
+        risk_id: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long, value_enum, ignore_case = true)]
+        treatment_plan: Option<RiskTreatmentPlan>,
+        #[arg(long)]
+        impact: Option<f64>,
+        #[arg(long)]
+        likelihood: Option<f64>,
+        #[arg(long, value_enum, ignore_case = true)]
+        status: Option<RiskStatus>,
+    },
+    /// Get risk insights for a register
+    Insights {
+        /// Risk register ID
+        register_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Controls
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum ControlAction {
+    /// List controls in a workspace
+    List {
+        /// Workspace ID
+        workspace_id: String,
+    },
+    /// Get a control by ID
+    Get {
+        /// Workspace ID
+        workspace_id: String,
+        /// Control ID
+        control_id: String,
+    },
+    /// Create a control in a workspace
+    Create {
+        /// Workspace ID
+        workspace_id: String,
+        /// Control name
+        #[arg(long)]
+        name: Option<String>,
+        /// Description
+        #[arg(long)]
+        description: Option<String>,
+        /// Guiding question
+        #[arg(long)]
+        question: Option<String>,
+        /// Activity description
+        #[arg(long)]
+        activity: Option<String>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
+    },
+    /// Update a control
+    Update {
+        /// Workspace ID
+        workspace_id: String,
+        /// Control ID
+        control_id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        question: Option<String>,
+        #[arg(long)]
+        activity: Option<String>,
+    },
+    /// List requirements mapped to a control
+    Requirements {
+        /// Workspace ID
+        workspace_id: String,
+        /// Control ID
+        control_id: String,
+    },
+    /// Compare control-requirement mappings in a workspace
+    Compare {
+        /// Workspace ID
+        workspace_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Devices
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum DeviceAction {
+    /// List all devices
+    List,
+    /// Get a device by ID
+    Get {
+        /// Device ID
+        device_id: String,
+    },
+    /// List devices for a personnel member
+    ForPersonnel {
+        /// Personnel ID
+        personnel_id: String,
+    },
+    /// List apps installed on a device
+    Apps {
+        /// Device ID
+        device_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Personnel
+// ---------------------------------------------------------------------------
+
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EmploymentStatus {
+    CurrentEmployee,
+    FormerEmployee,
+    CurrentContractor,
+    FormerContractor,
+    OutOfScope,
+    Unknown,
+    SpecialFormerEmployee,
+    SpecialFormerContractor,
+    FutureHire,
+    ServiceAccount,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PersonnelAction {
+    /// List all personnel
+    List,
+    /// Get a personnel record by ID
+    Get {
+        /// Personnel ID
+        personnel_id: String,
+    },
+    /// Update a personnel record
+    Update {
+        /// Personnel ID
+        personnel_id: String,
+        /// Employment status
+        #[arg(long, value_enum, ignore_case = true)]
+        employment_status: Option<EmploymentStatus>,
+        /// Start date (ISO 8601)
+        #[arg(long)]
+        started_at: Option<String>,
+        /// Separation date (ISO 8601)
+        #[arg(long)]
+        separated_at: Option<String>,
+        /// Reason if not a human (e.g. SERVICE_ACCOUNT)
+        #[arg(long)]
+        not_human_reason: Option<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Policies
+// ---------------------------------------------------------------------------
+
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PolicySourceType {
+    Uploaded,
+    External,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PolicyAction {
+    /// List all policies
+    List,
+    /// Get a policy by ID
+    Get {
+        /// Policy ID
+        policy_id: String,
+    },
+    /// Create a policy
+    Create {
+        /// Policy name
+        #[arg(long)]
+        name: Option<String>,
+        /// Owner personnel ID
+        #[arg(long)]
+        owner_id: Option<u64>,
+        /// Source type
+        #[arg(long, value_enum, ignore_case = true)]
+        source_type: Option<PolicySourceType>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
+    },
+    /// Update a policy
+    Update {
+        /// Policy ID
+        policy_id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        owner_id: Option<u64>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        renewal_date: Option<String>,
+    },
+    /// List available actions on a policy
+    Actions {
+        /// Policy ID
+        policy_id: String,
+    },
+    /// List policy versions
+    Versions {
+        /// Policy ID
+        policy_id: String,
+    },
+    /// Get a specific policy version
+    Version {
+        /// Policy ID
+        policy_id: String,
+        /// Version ID
+        version_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Evidence Library
+// ---------------------------------------------------------------------------
+
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RenewalScheduleType {
+    OneMonth,
+    TwoMonths,
+    ThreeMonths,
+    SixMonths,
+    OneYear,
+    Custom,
+    None,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EvidenceAction {
+    /// List evidence library items in a workspace
+    List {
+        /// Workspace ID
+        workspace_id: String,
+    },
+    /// Get an evidence library item by ID
+    Get {
+        /// Workspace ID
+        workspace_id: String,
+        /// Evidence library item ID
+        evidence_id: String,
+    },
+    /// Create an evidence library item
+    Create {
+        /// Workspace ID
+        workspace_id: String,
+        /// Item name
+        #[arg(long)]
+        name: Option<String>,
+        /// Description
+        #[arg(long)]
+        description: Option<String>,
+        /// Renewal schedule type
+        #[arg(long, value_enum, ignore_case = true)]
+        renewal_schedule_type: Option<RenewalScheduleType>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
+    },
+    /// Update an evidence library item
+    Update {
+        /// Workspace ID
+        workspace_id: String,
+        /// Evidence library item ID
+        evidence_id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long, value_enum, ignore_case = true)]
+        renewal_schedule_type: Option<RenewalScheduleType>,
+    },
+    /// Remove an evidence library item
+    Remove {
+        /// Workspace ID
+        workspace_id: String,
+        /// Evidence library item ID
+        evidence_id: String,
+    },
+    /// Get a specific version of an evidence library item
+    GetVersion {
+        /// Workspace ID
+        workspace_id: String,
+        /// Evidence library item ID
+        evidence_id: String,
+        /// Version ID
+        version_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Frameworks
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum FrameworkAction {
+    /// List frameworks in a workspace
+    List {
+        /// Workspace ID
+        workspace_id: String,
+    },
+    /// Create a framework
+    Create {
+        /// Workspace ID
+        workspace_id: String,
+        /// Framework name
+        #[arg(long)]
+        name: Option<String>,
+        /// Short name / acronym
+        #[arg(long)]
+        short_name: Option<String>,
+        /// Description
+        #[arg(long)]
+        description: Option<String>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
+    },
+    /// Update a framework
+    Update {
+        /// Workspace ID
+        workspace_id: String,
+        /// Framework ID
+        framework_id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// List requirements for a framework
+    Requirements {
+        /// Workspace ID
+        workspace_id: String,
+        /// Framework ID
+        framework_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Assets
+// ---------------------------------------------------------------------------
+
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AssetType {
+    Physical,
+    Virtual,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AssetAction {
+    /// List all assets
+    List,
+    /// Get an asset by ID
+    Get {
+        /// Asset ID
+        asset_id: String,
+    },
+    /// Create an asset
+    Create {
+        /// Asset name
+        #[arg(long)]
+        name: Option<String>,
+        /// Description
+        #[arg(long)]
+        description: Option<String>,
+        /// Asset type (PHYSICAL or VIRTUAL)
+        #[arg(long, value_enum, ignore_case = true)]
+        asset_type: Option<AssetType>,
+        /// Free-form notes
+        #[arg(long)]
+        notes: Option<String>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
+    },
+    /// Update an asset
+    Update {
+        /// Asset ID
+        asset_id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long, value_enum, ignore_case = true)]
+        asset_type: Option<AssetType>,
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    /// Delete an asset by ID
+    Remove {
+        /// Asset ID
+        asset_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Company
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum CompanyAction {
+    /// Get company information
+    Get,
+}
+
+// ---------------------------------------------------------------------------
+// Workspaces
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum WorkspaceAction {
+    /// List all workspaces
+    List,
 }
