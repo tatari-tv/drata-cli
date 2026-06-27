@@ -7,7 +7,9 @@ pub mod client;
 pub mod config;
 pub mod filter;
 pub mod output;
+pub mod raw;
 pub mod resources;
+pub mod spec;
 
 use cli::{Cli, Commands};
 use client::DrataClient;
@@ -17,9 +19,14 @@ use tracing::instrument;
 
 /// Returns the skeleton to print if the invoked command is a `--example`
 /// request that should bypass API/auth setup, `None` otherwise.
-pub fn example_if_requested(cli: &Cli) -> Option<&'static str> {
+///
+/// Curated `--example` skeletons are hand-written and infallible; the `raw`
+/// namespace derives its skeleton from the spec, which can fail (unknown
+/// method/path, or an operation with no JSON body), hence the inner `Result`.
+pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
     match &cli.command {
-        Commands::Vendor { action } => resources::vendor::example_if_requested(action),
+        Commands::Vendor { action } => resources::vendor::example_if_requested(action).map(|s| Ok(s.to_string())),
+        Commands::Raw(args) => raw::example_if_requested(args),
         _ => None,
     }
 }
@@ -65,6 +72,9 @@ pub async fn run(cli: &Cli, config: &Config) -> Result<()> {
     match &cli.command {
         Commands::Vendor { action } => {
             resources::vendor::handle(action, &client, config).await?;
+        }
+        Commands::Raw(args) => {
+            raw::handle(args, &client, config).await?;
         }
         // Auth commands normally take the no-key bypass in main; if they reach
         // `run`, a key is configured. Re-derive the diagnostic to report source.

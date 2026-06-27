@@ -60,6 +60,7 @@ async fn main() -> Result<()> {
     // --example prints a skeleton and exits. It never touches the API, so bypass
     // config/auth before Config::load demands a key.
     if let Some(skeleton) = drata_cli::example_if_requested(&cli) {
+        let skeleton = skeleton.context("Failed to generate --example skeleton")?;
         print!("{}", skeleton);
         return Ok(());
     }

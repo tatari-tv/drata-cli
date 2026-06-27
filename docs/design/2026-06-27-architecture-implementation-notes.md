@@ -106,3 +106,83 @@ Append-only. One section per phase.
   required by the spec). There is no curated command yet to *list* available questionnaire
   templates or security reviews, so a user must already know those IDs. Worth a convenience
   lookup (or curating the Vendor Security Reviews tag) in a later phase - confirm priority.
+
+## Phase 2: raw namespace + coverage
+
+### Design decisions
+
+- **Spec embedded via `include_str!`, parsed once into a cached `Value`.**
+  `spec::SPEC_JSON = include_str!("../spec/drata-openapi-v2.json")`; `spec::spec()`
+  parses it once into a `OnceLock<Value>`. Embedding (vs. reading from disk at
+  runtime) means the `--example` generator and the coverage test work regardless
+  of CWD and the binary is self-contained - the spec is the correctness anchor,
+  so it ships with the binary. Cost: ~1.4 MB in the binary, accepted for the
+  anchor role. The spec stays `Value` (walked dynamically), never 434 structs.
+- **Coverage tags sourced from operation-level `tags`, not the top-level list.**
+  `spec::operations()` reads each operation's own `tags` array; `spec::operation_tags()`
+  flattens+sorts+dedups them, yielding 35 distinct tags. A unit test
+  (`spec/tests.rs::operation_tags_include_the_two_missing_from_top_level`) and an
+  integration test (`tests/coverage.rs::operation_level_tags_number_thirty_five`)
+  both assert `len == 35` AND that `Audit Requests` + `Procurement Connection
+  Mappings` are present - the exact two the 33-entry top-level `tags` omits.
+- **`--example` fidelity: minimal-plus-examples stub, not deep materialization.**
+  `spec::build_skeleton` emits every `required` property, plus any property that
+  carries its own `example`/`default` (so common optionals stay discoverable).
+  `$ref` and `allOf` are resolved (`resolve_ref`/`build_allof`) so enum `$ref`s
+  materialize to a real value and merged object shapes flatten; `oneOf`/`anyOf`
+  take the first variant; inline `enum` uses its first value. Recursion is bounded
+  by `MAX_DEPTH = 6` (cycle-safe, legible). This is the design doc's open question
+  resolved toward the *minimal* end with enough resolution that no skeleton ever
+  leaks a raw `$ref` (asserted in `spec/tests.rs::example_resolves_enum_refs_to_a_real_value`).
+- **`raw` validates against the spec as a warn, not a hard error.**
+  `raw::handle` calls `spec::find_by_method_path`; an unknown method+path emits a
+  `warn!` and sends anyway. The committed spec is a snapshot aid; a power user may
+  legitimately hit a path it does not yet describe, so the spec must not be a gate
+  on the escape hatch. `raw --example`, by contrast, DOES hard-error on an unknown
+  op (`raw::example_skeleton`) since there is nothing to generate from.
+- **`--data` accepts inline JSON / `@file` / `-` (stdin).** `raw::read_data`
+  dispatches on the prefix (`-` -> stdin, `@` -> file, else inline) and parses to
+  `Value`. Debug logs preview length only, never the body content (logging rule).
+- **`--query` is `num_args = 1..` (space-separated or repeated), never
+  `value_delimiter`.** `raw::build_path` splits each entry on the first `=` and
+  percent-encodes both halves via the client's `encode_query`, so a value
+  containing `&`/`=` cannot corrupt the query string (tested).
+- **`example_if_requested` return type widened to `Option<Result<String>>`.**
+  Phase 1's curated skeleton was `&'static str` (infallible); the spec-derived
+  `raw` skeleton is an owned `String` that can fail. `lib::example_if_requested`
+  now returns `Option<Result<String>>`; `main.rs` `.context()`s the inner Result.
+
+### Deviations
+
+- **`raw` does not yet implement `--file` (multipart).** The design doc's `raw`
+  signature lists `[--file f]` for the 10 multipart upload ops. Multipart upload
+  is explicitly Phase 4 scope ("Multipart `--file` uploads (10 ops)"), so Phase 2
+  ships `raw` as JSON-only (`--data`). `spec::Operation.multipart` already flags
+  the 10 ops (tested) so Phase 4 can wire `--file` without re-parsing. Adding it
+  now would pull Phase 4 work forward.
+
+### Tradeoffs
+
+- **Coverage test treats `raw`-reachability as routability (method+path present)**
+  rather than spinning up a mock server per op. `raw` routes by method+path, so an
+  op is reachable iff it has a known upper-cased method and an absolute path; the
+  test asserts that for all 167 and would FAIL if a future op were unroutable or
+  if a curated entry stopped matching a real op. Cheaper and more stable than 167
+  wiremock round-trips, at the cost of not exercising the live HTTP path per op
+  (that is the client tests' job, which already cover the `raw` verb + guardrail).
+- **`raw::handle` is not unit-tested with wiremock; its pure helpers are.**
+  `build_path`, `read_data`, `example_skeleton`, and `example_if_requested` have
+  direct unit tests in `raw/tests.rs`; the HTTP send itself is covered by the
+  existing `tests/client.rs` raw-verb + write-guardrail tests. Avoids duplicating
+  a `Config` + mock-server harness for logic already proven elsewhere.
+
+### Open questions
+
+- **`--example` depth for the genuinely deep request bodies.** `MAX_DEPTH = 6`
+  and first-variant `oneOf` selection are fine for Drata's current bodies, but a
+  schema with a deep/recursive `oneOf` would get a truncated or single-branch
+  stub. If Phase 3/5 curates a tag whose body is awkward to stub, revisit whether
+  the skeleton should annotate omitted branches.
+- **Should `raw` gain a `--validate` strict mode?** Today an unknown method+path
+  warns and sends. A future flag could flip that to a hard error for users who
+  want the spec to gate their `raw` calls. Deferred until there is demand.

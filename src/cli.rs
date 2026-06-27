@@ -82,6 +82,28 @@ pub enum Commands {
         #[command(subcommand)]
         action: VendorAction,
     },
+    /// Generic passthrough to any operation: `raw <METHOD> <path> ...`
+    Raw(RawArgs),
+}
+
+/// Arguments for the generic `raw` passthrough namespace. Hits the active base
+/// URL for any of the spec's operations. Non-GET is subject to the write
+/// guardrail enforced in the client.
+#[derive(clap::Args, Debug)]
+pub struct RawArgs {
+    /// HTTP method (GET, POST, PUT, DELETE; case-insensitive)
+    pub method: String,
+    /// Path template under the API base, e.g. /vendors or /vendors/123
+    pub path: String,
+    /// Query parameters as key=value (repeated or space-separated)
+    #[arg(long, num_args = 1..)]
+    pub query: Vec<String>,
+    /// Request body: inline JSON, @file to read a file, or - for stdin
+    #[arg(long)]
+    pub data: Option<String>,
+    /// Print the operation's request-body skeleton from the spec and exit
+    #[arg(long)]
+    pub example: bool,
 }
 
 #[derive(Subcommand, Debug)]
