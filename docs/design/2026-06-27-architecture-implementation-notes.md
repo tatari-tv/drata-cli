@@ -375,3 +375,23 @@ fixed (every fix rolled in, none deferred):
 New `clap::ValueEnum`s: `AssetClassType`, `DeviceDocumentType`. New tests: snake_case
 migration, auth-diagnostic write status vs resolved source, and the `Multipart` builder.
 `otto ci` green.
+
+## Shakedown follow-ups (closed)
+
+The offline CLI shakedown had flagged three items as deferred. All three are now fixed:
+
+- **`--log-level` is a `ValueEnum`.** Was a free `Option<String>` (a CLI-conventions
+  violation - enum flags must be case-insensitive `ValueEnum`). Now `LogLevel`
+  (`trace`/`debug`/`info`/`warn`/`error`/`off`, `ignore_case`); invalid values are
+  rejected at parse time. (`src/cli.rs`)
+- **`--example` no longer requires the path positional.** `control`/`risk`/`framework`/
+  `evidence` create took a required leading positional (`workspace_id`/`register_id`),
+  so `... create --example` errored. Those positionals are now
+  `#[arg(required_unless_present = "example")] Option<String>`; the handlers validate
+  presence on the non-example path. `drata control create --example` now prints the
+  skeleton with no positional.
+- **Log file is created on all paths.** `setup_tracing` ran only after `Config::load`,
+  so a missing-key error (and auth/`--example` paths) never wrote the advertised log
+  file. Tracing now initializes immediately after arg parse, sourced from `--log-level`
+  (the only log-level source - it is not a config/credential field, so `Config.log_level`
+  was removed). (`src/main.rs`, `src/config.rs`)

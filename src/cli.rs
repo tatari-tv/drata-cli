@@ -45,9 +45,9 @@ pub struct Cli {
     #[arg(long, value_enum, global = true)]
     pub output: Option<OutputFormat>,
 
-    /// Log level (trace, debug, info, warn, error)
-    #[arg(short, long, global = true)]
-    pub log_level: Option<String>,
+    /// Log level
+    #[arg(short, long, global = true, value_enum, ignore_case = true)]
+    pub log_level: Option<LogLevel>,
 
     #[command(subcommand)]
     pub command: Commands,
@@ -59,6 +59,31 @@ pub enum OutputFormat {
     Json,
     Table,
     Auto,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+#[clap(rename_all = "kebab-case")]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Off,
+}
+
+impl LogLevel {
+    /// The lowercase string `EnvFilter` expects.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LogLevel::Trace => "trace",
+            LogLevel::Debug => "debug",
+            LogLevel::Info => "info",
+            LogLevel::Warn => "warn",
+            LogLevel::Error => "error",
+            LogLevel::Off => "off",
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -371,8 +396,9 @@ pub enum RiskAction {
     },
     /// Create a risk in a register
     Create {
-        /// Risk register ID
-        register_id: String,
+        /// Risk register ID (required unless --example)
+        #[arg(required_unless_present = "example")]
+        register_id: Option<String>,
         /// Risk title
         #[arg(long)]
         title: Option<String>,
@@ -461,8 +487,9 @@ pub enum ControlAction {
     },
     /// Create a control in a workspace (supports multipart --file)
     Create {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (required unless --example)
+        #[arg(required_unless_present = "example")]
+        workspace_id: Option<String>,
         /// Control name (required unless --example)
         #[arg(long)]
         name: Option<String>,
@@ -761,8 +788,9 @@ pub enum EvidenceAction {
     },
     /// Create an evidence library item (supports multipart --file)
     Create {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (required unless --example)
+        #[arg(required_unless_present = "example")]
+        workspace_id: Option<String>,
         /// Item name
         #[arg(long)]
         name: Option<String>,
@@ -829,8 +857,9 @@ pub enum FrameworkAction {
     },
     /// Create a framework
     Create {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (required unless --example)
+        #[arg(required_unless_present = "example")]
+        workspace_id: Option<String>,
         /// Framework name
         #[arg(long)]
         name: Option<String>,

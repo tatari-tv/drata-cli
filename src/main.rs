@@ -78,6 +78,13 @@ fn setup_tracing(log_level: &str) -> Result<()> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Set up logging FIRST so every code path writes to the advertised log file -
+    // including --example, auth commands, and a failed Config::load (which used to
+    // return before tracing was ever initialized). Level comes only from
+    // --log-level (default warn); it is not a config or credential field.
+    let log_level = cli.log_level.map(|l| l.as_str()).unwrap_or("warn");
+    setup_tracing(log_level).context("Failed to setup tracing")?;
+
     // --example prints a skeleton and exits. It never touches the API, so bypass
     // config/auth before Config::load demands a key.
     if let Some(skeleton) = drata_cli::example_if_requested(&cli) {
@@ -94,8 +101,6 @@ async fn main() -> Result<()> {
     }
 
     let config = Config::load(&cli).context("Failed to load configuration")?;
-
-    setup_tracing(&config.log_level).context("Failed to setup tracing")?;
 
     let confirm_fn = confirm::default_confirm(cli.yes);
     drata_cli::run(&cli, &config, confirm_fn)

@@ -59,7 +59,7 @@ pub async fn handle(action: &EvidenceAction, client: &DrataClient, config: &Conf
                 client,
                 config,
                 confirm,
-                workspace_id,
+                workspace_id.as_deref(),
                 name.as_deref(),
                 description.as_deref(),
                 renewal_schedule_type.as_ref(),
@@ -144,12 +144,15 @@ async fn create(
     client: &DrataClient,
     config: &Config,
     confirm: &ConfirmFn,
-    workspace_id: &str,
+    workspace_id: Option<&str>,
     name: Option<&str>,
     description: Option<&str>,
     renewal_schedule_type: Option<&RenewalScheduleType>,
     file: Option<&std::path::Path>,
 ) -> Result<()> {
+    // workspace_id is clap-required unless --example (which never reaches here).
+    let workspace_id = workspace_id
+        .ok_or_else(|| eyre::eyre!("`drata evidence create` requires <workspace_id> (or use --example)"))?;
     debug!(workspace_id, has_file = file.is_some(), "evidence create");
     // Spec requires `name` for both the JSON and multipart shapes.
     let name = name.ok_or_else(|| eyre::eyre!("`drata evidence create` requires --name (or use --example)"))?;

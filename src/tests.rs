@@ -62,3 +62,38 @@ fn example_if_requested_none_for_list() {
     });
     assert!(example_if_requested(&cli).is_none());
 }
+
+#[test]
+fn example_bypasses_required_path_positional() {
+    use clap::Parser;
+    // `--example` must work without the workspace/register positional...
+    let cli = Cli::try_parse_from(["drata", "control", "create", "--example"]).expect("--example should parse");
+    assert!(example_if_requested(&cli).is_some());
+
+    // ...but omitting both the positional AND --example is a parse error.
+    assert!(
+        Cli::try_parse_from(["drata", "control", "create"]).is_err(),
+        "workspace_id is required unless --example"
+    );
+
+    // Same contract for risk/framework/evidence create.
+    for argv in [
+        ["drata", "risk", "create", "--example"],
+        ["drata", "framework", "create", "--example"],
+        ["drata", "evidence", "create", "--example"],
+    ] {
+        assert!(
+            Cli::try_parse_from(argv).is_ok(),
+            "{argv:?} should parse with --example"
+        );
+    }
+}
+
+#[test]
+fn log_level_parses_case_insensitively() {
+    use clap::Parser;
+    let cli = Cli::try_parse_from(["drata", "-l", "DEBUG", "company", "get"]).expect("DEBUG should parse");
+    assert_eq!(cli.log_level.map(|l| l.as_str()), Some("debug"));
+    // An invalid level is rejected.
+    assert!(Cli::try_parse_from(["drata", "--log-level", "bogus", "company", "get"]).is_err());
+}

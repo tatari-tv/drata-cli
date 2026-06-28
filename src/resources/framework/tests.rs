@@ -5,7 +5,7 @@ use crate::cli::FrameworkAction;
 #[test]
 fn example_only_for_create_with_flag() {
     let create_example = FrameworkAction::Create {
-        workspace_id: "w1".to_string(),
+        workspace_id: Some("w1".to_string()),
         name: None,
         short_name: None,
         description: None,
@@ -14,7 +14,7 @@ fn example_only_for_create_with_flag() {
     assert!(example_if_requested(&create_example).is_some());
 
     let create_no_example = FrameworkAction::Create {
-        workspace_id: "w1".to_string(),
+        workspace_id: Some("w1".to_string()),
         name: Some("SOC2".to_string()),
         short_name: None,
         description: None,

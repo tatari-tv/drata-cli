@@ -59,7 +59,7 @@ pub async fn handle(action: &ControlAction, client: &DrataClient, config: &Confi
                 client,
                 config,
                 confirm,
-                workspace_id,
+                workspace_id.as_deref(),
                 name.as_deref(),
                 description.as_deref(),
                 code.as_deref(),
@@ -140,16 +140,19 @@ async fn create(
     client: &DrataClient,
     config: &Config,
     confirm: &ConfirmFn,
-    workspace_id: &str,
+    workspace_id: Option<&str>,
     name: Option<&str>,
     description: Option<&str>,
     code: Option<&str>,
     question: Option<&str>,
     activity: Option<&str>,
 ) -> Result<()> {
-    debug!(workspace_id, "control create");
     // Spec requires name, description, and code. Validate before confirming so
-    // we never prompt for a request the server would reject.
+    // we never prompt for a request the server would reject. workspace_id is
+    // clap-required unless --example (which never reaches this handler).
+    let workspace_id =
+        workspace_id.ok_or_else(|| eyre::eyre!("`drata control create` requires <workspace_id> (or use --example)"))?;
+    debug!(workspace_id, "control create");
     let name = name.ok_or_else(|| eyre::eyre!("`drata control create` requires --name (or use --example)"))?;
     let description =
         description.ok_or_else(|| eyre::eyre!("`drata control create` requires --description (or use --example)"))?;

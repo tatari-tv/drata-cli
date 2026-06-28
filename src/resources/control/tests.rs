@@ -5,7 +5,7 @@ use crate::cli::ControlAction;
 #[test]
 fn example_only_for_create_with_flag() {
     let create_example = ControlAction::Create {
-        workspace_id: "w1".to_string(),
+        workspace_id: Some("w1".to_string()),
         name: None,
         description: None,
         code: None,
@@ -16,7 +16,7 @@ fn example_only_for_create_with_flag() {
     assert!(example_if_requested(&create_example).is_some());
 
     let create_no_example = ControlAction::Create {
-        workspace_id: "w1".to_string(),
+        workspace_id: Some("w1".to_string()),
         name: Some("ctrl".to_string()),
         description: None,
         code: None,

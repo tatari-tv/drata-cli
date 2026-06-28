@@ -5,7 +5,7 @@ use crate::cli::{RiskAction, RiskTreatmentPlan};
 #[test]
 fn example_only_for_create_with_flag() {
     let create_example = RiskAction::Create {
-        register_id: "1".to_string(),
+        register_id: Some("1".to_string()),
         title: None,
         description: None,
         treatment_plan: None,
@@ -17,7 +17,7 @@ fn example_only_for_create_with_flag() {
     assert!(example_if_requested(&create_example).is_some());
 
     let create_no_example = RiskAction::Create {
-        register_id: "1".to_string(),
+        register_id: Some("1".to_string()),
         title: Some("t".to_string()),
         description: None,
         treatment_plan: None,

@@ -5,7 +5,7 @@ use crate::cli::{EvidenceAction, RenewalScheduleType};
 #[test]
 fn example_only_for_create_with_flag() {
     let create_example = EvidenceAction::Create {
-        workspace_id: "w1".to_string(),
+        workspace_id: Some("w1".to_string()),
         name: None,
         description: None,
         renewal_schedule_type: None,
@@ -15,7 +15,7 @@ fn example_only_for_create_with_flag() {
     assert!(example_if_requested(&create_example).is_some());
 
     let create_no_example = EvidenceAction::Create {
-        workspace_id: "w1".to_string(),
+        workspace_id: Some("w1".to_string()),
         name: Some("e".to_string()),
         description: None,
         renewal_schedule_type: None,

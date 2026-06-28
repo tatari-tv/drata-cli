@@ -53,7 +53,7 @@ pub async fn handle(
                 client,
                 config,
                 confirm,
-                workspace_id,
+                workspace_id.as_deref(),
                 name.as_deref(),
                 short_name.as_deref(),
                 description.as_deref(),
@@ -104,11 +104,14 @@ async fn create(
     client: &DrataClient,
     config: &Config,
     confirm: &ConfirmFn,
-    workspace_id: &str,
+    workspace_id: Option<&str>,
     name: Option<&str>,
     short_name: Option<&str>,
     description: Option<&str>,
 ) -> Result<()> {
+    // workspace_id is clap-required unless --example (which never reaches here).
+    let workspace_id = workspace_id
+        .ok_or_else(|| eyre::eyre!("`drata framework create` requires <workspace_id> (or use --example)"))?;
     debug!(workspace_id, "framework create");
     // Spec requires name, shortName, description.
     let name = name.ok_or_else(|| eyre::eyre!("`drata framework create` requires --name (or use --example)"))?;

@@ -239,7 +239,6 @@ pub struct Config {
     pub allow_writes: bool,
     pub profile: String,
     pub output_format: OutputFormat,
-    pub log_level: String,
     pub token_source: TokenSource,
 }
 
@@ -287,8 +286,6 @@ impl Config {
 
         let output_format = cli.output.clone().unwrap_or(OutputFormat::Auto);
 
-        let log_level = cli.log_level.clone().unwrap_or_else(|| "warn".to_string());
-
         debug!(
             profile = %profile_name,
             region = %region,
@@ -303,7 +300,6 @@ impl Config {
             allow_writes,
             profile: profile_name,
             output_format,
-            log_level,
             token_source,
         })
     }

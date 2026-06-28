@@ -60,7 +60,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
                 client,
                 config,
                 confirm,
-                register_id,
+                register_id.as_deref(),
                 title.as_deref(),
                 description.as_deref(),
                 treatment_plan.as_ref(),
@@ -138,7 +138,7 @@ async fn create(
     client: &DrataClient,
     config: &Config,
     confirm: &ConfirmFn,
-    register_id: &str,
+    register_id: Option<&str>,
     title: Option<&str>,
     description: Option<&str>,
     treatment_plan: Option<&RiskTreatmentPlan>,
@@ -146,6 +146,9 @@ async fn create(
     likelihood: Option<f64>,
     status: Option<&RiskStatus>,
 ) -> Result<()> {
+    // register_id is clap-required unless --example (which never reaches here).
+    let register_id =
+        register_id.ok_or_else(|| eyre::eyre!("`drata risk create` requires <register_id> (or use --example)"))?;
     debug!(register_id, "risk create");
     // Spec requires title and description.
     let title = title.ok_or_else(|| eyre::eyre!("`drata risk create` requires --title (or use --example)"))?;
