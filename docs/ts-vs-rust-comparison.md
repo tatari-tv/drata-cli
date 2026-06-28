@@ -7,9 +7,9 @@ representation, coverage gaps, and error-handling differences.
 ## Verdict
 
 **Field fidelity is perfect.** Across every resource that could be read with the available
-key, the Rust CLI returns byte-for-byte the same record data as the TS CLI (after unwrapping
-the list envelope). No renamed fields, no missing fields, no type/representation differences
-were found in any record.
+key, the Rust CLI returns record data semantically identical to the TS CLI after normalization
+(unwrapping the list envelope and sorting keys before diffing). No renamed fields, no missing
+fields, no type/representation differences were found in any record.
 
 The only differences are **structural and coverage-level**, not data-level:
 1. List envelope / pagination shape (a deliberate, known design choice - excluded by request).
@@ -83,7 +83,6 @@ exercise anyway; the read gaps (a curated GET a user would expect) are flagged.
 | risk-library             | list/get/copy                                        | yes (list/get) |
 | risk-notes               | list/get/create/update/delete                        | yes (list/get) |
 | vendor-types             | list/create/update/delete                            | yes (list) |
-| vendor-security-reviews  | list/create/create-with-file/get/update/actions/run-action/questionnaires/upload-questionnaire/upload-questionnaire-to-review | **curated** (see 2.5) |
 | custom-connections       | list/get/create/update/delete                        | yes (list/get) |
 | hris-identities          | list/get/batch-upsert/update/delete                  | yes (list/get) |
 | background-checks        | create                                               | no (write) |
@@ -138,8 +137,8 @@ worth noting. (Rust's error path, by contrast, surfaces the full upstream messag
   (`{"data":[]}`), not the 402 a disabled feature returns.
 - **No questionnaires are currently sent**: all 24 vendors on the first page returned
   `questionnaires=0`. (A second vendor page exists - not swept.)
-- Capability: Rust `vendor questionnaire list/get/send`; TS adds the `vendor-security-reviews`
-  group (see 2.5).
+- Capability: Rust `vendor questionnaire list/get/send` plus the `vendor security-review`
+  group (10 curated verbs, a superset of TS's 5 - see 2.5).
 
 ## 4. Not verified / blocked
 - **Write/mutation parity** (create/update/delete, `verify`, questionnaire `send`, security-review

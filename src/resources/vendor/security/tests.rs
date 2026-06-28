@@ -36,9 +36,9 @@ fn action_str_matches_spec() {
 fn example_only_for_create_with_flag() {
     let create_example = VendorSecurityReviewAction::Create {
         vendor_id: "v1".to_string(),
-        review_deadline_at: "2026-12-31".to_string(),
-        status: SecurityReviewStatus::NotYetStarted,
-        review_type: SecurityReviewType::Security,
+        review_deadline_at: Some("2026-12-31".to_string()),
+        status: Some(SecurityReviewStatus::NotYetStarted),
+        review_type: Some(SecurityReviewType::Security),
         title: None,
         note: None,
         requested_at: None,
@@ -53,9 +53,9 @@ fn example_only_for_create_with_flag() {
 fn example_none_when_create_flag_false() {
     let create_no_example = VendorSecurityReviewAction::Create {
         vendor_id: "v1".to_string(),
-        review_deadline_at: "2026-12-31".to_string(),
-        status: SecurityReviewStatus::NotYetStarted,
-        review_type: SecurityReviewType::Security,
+        review_deadline_at: Some("2026-12-31".to_string()),
+        status: Some(SecurityReviewStatus::NotYetStarted),
+        review_type: Some(SecurityReviewType::Security),
         title: None,
         note: None,
         requested_at: None,

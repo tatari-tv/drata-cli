@@ -410,15 +410,15 @@ pub enum VendorSecurityReviewAction {
     Create {
         /// Vendor ID
         vendor_id: String,
-        /// Review deadline (ISO 8601, e.g. 2026-12-31)
+        /// Review deadline (ISO 8601, e.g. 2026-12-31). Required unless --data/--example.
         #[arg(long)]
-        review_deadline_at: String,
-        /// Review status
+        review_deadline_at: Option<String>,
+        /// Review status. Required unless --data/--example.
         #[arg(long, value_enum, ignore_case = true)]
-        status: SecurityReviewStatus,
-        /// Review type
+        status: Option<SecurityReviewStatus>,
+        /// Review type. Required unless --data/--example.
         #[arg(long = "type", value_enum, ignore_case = true)]
-        review_type: SecurityReviewType,
+        review_type: Option<SecurityReviewType>,
         /// Optional title
         #[arg(long)]
         title: Option<String>,
@@ -525,7 +525,7 @@ pub enum VendorSecurityReviewAction {
         /// Vendor ID
         vendor_id: String,
         /// Path(s) to questionnaire file(s) (space-separated, repeatable)
-        #[arg(long, num_args = 1..)]
+        #[arg(long, num_args = 1.., required = true)]
         file: Vec<std::path::PathBuf>,
     },
     /// Upload one or more completed questionnaire files to a security review (multipart)
@@ -535,7 +535,7 @@ pub enum VendorSecurityReviewAction {
         /// Security review ID
         security_review_id: u64,
         /// Path(s) to questionnaire file(s) (space-separated, repeatable)
-        #[arg(long, num_args = 1..)]
+        #[arg(long, num_args = 1.., required = true)]
         file: Vec<std::path::PathBuf>,
     },
 }

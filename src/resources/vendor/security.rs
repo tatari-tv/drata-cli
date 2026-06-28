@@ -160,9 +160,9 @@ pub async fn handle(
                 config,
                 confirm,
                 vendor_id,
-                review_deadline_at,
-                status,
-                review_type,
+                review_deadline_at.as_deref(),
+                status.as_ref(),
+                review_type.as_ref(),
                 title.as_deref(),
                 note.as_deref(),
                 requested_at.as_deref(),
@@ -305,9 +305,9 @@ async fn create(
     config: &Config,
     confirm: &ConfirmFn,
     vendor_id: &str,
-    review_deadline_at: &str,
-    status: &SecurityReviewStatus,
-    review_type: &SecurityReviewType,
+    review_deadline_at: Option<&str>,
+    status: Option<&SecurityReviewStatus>,
+    review_type: Option<&SecurityReviewType>,
     title: Option<&str>,
     note: Option<&str>,
     requested_at: Option<&str>,
@@ -316,9 +316,9 @@ async fn create(
 ) -> Result<()> {
     debug!(
         vendor_id,
-        review_deadline_at,
-        status = status_str(status),
-        review_type = type_str(review_type),
+        has_review_deadline_at = review_deadline_at.is_some(),
+        status = status.map(status_str),
+        review_type = review_type.map(type_str),
         has_title = title.is_some(),
         has_note = note.is_some(),
         has_requested_at = requested_at.is_some(),
@@ -336,6 +336,15 @@ async fn create(
     let body: Value = if let Some(raw) = data {
         serde_json::from_str(raw).map_err(|e| eyre::eyre!("--data is not valid JSON: {}", e))?
     } else {
+        // The trio is required unless --data (or --example) supplies the body.
+        let review_deadline_at = review_deadline_at.ok_or_else(|| {
+            eyre::eyre!("`vendor security-review create` requires --review-deadline-at (or use --data/--example)")
+        })?;
+        let status = status.ok_or_else(|| {
+            eyre::eyre!("`vendor security-review create` requires --status (or use --data/--example)")
+        })?;
+        let review_type = review_type
+            .ok_or_else(|| eyre::eyre!("`vendor security-review create` requires --type (or use --data/--example)"))?;
         // Required fields with translated body keys (securityReviewStatus / securityReviewType).
         let mut b = json!({
             "securityReviewStatus": status_str(status),
