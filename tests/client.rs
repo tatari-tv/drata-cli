@@ -118,7 +118,7 @@ async fn cursor_pagination_drains_all_pages() {
 async fn cursor_pagination_aborts_on_repeated_cursor() {
     let server = MockServer::start().await;
     // Every page returns the same non-null cursor: no forward progress. The
-    // hardening must break instead of looping forever.
+    // hardening must now return Err (fail-closed) instead of partial data.
     Mock::given(method("GET"))
         .and(path("/vendors"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -129,9 +129,13 @@ async fn cursor_pagination_aborts_on_repeated_cursor() {
         .await;
 
     let client = ro_client(&server).await;
-    let all = client.get_all("/vendors").await.expect("pagination ok");
-    // First page accepted, second page returns the same cursor -> abort.
-    assert_eq!(all.len(), 2);
+    let result = client.get_all("/vendors").await;
+    assert!(result.is_err(), "repeated cursor must return Err, not partial data");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("repeated cursor"),
+        "error should describe the problem: {msg}"
+    );
 }
 
 #[tokio::test]

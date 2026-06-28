@@ -122,8 +122,17 @@ async fn create(
     if !confirm("POST", "/policies")? {
         bail!("aborted");
     }
-    // When a file is provided and source type is UPLOADED, use multipart upload.
+    // When a file is provided, use multipart upload. --file is only valid with
+    // sourceType UPLOADED (or when sourceType is omitted, implying UPLOADED).
+    // EXTERNAL policies use an externalFileId, not a file upload.
     if let Some(path) = file {
+        if let Some(PolicySourceType::External) = source_type {
+            bail!(
+                "--file is only valid for UPLOADED policies. \
+                 EXTERNAL policies reference an existing file via --source-type external \
+                 and do not accept a file upload. Remove --file or change --source-type."
+            );
+        }
         let result = client.post_multipart("/policies", path).await?;
         print_value(&result, &config.output_format);
         return Ok(());

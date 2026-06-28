@@ -18,6 +18,9 @@ use drata_cli::confirm;
 const PROJECT: &str = "drata";
 
 fn setup_tracing(log_level: &str) -> Result<()> {
+    // Level comes from --log-level, never RUST_LOG.
+    let filter = EnvFilter::try_new(log_level).unwrap_or_else(|_| EnvFilter::new("warn"));
+
     // xdg_data_dir() (not dirs::data_local_dir()) so macOS also honors XDG and
     // logs land in ~/.local/share - matching the path advertised in `--help`.
     let log_dir = drata_cli::config::xdg_data_dir()
@@ -25,32 +28,49 @@ fn setup_tracing(log_level: &str) -> Result<()> {
         .join(PROJECT)
         .join("logs");
 
-    fs::create_dir_all(&log_dir).context("Failed to create log directory")?;
+    // Log setup degrades gracefully: if the log directory cannot be created or
+    // the log file cannot be opened, fall back to stderr rather than aborting
+    // the command. A missing log directory is not a reason to fail an API call.
+    let maybe_file = fs::create_dir_all(&log_dir)
+        .and_then(|_| {
+            let log_file = log_dir.join(format!("{}.log", PROJECT));
+            fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_file)
+                .map(|f| (f, log_file))
+        })
+        .ok();
 
-    let log_file = log_dir.join(format!("{}.log", PROJECT));
+    match maybe_file {
+        Some((file, log_file)) => {
+            tracing_subscriber::registry()
+                .with(
+                    fmt::layer()
+                        .with_writer(file)
+                        .with_ansi(false)
+                        .with_target(true)
+                        .with_file(true)
+                        .with_line_number(true),
+                )
+                .with(filter)
+                .init();
+            info!(log_path = %log_file.display(), "tracing initialized");
+        }
+        None => {
+            // Fallback: log to stderr so tracing macros still work.
+            tracing_subscriber::registry()
+                .with(fmt::layer().with_writer(std::io::stderr).with_ansi(false))
+                .with(filter)
+                .init();
+            // Use eprintln here since tracing is just initializing.
+            eprintln!(
+                "warning: could not open log file under {}; logging to stderr",
+                log_dir.display()
+            );
+        }
+    }
 
-    let file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_file)
-        .context("Failed to open log file")?;
-
-    // Level comes from --log-level, never RUST_LOG.
-    let filter = EnvFilter::try_new(log_level).unwrap_or_else(|_| EnvFilter::new("warn"));
-
-    tracing_subscriber::registry()
-        .with(
-            fmt::layer()
-                .with_writer(file)
-                .with_ansi(false)
-                .with_target(true)
-                .with_file(true)
-                .with_line_number(true),
-        )
-        .with(filter)
-        .init();
-
-    info!(log_path = %log_file.display(), "tracing initialized");
     Ok(())
 }
 

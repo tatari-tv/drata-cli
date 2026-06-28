@@ -51,6 +51,9 @@ pub struct VerifyResult {
 /// Returns `Ok(VerifyResult)` when every step succeeds, `Err` on the first
 /// failure (the caller should report which step failed and surface the error).
 ///
+/// Any failure after the vendor is created attempts a best-effort cleanup
+/// (DELETE) so `zzz-clitest-` records do not persist in the tenant.
+///
 /// MUST be called with a write-enabled client (the create/delete calls will
 /// hit the write guardrail otherwise).
 #[instrument(skip(client))]
@@ -74,6 +77,31 @@ pub async fn run(client: &DrataClient) -> Result<VerifyResult> {
         other => bail!("verify step 1: unexpected id type in response: {:?}", other),
     };
 
+    // All steps after creation run inside a closure so we can guarantee
+    // best-effort cleanup (delete) on any failure.
+    let inner_result = verify_inner(client, &name, &id_str).await;
+
+    match inner_result {
+        Ok(result) => {
+            info!(?result, "disposable verification cycle complete");
+            Ok(result)
+        }
+        Err(e) => {
+            // Best-effort cleanup: try to delete the throwaway vendor so it
+            // does not persist in the tenant after a failed verify run.
+            warn!(id = %id_str, "verify failed; attempting best-effort cleanup DELETE /vendors/{id_str}");
+            if let Err(cleanup_err) = client.delete(&format!("/vendors/{}", id_str)).await {
+                warn!(%cleanup_err, "cleanup delete failed; zzz-clitest- record may persist");
+            } else {
+                debug!(id = %id_str, "cleanup delete succeeded");
+            }
+            Err(e)
+        }
+    }
+}
+
+#[instrument(skip(client))]
+async fn verify_inner(client: &DrataClient, name: &str, id_str: &str) -> Result<VerifyResult> {
     // Step 2a: Verify by GET /vendors/{id}
     info!(id = %id_str, "verify step 2a: GET /vendors/{id_str}");
     let fetched = client
@@ -86,27 +114,25 @@ pub async fn run(client: &DrataClient) -> Result<VerifyResult> {
     }
     debug!("verify step 2a: name matches");
 
-    // Step 2b: Verify it appears in the first page of the list
-    info!("verify step 2b: GET /vendors (list)");
-    let list_resp = client
-        .get("/vendors?size=50")
+    // Step 2b: Verify it appears in the full paginated list. TEST_PREFIX is
+    // lexicographically last so it will NOT appear on page 1 of an ascending
+    // list if the tenant has many vendors. Use get_all to scan all pages.
+    info!("verify step 2b: GET /vendors (paginated)");
+    let all_vendors = client
+        .get_all("/vendors")
         .await
-        .context("verify step 2b (list) failed")?;
-    let found_in_list = list_resp
-        .get("data")
-        .and_then(|d| d.as_array())
-        .map(|arr| {
-            arr.iter()
-                .any(|v| v.get("name").and_then(|n| n.as_str()) == Some(&name))
-        })
-        .unwrap_or(false);
+        .context("verify step 2b (paginated list) failed")?;
+    let found_in_list = all_vendors
+        .iter()
+        .any(|v| v.get("name").and_then(|n| n.as_str()) == Some(name));
     if !found_in_list {
-        warn!(
+        bail!(
+            "verify step 2b: vendor `{}` not found in full paginated list ({} items scanned)",
             name,
-            "verify step 2b: vendor not found in first page of list (may be on a later page)"
+            all_vendors.len()
         );
     }
-    debug!(found_in_list, "verify step 2b done");
+    debug!(found_in_list, items = all_vendors.len(), "verify step 2b done");
 
     // Step 3: Delete
     info!(id = %id_str, "verify step 3: DELETE /vendors/{id_str}");
@@ -139,17 +165,14 @@ pub async fn run(client: &DrataClient) -> Result<VerifyResult> {
         }
     };
 
-    let result = VerifyResult {
-        vendor_id,
+    Ok(VerifyResult {
+        vendor_id: serde_json::Value::String(id_str.to_string()),
         created: true,
         verified_list: found_in_list,
         verified_get: true,
         deleted: true,
         verified_deleted: deleted,
-    };
-
-    info!(?result, "disposable verification cycle complete");
-    Ok(result)
+    })
 }
 
 #[cfg(test)]

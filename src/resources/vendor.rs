@@ -116,6 +116,16 @@ async fn list(client: &DrataClient, config: &Config, patterns: &[String], all: b
         expand_len = expand.len(),
         "vendor list"
     );
+    // --all streams the full tenant export as NDJSON; name-pattern filtering is
+    // buffered and does not apply to streaming mode. Reject the combination so
+    // the caller cannot silently get a wrong result.
+    if all && !patterns.is_empty() {
+        bail!(
+            "--all and name patterns are mutually exclusive. \
+             --all streams the full unfiltered export; \
+             omit --all to filter by name patterns."
+        );
+    }
     let base = append_expand("/vendors", expand);
     if all {
         let mut stdout = io::stdout();

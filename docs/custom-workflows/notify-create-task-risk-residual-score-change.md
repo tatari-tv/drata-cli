@@ -30,7 +30,7 @@ This workflow executes when:
 *   **Object Type:** Risk
 *   **Scope:** All risks
 *   **Trigger Event:** Residual score changed
-*   **Trigger Condition:** New residual score meets or exceeds selected threshold
+*   **Trigger Condition:** New residual score meets or exceeds selected threshold (fires on any change where the new score crosses or stays above the threshold, including decreases that remain above it)
 *   **Actions:**
     *    Send notification (Email, Slack, or Teams)
     *    Create task for risk owner or designated role
@@ -61,7 +61,7 @@ This workflow executes when:
     *    Under **New score is** , choose the threshold you want to monitor (e.g., _High_ , _Critical_ ).
     *    Configure the operator (e.g., _Greater than or equal to_ ).
 
-This ensures the workflow only triggers when the score increases into an elevated category.
+This triggers the workflow whenever the new score meets or exceeds the threshold. Note that this condition fires on any score change where the new value is at or above the threshold, not only when the score increases; a decrease from Critical to High would also trigger if both values exceed the threshold. If you only want to notify on upward changes, you would need an additional old-vs-new comparison condition when the platform supports it.
 
 ![Image 3: Trigger](https://cdn.drata.com/developers/custom_workflows/recipe_3/trigger.png)
 

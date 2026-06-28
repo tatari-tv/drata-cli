@@ -190,7 +190,9 @@ async fn update(
         bail!("aborted");
     }
     if let Some(f) = file {
-        let result = client.post_multipart(&path, f).await?;
+        // The spec specifies PUT multipart/form-data for evidence update
+        // (PUT /workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}).
+        let result = client.put_multipart(&path, f).await?;
         print_value(&result, &config.output_format);
         return Ok(());
     }

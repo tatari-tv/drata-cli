@@ -45,8 +45,8 @@ pub async fn handle(action: &RegisterAction, client: &DrataClient, config: &Conf
                 confirm,
                 name.as_deref(),
                 description.as_deref(),
-                owner_ids,
-                workspace_ids,
+                owner_ids.as_deref(),
+                workspace_ids.as_deref(),
             )
             .await
         }
@@ -64,8 +64,8 @@ pub async fn handle(action: &RegisterAction, client: &DrataClient, config: &Conf
                 register_id,
                 name.as_deref(),
                 description.as_deref(),
-                owner_ids,
-                workspace_ids,
+                owner_ids.as_deref(),
+                workspace_ids.as_deref(),
             )
             .await
         }
@@ -101,8 +101,8 @@ async fn create(
     confirm: &ConfirmFn,
     name: Option<&str>,
     description: Option<&str>,
-    owner_ids: &[u64],
-    workspace_ids: &[u64],
+    owner_ids: Option<&[u64]>,
+    workspace_ids: Option<&[u64]>,
 ) -> Result<()> {
     debug!("register create");
     if !confirm("POST", "/risk-registers")? {
@@ -115,11 +115,12 @@ async fn create(
     if let Some(v) = description {
         body["description"] = json!(v);
     }
-    if !owner_ids.is_empty() {
-        body["ownerIds"] = json!(owner_ids);
+    // None = field omitted (not provided); Some([]) = send empty array to clear.
+    if let Some(ids) = owner_ids {
+        body["ownerIds"] = json!(ids);
     }
-    if !workspace_ids.is_empty() {
-        body["workspaceIds"] = json!(workspace_ids);
+    if let Some(ids) = workspace_ids {
+        body["workspaceIds"] = json!(ids);
     }
     let result = client.post("/risk-registers", body).await?;
     print_value(&result, &config.output_format);
@@ -134,8 +135,8 @@ async fn update(
     register_id: &str,
     name: Option<&str>,
     description: Option<&str>,
-    owner_ids: &[u64],
-    workspace_ids: &[u64],
+    owner_ids: Option<&[u64]>,
+    workspace_ids: Option<&[u64]>,
 ) -> Result<()> {
     debug!(register_id, "register update");
     if !confirm("PUT", &format!("/risk-registers/{}", register_id))? {
@@ -148,11 +149,12 @@ async fn update(
     if let Some(v) = description {
         body["description"] = json!(v);
     }
-    if !owner_ids.is_empty() {
-        body["ownerIds"] = json!(owner_ids);
+    // None = field omitted (not provided); Some([]) = send empty array to clear.
+    if let Some(ids) = owner_ids {
+        body["ownerIds"] = json!(ids);
     }
-    if !workspace_ids.is_empty() {
-        body["workspaceIds"] = json!(workspace_ids);
+    if let Some(ids) = workspace_ids {
+        body["workspaceIds"] = json!(ids);
     }
     let result = client.put(&format!("/risk-registers/{}", register_id), body).await?;
     print_value(&result, &config.output_format);

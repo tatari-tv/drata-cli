@@ -95,12 +95,21 @@ const REQUEST_TIMEOUT_SECS: u64 = 30;
 /// returns a null cursor cannot loop forever.
 const MAX_PAGES: u32 = 10_000;
 
-/// Resolve a region string to its base URL. Unknown regions fall back to US.
-pub fn base_url_for_region(region: &str) -> &'static str {
+/// Resolve a region string to its base URL. Returns `Err` for unknown regions
+/// so the bearer token is never sent to an unintended endpoint.
+pub fn base_url_for_region(region: &str) -> Result<&'static str> {
     match region.to_lowercase().as_str() {
-        "eu" => EU_BASE_URL,
-        "apac" => APAC_BASE_URL,
-        _ => US_BASE_URL,
+        "us" => Ok(US_BASE_URL),
+        "eu" => Ok(EU_BASE_URL),
+        "apac" => Ok(APAC_BASE_URL),
+        other => {
+            bail!(
+                "Unknown region {:?}. Valid values: us, eu, apac. \
+                 Set the correct region in your profile (`drata login --region <region>`) \
+                 or via --region / DRATA_REGION.",
+                other
+            )
+        }
     }
 }
 
@@ -116,9 +125,11 @@ pub struct DrataClient {
 impl DrataClient {
     /// Build a client for the given region. `allow_writes` is a property of the
     /// resolved credential: a non-GET request on a `false` client fails closed.
+    /// Returns `Err` if `region` is not a known value (us/eu/apac).
     #[instrument(skip(api_key), fields(region, allow_writes))]
     pub fn new(api_key: String, region: &str, allow_writes: bool) -> Result<Self> {
         debug!(region, allow_writes, "building DrataClient");
+        let base_url = base_url_for_region(region)?;
         let http = Client::builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()
@@ -126,7 +137,7 @@ impl DrataClient {
 
         Ok(Self {
             http,
-            base_url: base_url_for_region(region).to_string(),
+            base_url: base_url.to_string(),
             api_key,
             allow_writes,
         })
@@ -219,20 +230,20 @@ impl DrataClient {
         }
     }
 
-    /// Send a multipart/form-data POST request. Used for the 10 upload
-    /// operations identified by `spec::Operation.multipart`. The write guardrail
-    /// applies: the client must be write-enabled. The file is read from `file_path`
-    /// and sent as the `file` part; any extra JSON fields are sent as the `data`
-    /// part (a serialized JSON string).
-    #[instrument(skip(self, file_path), fields(%path))]
-    pub async fn post_multipart(&self, path: &str, file_path: impl AsRef<Path>) -> Result<Value> {
+    /// Send a multipart/form-data request. Used for the upload operations
+    /// identified by `spec::Operation.multipart`. The write guardrail applies:
+    /// the client must be write-enabled. The file is read from `file_path` and
+    /// sent as the `file` part. Retries on 429 with `Retry-After` (bounded),
+    /// matching `send_inner`'s contract.
+    #[instrument(skip(self, file_path), fields(%method, %path))]
+    pub async fn send_multipart(&self, method: Method, path: &str, file_path: impl AsRef<Path>) -> Result<Value> {
         let file_path = file_path.as_ref();
-        debug!(path, file = %file_path.display(), "multipart POST");
+        debug!(%method, path, file = %file_path.display(), "multipart request");
 
         if !self.allow_writes {
-            warn!(%path, "write blocked: credential not write-enabled");
+            warn!(%method, %path, "write blocked: credential not write-enabled");
             return Err(WriteGuardError {
-                method: "POST".to_string(),
+                method: method.to_string(),
                 path: path.to_string(),
             }
             .into());
@@ -247,46 +258,86 @@ impl DrataClient {
             .to_string();
         let mime = mime_guess::from_path(file_path).first_or_octet_stream().to_string();
 
-        debug!(bytes = file_bytes.len(), mime, "file loaded for multipart upload");
-
-        let part = reqwest::multipart::Part::bytes(file_bytes)
-            .file_name(file_name)
-            .mime_str(&mime)
-            .context("Failed to set MIME type on multipart part")?;
-        let form = reqwest::multipart::Form::new().part("file", part);
+        debug!(bytes = file_bytes.len(), %mime, "file loaded for multipart upload");
 
         let url = format!("{}{}", self.base_url, path);
-        let resp = self
-            .http
-            .post(&url)
-            .header("Accept", "application/json")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .multipart(form)
-            .send()
-            .await
-            .context("Multipart HTTP request failed")?;
+        let mut attempts = 0u32;
 
-        let status = resp.status();
+        loop {
+            attempts += 1;
 
-        if status == StatusCode::NO_CONTENT {
-            debug!("multipart 204 No Content");
-            return Ok(Value::Null);
-        }
+            let part = reqwest::multipart::Part::bytes(file_bytes.clone())
+                .file_name(file_name.clone())
+                .mime_str(&mime)
+                .context("Failed to set MIME type on multipart part")?;
+            let form = reqwest::multipart::Form::new().part("file", part);
 
-        if !status.is_success() {
-            let error_body = resp.text().await.unwrap_or_default();
-            debug!(%url, %status, body = %error_body, "multipart API request failed");
-            return Err(ApiError {
-                status,
-                formatted: format_api_error(&Method::POST, &url, status, &error_body),
-                body: error_body,
+            let resp = self
+                .http
+                .request(method.clone(), &url)
+                .header("Accept", "application/json")
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .multipart(form)
+                .send()
+                .await
+                .context("Multipart HTTP request failed")?;
+
+            let status = resp.status();
+
+            if status == StatusCode::TOO_MANY_REQUESTS {
+                if attempts > MAX_RETRY_ATTEMPTS {
+                    bail!("Rate limited after {} attempts (multipart)", MAX_RETRY_ATTEMPTS);
+                }
+                let delay = resp
+                    .headers()
+                    .get("Retry-After")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(DEFAULT_RETRY_DELAY_SECS);
+                warn!(
+                    delay,
+                    attempts,
+                    max = MAX_RETRY_ATTEMPTS,
+                    "rate limited on multipart, retrying"
+                );
+                sleep(Duration::from_secs(delay)).await;
+                continue;
             }
-            .into());
-        }
 
-        let json: Value = resp.json().await.context("Failed to parse multipart response JSON")?;
-        debug!(%status, "multipart request succeeded");
-        Ok(json)
+            if status == StatusCode::NO_CONTENT {
+                debug!("multipart 204 No Content");
+                return Ok(Value::Null);
+            }
+
+            if !status.is_success() {
+                let error_body = resp.text().await.unwrap_or_default();
+                debug!(%method, %url, %status, body = %error_body, "multipart API request failed");
+                return Err(ApiError {
+                    status,
+                    formatted: format_api_error(&method, &url, status, &error_body),
+                    body: error_body,
+                }
+                .into());
+            }
+
+            let json: Value = resp.json().await.context("Failed to parse multipart response JSON")?;
+            debug!(%status, "multipart request succeeded");
+            return Ok(json);
+        }
+    }
+
+    /// POST a multipart/form-data request. Convenience wrapper around
+    /// `send_multipart` for upload operations that use POST.
+    #[instrument(skip(self, file_path), fields(%path))]
+    pub async fn post_multipart(&self, path: &str, file_path: impl AsRef<Path>) -> Result<Value> {
+        self.send_multipart(Method::POST, path, file_path).await
+    }
+
+    /// PUT a multipart/form-data request. Used for update operations where the
+    /// spec specifies a PUT with `multipart/form-data` (e.g. evidence update).
+    #[instrument(skip(self, file_path), fields(%path))]
+    pub async fn put_multipart(&self, path: &str, file_path: impl AsRef<Path>) -> Result<Value> {
+        self.send_multipart(Method::PUT, path, file_path).await
     }
 
     #[instrument(skip(self))]
@@ -348,11 +399,13 @@ impl DrataClient {
         loop {
             pages += 1;
             if pages > MAX_PAGES {
-                warn!(
-                    path,
-                    pages, "cursor pagination hit MAX_PAGES bound; returning partial results"
+                bail!(
+                    "cursor pagination exceeded MAX_PAGES ({}) for path {}; \
+                     the server may not be returning a terminal null cursor. \
+                     Use --all for streaming instead of buffering.",
+                    MAX_PAGES,
+                    path
                 );
-                break;
             }
 
             let paginated = match &cursor {
@@ -378,8 +431,13 @@ impl DrataClient {
                     // No-progress guard: a server that echoes the same cursor
                     // forever would otherwise loop until MAX_PAGES.
                     if !seen_cursors.insert(n.clone()) {
-                        warn!(path, cursor = %n, "repeated cursor detected; aborting pagination");
-                        break;
+                        bail!(
+                            "repeated cursor {:?} detected on path {}; \
+                             server is not making forward progress. Aborting to avoid \
+                             returning silently truncated results.",
+                            n,
+                            path
+                        );
                     }
                     cursor = Some(n);
                 }
@@ -409,8 +467,12 @@ impl DrataClient {
         loop {
             pages += 1;
             if pages > MAX_PAGES {
-                warn!(path, pages, "stream_all hit MAX_PAGES bound; partial results streamed");
-                break;
+                bail!(
+                    "stream_all exceeded MAX_PAGES ({}) for path {}; \
+                     the server may not be returning a terminal null cursor.",
+                    MAX_PAGES,
+                    path
+                );
             }
 
             let paginated = match &cursor {
@@ -438,8 +500,12 @@ impl DrataClient {
             match next {
                 Some(n) => {
                     if !seen_cursors.insert(n.clone()) {
-                        warn!(path, cursor = %n, "repeated cursor detected in stream_all; aborting");
-                        break;
+                        bail!(
+                            "repeated cursor {:?} detected in stream_all on path {}; \
+                             server is not making forward progress.",
+                            n,
+                            path
+                        );
                     }
                     cursor = Some(n);
                 }

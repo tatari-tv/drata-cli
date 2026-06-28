@@ -928,12 +928,14 @@ pub enum RegisterAction {
         /// Description
         #[arg(long)]
         description: Option<String>,
-        /// Owner personnel IDs (space-separated or repeated)
-        #[arg(long, num_args = 1..)]
-        owner_ids: Vec<u64>,
-        /// Workspace IDs to associate (space-separated or repeated)
-        #[arg(long, num_args = 1..)]
-        workspace_ids: Vec<u64>,
+        /// Owner personnel IDs (space-separated or repeated).
+        /// Omit to leave unset; pass with no values (`--owner-ids`) to clear.
+        #[arg(long, num_args = 0..)]
+        owner_ids: Option<Vec<u64>>,
+        /// Workspace IDs to associate (space-separated or repeated).
+        /// Omit to leave unset; pass with no values (`--workspace-ids`) to clear.
+        #[arg(long, num_args = 0..)]
+        workspace_ids: Option<Vec<u64>>,
         /// Print a JSON skeleton and exit (no API call)
         #[arg(long)]
         example: bool,
@@ -946,10 +948,14 @@ pub enum RegisterAction {
         name: Option<String>,
         #[arg(long)]
         description: Option<String>,
-        #[arg(long, num_args = 1..)]
-        owner_ids: Vec<u64>,
-        #[arg(long, num_args = 1..)]
-        workspace_ids: Vec<u64>,
+        /// Owner personnel IDs (space-separated or repeated).
+        /// Omit to leave unset; pass with no values (`--owner-ids`) to clear all.
+        #[arg(long, num_args = 0..)]
+        owner_ids: Option<Vec<u64>>,
+        /// Workspace IDs to associate (space-separated or repeated).
+        /// Omit to leave unset; pass with no values (`--workspace-ids`) to clear all.
+        #[arg(long, num_args = 0..)]
+        workspace_ids: Option<Vec<u64>>,
     },
     /// Delete a risk register by ID
     Remove {

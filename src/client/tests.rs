@@ -19,12 +19,23 @@ fn test_with_base_url() {
 
 #[test]
 fn test_base_url_for_region() {
-    assert_eq!(base_url_for_region("us"), US_BASE_URL);
-    assert_eq!(base_url_for_region("eu"), EU_BASE_URL);
-    assert_eq!(base_url_for_region("EU"), EU_BASE_URL);
-    assert_eq!(base_url_for_region("apac"), APAC_BASE_URL);
-    // Unknown region falls back to US.
-    assert_eq!(base_url_for_region("mars"), US_BASE_URL);
+    assert_eq!(base_url_for_region("us").unwrap(), US_BASE_URL);
+    assert_eq!(base_url_for_region("eu").unwrap(), EU_BASE_URL);
+    assert_eq!(base_url_for_region("EU").unwrap(), EU_BASE_URL);
+    assert_eq!(base_url_for_region("apac").unwrap(), APAC_BASE_URL);
+    // Unknown region returns an error.
+    assert!(base_url_for_region("mars").is_err());
+}
+
+#[test]
+fn test_new_rejects_unknown_region() {
+    let result = DrataClient::new("test-key".to_string(), "mars", false);
+    assert!(result.is_err(), "unknown region should return Err");
+    if let Err(e) = result {
+        let msg = e.to_string();
+        assert!(msg.contains("mars"), "error should name the bad region: {msg}");
+        assert!(msg.contains("us, eu, apac"), "error should list valid regions: {msg}");
+    }
 }
 
 #[test]
@@ -179,11 +190,14 @@ async fn stream_all_aborts_on_repeated_cursor() {
 
     let client = ro_client_for_stream(&server).await;
     let mut out: Vec<u8> = Vec::new();
-    // Should not hang; repeated cursor breaks out after seeing it twice.
-    let count = client.stream_all("/items", &mut out).await.unwrap();
-    // First page item + second page item (same cursor => abort before third)
-    assert!(count >= 1, "should have streamed at least one item");
-    assert!(count <= 5, "should not have looped forever: {count}");
+    // A repeated cursor now returns Err (fail-closed) instead of partial data.
+    let result = client.stream_all("/items", &mut out).await;
+    assert!(result.is_err(), "repeated cursor should return Err, not partial data");
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("repeated cursor"),
+        "error should mention repeated cursor: {msg}"
+    );
 }
 
 #[tokio::test]
