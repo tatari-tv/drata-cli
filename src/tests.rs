@@ -76,16 +76,18 @@ fn example_bypasses_required_path_positional() {
         "workspace_id is required unless --example"
     );
 
-    // Same contract for risk/framework/evidence create.
+    // Same contract for risk/framework/evidence create: parses without the
+    // positional AND actually yields a skeleton via example_if_requested.
     for argv in [
         ["drata", "risk", "create", "--example"],
         ["drata", "framework", "create", "--example"],
         ["drata", "evidence", "create", "--example"],
     ] {
-        assert!(
-            Cli::try_parse_from(argv).is_ok(),
-            "{argv:?} should parse with --example"
-        );
+        let cli = Cli::try_parse_from(argv).unwrap_or_else(|e| panic!("{argv:?} should parse with --example: {e}"));
+        let skeleton = example_if_requested(&cli)
+            .unwrap_or_else(|| panic!("{argv:?} should produce a skeleton"))
+            .unwrap_or_else(|e| panic!("{argv:?} skeleton generation failed: {e}"));
+        assert!(!skeleton.is_empty(), "{argv:?} skeleton must be non-empty");
     }
 }
 
