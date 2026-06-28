@@ -1,0 +1,37 @@
+[package]
+name = "drata-cli"
+version = "0.1.0"
+edition = "2024"
+authors = ["Scott Idler <scott.idler@tatari.tv>"]
+build = "build.rs"
+description = "Drata compliance API CLI: curated typed commands plus a spec-driven raw passthrough"
+
+# The crate is `drata-cli` but the installed binary is `drata`.
+[[bin]]
+name = "drata"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+dirs = "6.0.0"
+eyre = "0.6.12"
+mime_guess = "2.0.5"
+percent-encoding = "2.3.2"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "http2", "charset", "multipart"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+terminal_size = "0.4.4"
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+uuid = { version = "1.23.4", features = ["v4"] }
+# Dependencies will be added via cargo add
+
+[dev-dependencies]
+# tempfile is used by the generated config/tests.rs and lib tests
+tempfile = "3"
+wiremock = "0.6.5"
+
+[build-dependencies]
+# For build.rs if needed

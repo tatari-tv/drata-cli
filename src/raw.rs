@@ -1,0 +1,175 @@
+//! `drata raw <METHOD> <path> ...` - the gated generic passthrough namespace.
+//!
+//! Reaches any of the 167 operations by HTTP method + path template, for the
+//! long tail and power users. Non-GET requests flow through the same write
+//! guardrail as the curated verbs (enforced in `client::send_inner`), so a
+//! `raw POST` on a non-write-enabled credential fails closed exactly like a
+//! curated create.
+//!
+//! `--data` accepts inline JSON, `@file` (read a file), or `-` (read stdin).
+//! `--file <path>` sends a multipart/form-data request (for the 10 upload ops).
+//! `--query k=v` (repeated or space-separated) appends percent-encoded query
+//! parameters. `--example` prints the operation's request-body skeleton from
+//! the spec and exits before any API/auth setup.
+//!
+//! Phase 4: confirm-on-mutation gate (all non-GET through `raw` now prompts).
+
+use crate::cli::RawArgs;
+use crate::client::{DrataClient, Multipart, encode_query};
+use crate::config::Config;
+use crate::confirm::ConfirmFn;
+use crate::output::print_value;
+use crate::spec;
+use eyre::{Context, Result, bail, eyre};
+use serde_json::Value;
+use std::io::Read;
+use tracing::{debug, instrument, warn};
+
+/// Returns the spec-derived `--example` skeleton if this is a `raw --example`
+/// request, else `None`. Checked before config/auth load (no key needed).
+///
+/// Unlike a curated `--example` (which is infallible), this can fail if the
+/// method/path pair is unknown or has no JSON body; the caller surfaces that as
+/// a plain message and exits.
+pub fn example_if_requested(args: &RawArgs) -> Option<Result<String>> {
+    if !args.example {
+        return None;
+    }
+    Some(example_skeleton(&args.method, &args.path))
+}
+
+/// Resolve the `--example` skeleton for `method`+`path`, erroring with a clear
+/// message when the operation is unknown or carries no JSON request body.
+fn example_skeleton(method: &str, path: &str) -> Result<String> {
+    match spec::example_for_operation(method, path)? {
+        Some(skeleton) => Ok(skeleton),
+        None => {
+            // Distinguish "no such operation" from "operation has no JSON body".
+            match spec::find_by_method_path(method, path)? {
+                Some(_) => Err(eyre!(
+                    "`{} {}` has no JSON request body (it may be a GET or a multipart upload)",
+                    method.to_uppercase(),
+                    path
+                )),
+                None => Err(eyre!(
+                    "no operation `{} {}` in the spec; check the method and path template (e.g. /vendors/{{id}})",
+                    method.to_uppercase(),
+                    path
+                )),
+            }
+        }
+    }
+}
+
+/// Dispatch a `drata raw` invocation: build the path (with query params), read
+/// the body if any, and send through the client's generic `raw` verb. Non-GET
+/// requests prompt for confirmation unless `--yes` was passed (confirm is
+/// already baked into the `ConfirmFn`).
+#[instrument(skip(client, config, confirm), fields(method = %args.method, path = %args.path))]
+pub async fn handle(args: &RawArgs, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
+    debug!(
+        method = %args.method,
+        path = %args.path,
+        query_len = args.query.len(),
+        has_data = args.data.is_some(),
+        file_count = args.file.len(),
+        "raw request"
+    );
+
+    // Validate against the spec when possible. An unknown method+path is a warn,
+    // not a hard error: the spec is an aid, and a power user may legitimately hit
+    // a path the committed snapshot does not yet describe.
+    if spec::find_by_method_path(&args.method, &args.path)?.is_none() {
+        warn!(method = %args.method, path = %args.path, "method+path not found in spec; sending anyway");
+    }
+
+    // Confirm before any non-GET mutation.
+    let upper = args.method.to_uppercase();
+    if upper != "GET" && !confirm(&upper, &args.path)? {
+        bail!("aborted");
+    }
+
+    let path = build_path(&args.path, &args.query)?;
+
+    // Multipart upload takes priority over --data when both somehow supplied.
+    if !args.file.is_empty() {
+        // The spec's multipart operations are POST (uploads) and PUT (evidence
+        // update), so accept both rather than POST-only.
+        let field = args.file_field.as_deref().unwrap_or("file");
+        let mut form = Multipart::new();
+        for file_path in &args.file {
+            form.add_file(field, file_path.clone());
+        }
+        for kv in &args.field {
+            let (key, value) = kv
+                .split_once('=')
+                .ok_or_else(|| eyre!("invalid --field `{}`: expected key=value", kv))?;
+            form.add_field(key, value);
+        }
+        let result = match upper.as_str() {
+            "POST" => client.post_multipart(&path, &form).await?,
+            "PUT" => client.put_multipart(&path, &form).await?,
+            other => bail!("--file (multipart upload) is only supported for POST and PUT requests (got {other})"),
+        };
+        print_value(&result, &config.output_format);
+        return Ok(());
+    }
+
+    let body = match &args.data {
+        Some(spec_data) => Some(read_data(spec_data).context("Failed to read --data")?),
+        None => None,
+    };
+
+    let result = client.raw(&args.method, &path, body).await?;
+    print_value(&result, &config.output_format);
+    Ok(())
+}
+
+/// Append `key=value` query parameters (percent-encoded) to a path template.
+/// Each entry must contain a single `=`. The path may already carry a `?`.
+fn build_path(path: &str, query: &[String]) -> Result<String> {
+    if query.is_empty() {
+        return Ok(path.to_string());
+    }
+    let mut out = String::from(path);
+    let mut sep = if path.contains('?') { '&' } else { '?' };
+    for entry in query {
+        let (key, value) = entry
+            .split_once('=')
+            .ok_or_else(|| eyre!("invalid --query `{}`: expected key=value", entry))?;
+        out.push(sep);
+        out.push_str(&encode_query(key));
+        out.push('=');
+        out.push_str(&encode_query(value));
+        sep = '&';
+    }
+    debug!(query_count = query.len(), "built query string");
+    Ok(out)
+}
+
+/// Resolve a `--data` argument into a JSON value. Accepts:
+/// - `@path`  -> read the file at `path`,
+/// - `-`      -> read stdin,
+/// - anything else -> treat as inline JSON.
+fn read_data(data: &str) -> Result<Value> {
+    let raw = if data == "-" {
+        debug!("reading --data from stdin");
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .context("Failed to read JSON from stdin")?;
+        buf
+    } else if let Some(file) = data.strip_prefix('@') {
+        debug!(file, "reading --data from file");
+        std::fs::read_to_string(file).with_context(|| format!("Failed to read --data file `{}`", file))?
+    } else {
+        // Inline JSON. Preview length only, never the full body.
+        debug!(bytes = data.len(), "parsing inline --data JSON");
+        data.to_string()
+    };
+
+    serde_json::from_str(&raw).context("--data is not valid JSON")
+}
+
+#[cfg(test)]
+mod tests;
