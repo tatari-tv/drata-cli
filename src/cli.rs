@@ -136,6 +136,31 @@ pub enum Commands {
         #[command(subcommand)]
         action: WorkspaceAction,
     },
+    /// Manage risk registers (list/get/create/update/delete)
+    Register {
+        #[command(subcommand)]
+        action: RegisterAction,
+    },
+    /// List and inspect users and roles (read-only)
+    User {
+        #[command(subcommand)]
+        action: UserAction,
+    },
+    /// Inspect monitoring tests in a workspace
+    Monitor {
+        #[command(subcommand)]
+        action: MonitorAction,
+    },
+    /// List and inspect audits in a workspace (read-only)
+    Audit {
+        #[command(subcommand)]
+        action: AuditAction,
+    },
+    /// List and inspect events (read-only)
+    Event {
+        #[command(subcommand)]
+        action: EventAction,
+    },
     /// Generic passthrough to any operation: `raw <METHOD> <path> ...`
     Raw(RawArgs),
 }
@@ -880,4 +905,191 @@ pub enum CompanyAction {
 pub enum WorkspaceAction {
     /// List all workspaces
     List,
+}
+
+// ---------------------------------------------------------------------------
+// Risk Registers
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum RegisterAction {
+    /// List all risk registers
+    List,
+    /// Get a risk register by ID
+    Get {
+        /// Risk register ID
+        register_id: String,
+    },
+    /// Create a risk register
+    Create {
+        /// Register name
+        #[arg(long)]
+        name: Option<String>,
+        /// Description
+        #[arg(long)]
+        description: Option<String>,
+        /// Owner personnel IDs (space-separated or repeated)
+        #[arg(long, num_args = 1..)]
+        owner_ids: Vec<u64>,
+        /// Workspace IDs to associate (space-separated or repeated)
+        #[arg(long, num_args = 1..)]
+        workspace_ids: Vec<u64>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
+    },
+    /// Update a risk register
+    Update {
+        /// Risk register ID
+        register_id: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long, num_args = 1..)]
+        owner_ids: Vec<u64>,
+        #[arg(long, num_args = 1..)]
+        workspace_ids: Vec<u64>,
+    },
+    /// Delete a risk register by ID
+    Remove {
+        /// Risk register ID
+        register_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Users and Roles
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum UserAction {
+    /// List all users
+    List {
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+    },
+    /// Get a user by ID
+    Get {
+        /// User ID
+        user_id: String,
+    },
+    /// List all roles
+    Roles,
+    /// Get a role by ID
+    Role {
+        /// Role ID
+        role_id: String,
+    },
+    /// List users assigned to a role
+    RoleUsers {
+        /// Role ID
+        role_id: String,
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Monitoring Tests
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum MonitorAction {
+    /// List monitoring tests in a workspace
+    List {
+        /// Workspace ID
+        workspace_id: String,
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+    },
+    /// Get a monitoring test by ID
+    Get {
+        /// Workspace ID
+        workspace_id: String,
+        /// Test ID
+        test_id: String,
+    },
+    /// Update a monitoring test
+    Update {
+        /// Workspace ID
+        workspace_id: String,
+        /// Test ID
+        test_id: String,
+        /// Display name for the test
+        #[arg(long)]
+        name: Option<String>,
+        /// Enable or disable the test
+        #[arg(long)]
+        enabled: Option<bool>,
+        /// Description
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// List exclusions for a monitoring test
+    Exclusions {
+        /// Workspace ID
+        workspace_id: String,
+        /// Test ID
+        test_id: String,
+    },
+    /// List recent failures for a monitoring test
+    Failures {
+        /// Workspace ID
+        workspace_id: String,
+        /// Test ID
+        test_id: String,
+    },
+    /// List recent passes for a monitoring test
+    Passes {
+        /// Workspace ID
+        workspace_id: String,
+        /// Test ID
+        test_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Audits
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum AuditAction {
+    /// List audits in a workspace
+    List {
+        /// Workspace ID
+        workspace_id: String,
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+    },
+    /// Get an audit by ID
+    Get {
+        /// Workspace ID
+        workspace_id: String,
+        /// Audit ID
+        audit_id: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug)]
+pub enum EventAction {
+    /// List all events
+    List {
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+    },
+    /// Get an event by ID
+    Get {
+        /// Event ID
+        event_id: String,
+    },
 }

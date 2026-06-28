@@ -308,3 +308,31 @@ Append-only. One section per phase.
 
 - **Live recording pass for verify harness.** The disposable verification harness (`src/verify.rs`) must NOT be run in CI. It is intended as a one-time manual verification step by a user with a write-enabled Drata credential. This has not been executed. Before any production use, a human should run `drata verify` against a real tenant with a known-clean test environment and confirm that the `zzz-clitest-` vendor was created, verified, and deleted. See Phase 5 for the `verify` subcommand wiring.
 - **`--file` support on `raw` is POST-only.** The current implementation rejects `--file` for any method other than POST with a clear error message. If the Drata API adds multipart PUT endpoints in the future, this gate should be relaxed. No such endpoints exist in the current spec snapshot.
+
+## Phase 5: Long tail + CI + polish
+
+### Design decisions
+
+- **Five new tags curated; all others intentionally deferred to raw.** Tags chosen for curation: Risk Registers (5 ops, required to discover riskRegisterId which was an open question since Phase 1), Users and Roles (5 ops, read-only, broadly useful), Monitoring Tests (6 ops, list/get/update + sub-collections), Audits (2 ops, read-only workspace-scoped), Events (2 ops, read-only). Total curated ops raised from 50 to 70 (41.9%). Tags deliberately left raw-only are documented in the README and the notes below.
+- **`register` as the module name for Risk Registers.** The spec tag is "Risk Registers" (two words). Per the decompose-compound-names rule, `risk` is already taken; the second word `register` is the single-word module. The CLI command is `drata register ...`; `--help` says "Manage risk registers" to preserve discoverability. (`src/resources/register.rs`)
+- **`user` module covers both Users and Roles.** The spec has two tags ("Users and Roles" and related sub-resources). Both are read-only and naturally grouped: `drata user list/get` for users, `drata user roles/role/role-users` for roles. No curation needed for user documents or assigned policies (narrow, raw sufficient). (`src/resources/user.rs`)
+- **Table dispatch extended with 7 new shape detectors.** `output::table::pick_renderer` now detects risk registers (`owners` + `workspaces`), users (`firstName` + `lastName`), roles (`role` + `permissions`), monitors (`checkResultStatus` or `checkStatus`), audits (`auditType` or `frameworkType`), events (`requestDescription` or `testName`). Dispatch ordering keeps more specific detectors before general ones to prevent misrouting. (`src/output/table.rs`)
+- **`rustfmt.toml` already had `max_width = 120`.** The design doc specifies this value; it was confirmed present from Phase 1 - no adjustment needed.
+- **README examples sourced entirely from offline `--help` and `--example` output.** No live API calls were made. Every command example in the README was verified by running the binary with `--help` or `--example` flags. The curated-coverage percentage (42%) and the note about deferred live verification are accurate as of this phase.
+
+### Deviations
+
+- **Audit Requests tag deferred (2 ops).** The design doc named audit-requests as a candidate to defer to raw. These 2 GET ops require knowing both workspaceId and auditId - the audit list/get commands now provide workspaceId/auditId, but the requests sub-resource is still deferred. It is reachable via `drata raw GET /workspaces/{workspaceId}/audits/{auditId}/requests`.
+- **Events download-job ops deferred (2 ops).** The Events tag has 4 ops total; list and get are curated. The 2 download-job ops (`POST /events/{eventId}/download-jobs`, `GET /events/{eventId}/download-jobs/{jobId}`) require a multi-step polling workflow unsuitable for a simple curated verb. Deferred to raw.
+
+### Tradeoffs
+
+- **Curating 5 new tags vs stopping at 0 additional.** The design doc says "curate as friction warrants." Risk Registers specifically unlock the `risk` command by providing discoverable register IDs - zero friction. Users and Roles are pure read and frequently needed for `--owner-id` lookups in other verbs. Monitoring Tests and Audits add operational value for compliance checks. Events are read-only and complete a natural audit trail. None of these required complex enum promotion or multipart handling.
+- **20 new ops curated vs stopping earlier.** Stopping at monitoring exclusions/failures/passes adds 3 ops but rounds out the monitoring surface (exclusions are frequently queried by compliance staff). The cost was minimal (3 extra match arms, no new types).
+- **Deferred tags explicitly documented in README and notes vs silent omission.** Making the raw-only decision explicit in both the README and the notes means users know upfront why certain tags are not curated and how to reach them via `raw`. This is the "raw as a documented escape hatch" principle from the design doc made visible to end users.
+
+### Open questions
+
+- **Live verification pass still pending.** The `drata verify` harness (Phase 4) has not been run against a real tenant. This remains the same open question from Phase 4; it is a manual step requiring a write-enabled credential and a clean test environment. The README documents this.
+- **`drata register` vs `drata risk-register`.** The current command is `drata register` (single word, per the naming rule). If users expect `risk-register` (matching the API path prefix), this could be an ergonomics issue. No action taken - single-word names are the rule; change only if user feedback warrants it.
+- **`--from-file` on register/monitor/audit/event create/update verbs.** Phase 4 added `--from-file` globally but the new Phase 5 modules (register, monitor) did not implement it on their update verbs. Monitor update body is small (name/enabled/description); register update body includes arrays (ownerIds/workspaceIds) which are awkward via CLI flags but fine via `raw`. Adding `--from-file` to these is a low-priority follow-up.

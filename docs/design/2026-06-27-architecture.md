@@ -1,6 +1,6 @@
 # Drata CLI - architecture
 
-- Status: draft (revised post-review-panel)
+- Status: implemented (revised post-review-panel)
 - Date: 2026-06-27
 - Owner: Scott Idler
 - Repo: `tatari-tv/drata-cli` (Rust port of the upstream TypeScript `drata-cli`)

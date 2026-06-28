@@ -36,6 +36,7 @@ pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
         Commands::Evidence { action } => resources::evidence::example_if_requested(action),
         Commands::Framework { action } => resources::framework::example_if_requested(action),
         Commands::Asset { action } => resources::asset::example_if_requested(action),
+        Commands::Register { action } => resources::register::example_if_requested(action),
         Commands::Raw(args) => raw::example_if_requested(args),
         _ => None,
     }
@@ -112,6 +113,21 @@ pub async fn run(cli: &Cli, config: &Config, confirm: ConfirmFn) -> Result<()> {
         }
         Commands::Workspace { action } => {
             resources::workspace::handle(action, &client, config).await?;
+        }
+        Commands::Register { action } => {
+            resources::register::handle(action, &client, config, &confirm).await?;
+        }
+        Commands::User { action } => {
+            resources::user::handle(action, &client, config).await?;
+        }
+        Commands::Monitor { action } => {
+            resources::monitor::handle(action, &client, config, &confirm).await?;
+        }
+        Commands::Audit { action } => {
+            resources::audit::handle(action, &client, config).await?;
+        }
+        Commands::Event { action } => {
+            resources::event::handle(action, &client, config).await?;
         }
         Commands::Raw(args) => {
             raw::handle(args, &client, config, &confirm).await?;

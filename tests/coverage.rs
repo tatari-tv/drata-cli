@@ -86,6 +86,31 @@ const CURATED: &[(&str, &str)] = &[
     ("GET", "/company"),
     // Phase 3: workspaces
     ("GET", "/workspaces"),
+    // Phase 5: risk registers
+    ("GET", "/risk-registers"),
+    ("POST", "/risk-registers"),
+    ("GET", "/risk-registers/{riskRegisterId}"),
+    ("PUT", "/risk-registers/{riskRegisterId}"),
+    ("DELETE", "/risk-registers/{riskRegisterId}"),
+    // Phase 5: users and roles
+    ("GET", "/users"),
+    ("GET", "/users/{userId}"),
+    ("GET", "/roles"),
+    ("GET", "/roles/{roleId}"),
+    ("GET", "/roles/{roleId}/users"),
+    // Phase 5: monitoring tests
+    ("GET", "/workspaces/{workspaceId}/monitoring-tests"),
+    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}"),
+    ("PUT", "/workspaces/{workspaceId}/monitoring-tests/{testId}"),
+    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}/exclusions"),
+    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}/failures"),
+    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}/passes"),
+    // Phase 5: audits
+    ("GET", "/workspaces/{workspaceId}/audits"),
+    ("GET", "/workspaces/{workspaceId}/audits/{auditId}"),
+    // Phase 5: events
+    ("GET", "/events"),
+    ("GET", "/events/{eventId}"),
 ];
 
 fn is_curated(op: &Operation) -> bool {
@@ -135,11 +160,11 @@ fn reports_curated_coverage_percentage() {
     let curated = ops.iter().filter(|op| is_curated(op)).count();
     let pct = (curated as f64 / total as f64) * 100.0;
 
-    // Phase 3 raised the bar from 8 (Phase 1 baseline) to the Phase 3 set.
+    // Phase 5 raised the bar from 50 (Phase 3 baseline) to the Phase 5 set.
     // This is a floor, not an equality: later phases raise it further.
     assert!(
-        curated >= 50,
-        "curated coverage dropped below the Phase 3 baseline of 50 ops (got {})",
+        curated >= 70,
+        "curated coverage dropped below the Phase 5 baseline of 70 ops (got {})",
         curated
     );
     assert_eq!(total, 167);

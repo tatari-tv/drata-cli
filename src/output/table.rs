@@ -90,6 +90,30 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("primary") && obj.contains_key("name") {
         return Some(render_workspaces);
     }
+    // Risk register rows carry `owners` (array) alongside `workspaces` but no `primary`.
+    if obj.contains_key("owners") && obj.contains_key("workspaces") {
+        return Some(render_registers);
+    }
+    // User rows carry `firstName` + `lastName` (distinct from personnel `employmentStatus`).
+    if obj.contains_key("firstName") && obj.contains_key("lastName") {
+        return Some(render_users);
+    }
+    // Role rows carry `role` (the role name string) + `permissions`.
+    if obj.contains_key("role") && obj.contains_key("permissions") {
+        return Some(render_roles);
+    }
+    // Monitor/monitoring-test rows carry `checkResultStatus` or `checkStatus`.
+    if obj.contains_key("checkResultStatus") || obj.contains_key("checkStatus") {
+        return Some(render_monitors);
+    }
+    // Audit rows carry `auditType` or `frameworkType`.
+    if obj.contains_key("auditType") || obj.contains_key("frameworkType") {
+        return Some(render_audits);
+    }
+    // Event rows carry `requestDescription` or `testName` (both unique to events).
+    if obj.contains_key("requestDescription") || obj.contains_key("testName") {
+        return Some(render_events);
+    }
     None
 }
 
@@ -262,6 +286,94 @@ fn render_workspaces(rows: &[Value], width: usize) -> String {
             |r| scalar_field(r, "id"),
             |r| str_field(r, "name"),
             |r| bool_field(r, "primary"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_registers(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "DESCRIPTION", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "description"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_users(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "EMAIL", "FIRST_NAME", "LAST_NAME", "JOB_TITLE"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "email"),
+            |r| str_field(r, "firstName"),
+            |r| str_field(r, "lastName"),
+            |r| str_field(r, "jobTitle"),
+        ],
+        width,
+    )
+}
+
+fn render_roles(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "ROLE", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "role"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_monitors(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "CHECK_STATUS", "RESULT_STATUS", "LAST_PASSED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "checkStatus"),
+            |r| str_field(r, "checkResultStatus"),
+            |r| str_field(r, "lastPassedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_audits(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "FRAMEWORK", "AUDIT_TYPE", "STATUS", "START", "END"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "frameworkType"),
+            |r| str_field(r, "auditType"),
+            |r| str_field(r, "status"),
+            |r| str_field(r, "startDate"),
+            |r| str_field(r, "endDate"),
+        ],
+        width,
+    )
+}
+
+fn render_events(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "TYPE", "CATEGORY", "SOURCE", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "type"),
+            |r| str_field(r, "category"),
+            |r| str_field(r, "source"),
             |r| str_field(r, "createdAt"),
         ],
         width,
