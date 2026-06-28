@@ -1,89 +1,62 @@
-name: ci
-
-# Rust CI for drata-cli. Runs `otto ci` (whitespace + bloat + clippy + fmt + test)
-# INSIDE the org builder-base image, which ships otto + whitespace + lint-unused +
-# sccache + the Rust toolchain - so GitHub CI == local `otto ci`.
-#
-# Why not the rust-ci reusable: it runs on a bare runner with only `setup-otto`, so it
-# has no `whitespace` binary and this repo's otto lint task (`whitespace -r`) fails
-# ("whitespace: command not found"). The builder-base image is the org's answer to
-# that (same pattern as clyde and marquee). drata-cli has no private git deps - every
-# dependency is published - so no private-dep token is wired.
+name: CI
 
 on:
   push:
-    branches:
-      - "**"
-  workflow_dispatch: {}
-
-permissions:
-  contents: read
-  id-token: write
+    branches: [main]
+  pull_request:
 
 env:
-  RUST_IMG_TAG: "1.96"
+  RUST_VERSION: 1.94.0
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Mint an ECR token so the container job can pull the builder-base image.
-  # NOTE: do NOT add-mask the token - masked values are dropped from job outputs,
-  # which would leave the container credential empty.
-  ecr-auth:
-    name: ECR Auth
+  test:
+    name: Test
     runs-on: ubuntu-latest
-    outputs:
-      token: ${{ steps.ecr.outputs.token }}
     steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6.1.1
-        with:
-          role-to-assume: ${{ secrets.CI_AWS_IAM_ROLE }}
-          aws-region: us-east-1
-      - name: Get ECR auth token
-        id: ecr
-        shell: bash
-        run: echo "token=$(aws ecr get-login-password --region us-east-1)" >> "$GITHUB_OUTPUT"
+    - uses: actions/checkout@v6
 
-  build-and-test:
-    name: Build and Test
-    needs: ecr-auth
-    runs-on: ubuntu-latest
-    container:
-      image: 878256633362.dkr.ecr.us-east-1.amazonaws.com/base/rust:1.96-builder-base
-      credentials:
-        username: AWS
-        password: ${{ needs.ecr-auth.outputs.token }}
-    env:
-      # Override the image's SCCACHE_DIR=/sccache so actions/cache can persist it.
-      SCCACHE_DIR: ${{ github.workspace }}/.sccache
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ env.RUST_VERSION }}
+        components: rustfmt, clippy
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: "v1-rust"
+
+    - name: Run tests
+      run: cargo test --verbose
+
+    - name: Check formatting
+      run: cargo fmt --check
+
+    - name: Run clippy
+      run: cargo clippy -- -D warnings
+
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-14  # Apple Silicon ARM
     steps:
-      - name: Install git
-        run: apt-get update && apt-get install -y --no-install-recommends git
-      - uses: actions/checkout@v6
-      # The image runs as a different uid than the checkout.
-      - name: Mark workspace safe for git
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-      # The builder-base image ships cargo/rustc but not clippy/rustfmt, which
-      # `otto check` needs. rustup is present, so add them.
-      - name: Add clippy + rustfmt
-        run: rustup component add clippy rustfmt
-      - name: Cache sccache
-        uses: actions/cache@v5
-        with:
-          path: ${{ github.workspace }}/.sccache
-          key: sccache-${{ env.RUST_IMG_TAG }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            sccache-${{ env.RUST_IMG_TAG }}-
-      - name: Cache cargo registry and git
-        uses: actions/cache@v5
-        with:
-          path: |
-            /usr/local/cargo/registry
-            /usr/local/cargo/git
-          key: cargo-${{ env.RUST_IMG_TAG }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ env.RUST_IMG_TAG }}-
-      - name: CI (otto)
-        run: otto ci
-      - name: Show sccache stats
-        run: sccache --show-stats
+    - uses: actions/checkout@v6
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ env.RUST_VERSION }}
+
+    - name: Cache Rust dependencies
+      uses: Swatinem/rust-cache@v2
+      with:
+        prefix-key: "v1-rust"
+        shared-key: ${{ matrix.os }}
+
+    - name: Build
+      run: cargo build --release --verbose
