@@ -460,6 +460,9 @@ pub enum VendorSecurityReviewAction {
         /// SOC form value
         #[arg(long)]
         soc_form: Option<String>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
     },
     /// List available actions for a security review
     Actions {

@@ -8,14 +8,20 @@
 //!     (body key: `securityReviewType`)
 //!   - action: `finalize | reopen`
 //!
-//! Phase 1 provides the clap surface + dispatch wiring only.
-//! Phases 2-3 add the HTTP handlers.
+//! Phase 2 implements all GET handlers (list, get, actions, questionnaires)
+//! and JSON mutating handlers (create, update, run-action).
+//! Phase 3 adds multipart handlers (create-with-file, upload-questionnaire,
+//! upload-questionnaire-to-review).
 
 use crate::cli::{SecurityReviewAction, SecurityReviewStatus, SecurityReviewType, VendorSecurityReviewAction};
 use crate::client::DrataClient;
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
-use eyre::Result;
+use crate::expand::append_expand;
+use crate::output::print_value;
+use eyre::{Result, bail};
+use serde_json::{Value, json};
+use std::io;
 use tracing::debug;
 
 // ---------------------------------------------------------------------------
@@ -50,10 +56,10 @@ pub(crate) fn action_str(a: &SecurityReviewAction) -> &'static str {
 }
 
 // ---------------------------------------------------------------------------
-// Example skeleton
+// Example skeletons
 // ---------------------------------------------------------------------------
 
-/// JSON skeleton for `vendor security-review create --example`.
+/// JSON skeleton printed by `vendor security-review create --example`.
 const SECURITY_REVIEW_CREATE_EXAMPLE: &str = r#"{
   "securityReviewStatus": "NOT_YET_STARTED",
   "securityReviewType": "SECURITY",
@@ -65,11 +71,19 @@ const SECURITY_REVIEW_CREATE_EXAMPLE: &str = r#"{
 }
 "#;
 
+/// JSON skeleton printed by `vendor security-review update --example`.
+const SECURITY_REVIEW_UPDATE_EXAMPLE: &str = r#"{
+  "title": "Updated review title",
+  "socForm": "SOC2_TYPE_II"
+}
+"#;
+
 /// Returns the example skeleton if the action is a `--example` request.
 /// Called from `vendor::example_if_requested` before config/auth load.
 pub fn example_if_requested(action: &VendorSecurityReviewAction) -> Option<&'static str> {
     match action {
         VendorSecurityReviewAction::Create { example: true, .. } => Some(SECURITY_REVIEW_CREATE_EXAMPLE),
+        VendorSecurityReviewAction::Update { example: true, .. } => Some(SECURITY_REVIEW_UPDATE_EXAMPLE),
         _ => None,
     }
 }
@@ -79,14 +93,11 @@ pub fn example_if_requested(action: &VendorSecurityReviewAction) -> Option<&'sta
 // ---------------------------------------------------------------------------
 
 /// Dispatch a `vendor security-review <verb>` action.
-///
-/// Phase 1: stubs only - each arm logs entry and returns an informative
-/// `bail!`. Phases 2-3 replace the stubs with real HTTP calls.
 pub async fn handle(
     action: &VendorSecurityReviewAction,
-    _client: &DrataClient,
-    _config: &Config,
-    _confirm: &ConfirmFn,
+    client: &DrataClient,
+    config: &Config,
+    confirm: &ConfirmFn,
 ) -> Result<()> {
     match action {
         VendorSecurityReviewAction::List {
@@ -96,15 +107,16 @@ pub async fn handle(
             expand,
             all,
         } => {
-            debug!(
+            list(
+                client,
+                config,
                 vendor_id,
-                status = status.as_ref().map(status_str),
-                review_type = review_type.as_ref().map(type_str),
-                expand_len = expand.len(),
-                all,
-                "security_review list (stub)"
-            );
-            eyre::bail!("vendor security-review list: not yet implemented (Phase 2)")
+                status.as_ref(),
+                review_type.as_ref(),
+                expand,
+                *all,
+            )
+            .await
         }
         VendorSecurityReviewAction::Create {
             vendor_id,
@@ -118,75 +130,294 @@ pub async fn handle(
             data,
             example: _,
         } => {
-            debug!(
+            create(
+                client,
+                config,
+                confirm,
                 vendor_id,
                 review_deadline_at,
-                status = status_str(status),
-                review_type = type_str(review_type),
-                has_title = title.is_some(),
-                has_note = note.is_some(),
-                has_requested_at = requested_at.is_some(),
-                has_requester_user_id = requester_user_id.is_some(),
-                has_data = data.is_some(),
-                "security_review create (stub)"
-            );
-            eyre::bail!("vendor security-review create: not yet implemented (Phase 2)")
+                status,
+                review_type,
+                title.as_deref(),
+                note.as_deref(),
+                requested_at.as_deref(),
+                *requester_user_id,
+                data.as_deref(),
+            )
+            .await
         }
         VendorSecurityReviewAction::Get {
             vendor_id,
             security_review_id,
             expand,
-        } => {
-            debug!(
-                vendor_id,
-                security_review_id,
-                expand_len = expand.len(),
-                "security_review get (stub)"
-            );
-            eyre::bail!("vendor security-review get: not yet implemented (Phase 2)")
-        }
+        } => get(client, config, vendor_id, *security_review_id, expand).await,
         VendorSecurityReviewAction::Update {
             vendor_id,
             security_review_id,
             title,
             soc_form,
+            example: _,
         } => {
-            debug!(
+            update(
+                client,
+                config,
+                confirm,
                 vendor_id,
-                security_review_id,
-                has_title = title.is_some(),
-                has_soc_form = soc_form.is_some(),
-                "security_review update (stub)"
-            );
-            eyre::bail!("vendor security-review update: not yet implemented (Phase 2)")
+                *security_review_id,
+                title.as_deref(),
+                soc_form.as_deref(),
+            )
+            .await
         }
         VendorSecurityReviewAction::Actions {
             vendor_id,
             security_review_id,
-        } => {
-            debug!(vendor_id, security_review_id, "security_review actions (stub)");
-            eyre::bail!("vendor security-review actions: not yet implemented (Phase 2)")
-        }
+        } => actions(client, config, vendor_id, *security_review_id).await,
         VendorSecurityReviewAction::RunAction {
             vendor_id,
             security_review_id,
             action,
-        } => {
-            debug!(
-                vendor_id,
-                security_review_id,
-                action = action_str(action),
-                "security_review run-action (stub)"
-            );
-            eyre::bail!("vendor security-review run-action: not yet implemented (Phase 2)")
-        }
+        } => run_action(client, config, confirm, vendor_id, *security_review_id, action).await,
         VendorSecurityReviewAction::Questionnaires {
             vendor_id,
             security_review_id,
-        } => {
-            debug!(vendor_id, security_review_id, "security_review questionnaires (stub)");
-            eyre::bail!("vendor security-review questionnaires: not yet implemented (Phase 2)")
+        } => questionnaires(client, config, vendor_id, *security_review_id).await,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+async fn list(
+    client: &DrataClient,
+    config: &Config,
+    vendor_id: &str,
+    status: Option<&SecurityReviewStatus>,
+    review_type: Option<&SecurityReviewType>,
+    expand: &[String],
+    all: bool,
+) -> Result<()> {
+    debug!(
+        vendor_id,
+        status = status.map(status_str),
+        review_type = review_type.map(type_str),
+        expand_len = expand.len(),
+        all,
+        "security_review list"
+    );
+
+    let mut base = format!("/vendors/{}/security-reviews", vendor_id);
+
+    // Append filter query params before expand params.
+    let mut sep = '?';
+    if let Some(s) = status {
+        base.push(sep);
+        base.push_str(&format!("status={}", status_str(s)));
+        sep = '&';
+    }
+    if let Some(t) = review_type {
+        base.push(sep);
+        base.push_str(&format!("type={}", type_str(t)));
+    }
+
+    let path = append_expand(&base, expand);
+
+    if all {
+        let mut stdout = io::stdout();
+        let total = client.stream_all(&path, &mut stdout).await?;
+        debug!(total, "security_review list stream complete");
+    } else {
+        let items = client.get_all(&path).await?;
+        let count = items.len();
+        let result = json!({ "data": items });
+        print_value(&result, &config.output_format);
+        debug!(count, "security_review list complete");
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn create(
+    client: &DrataClient,
+    config: &Config,
+    confirm: &ConfirmFn,
+    vendor_id: &str,
+    review_deadline_at: &str,
+    status: &SecurityReviewStatus,
+    review_type: &SecurityReviewType,
+    title: Option<&str>,
+    note: Option<&str>,
+    requested_at: Option<&str>,
+    requester_user_id: Option<u64>,
+    data: Option<&str>,
+) -> Result<()> {
+    debug!(
+        vendor_id,
+        review_deadline_at,
+        status = status_str(status),
+        review_type = type_str(review_type),
+        has_title = title.is_some(),
+        has_note = note.is_some(),
+        has_requested_at = requested_at.is_some(),
+        has_requester_user_id = requester_user_id.is_some(),
+        has_data = data.is_some(),
+        "security_review create"
+    );
+
+    let path = format!("/vendors/{}/security-reviews", vendor_id);
+
+    if !confirm("POST", &path)? {
+        bail!("aborted");
+    }
+
+    let body: Value = if let Some(raw) = data {
+        serde_json::from_str(raw).map_err(|e| eyre::eyre!("--data is not valid JSON: {}", e))?
+    } else {
+        // Required fields with translated body keys (securityReviewStatus / securityReviewType).
+        let mut b = json!({
+            "securityReviewStatus": status_str(status),
+            "securityReviewType": type_str(review_type),
+            "reviewDeadlineAt": review_deadline_at,
+        });
+        set_opt_str(&mut b, "title", title);
+        set_opt_str(&mut b, "note", note);
+        set_opt_str(&mut b, "requestedAt", requested_at);
+        if let Some(id) = requester_user_id {
+            b["requesterUserId"] = json!(id);
         }
+        b
+    };
+
+    let result = client.post(&path, body).await?;
+    print_value(&result, &config.output_format);
+    debug!("security_review create complete");
+    Ok(())
+}
+
+async fn get(
+    client: &DrataClient,
+    config: &Config,
+    vendor_id: &str,
+    security_review_id: u64,
+    expand: &[String],
+) -> Result<()> {
+    debug!(
+        vendor_id,
+        security_review_id,
+        expand_len = expand.len(),
+        "security_review get"
+    );
+    let base = format!("/vendors/{}/security-reviews/{}", vendor_id, security_review_id);
+    let path = append_expand(&base, expand);
+    let resp = client.get(&path).await?;
+    print_value(&resp, &config.output_format);
+    debug!(vendor_id, security_review_id, "security_review get complete");
+    Ok(())
+}
+
+async fn update(
+    client: &DrataClient,
+    config: &Config,
+    confirm: &ConfirmFn,
+    vendor_id: &str,
+    security_review_id: u64,
+    title: Option<&str>,
+    soc_form: Option<&str>,
+) -> Result<()> {
+    debug!(
+        vendor_id,
+        security_review_id,
+        has_title = title.is_some(),
+        has_soc_form = soc_form.is_some(),
+        "security_review update"
+    );
+
+    let path = format!("/vendors/{}/security-reviews/{}", vendor_id, security_review_id);
+
+    if !confirm("PUT", &path)? {
+        bail!("aborted");
+    }
+
+    // UpdateDTO has ONLY title and socForm - not create's fields.
+    let mut body = json!({});
+    set_opt_str(&mut body, "title", title);
+    set_opt_str(&mut body, "socForm", soc_form);
+
+    let result = client.put(&path, body).await?;
+    print_value(&result, &config.output_format);
+    debug!(vendor_id, security_review_id, "security_review update complete");
+    Ok(())
+}
+
+async fn actions(client: &DrataClient, config: &Config, vendor_id: &str, security_review_id: u64) -> Result<()> {
+    debug!(vendor_id, security_review_id, "security_review actions");
+    let path = format!("/vendors/{}/security-reviews/{}/actions", vendor_id, security_review_id);
+    let resp = client.get(&path).await?;
+    print_value(&resp, &config.output_format);
+    debug!(vendor_id, security_review_id, "security_review actions complete");
+    Ok(())
+}
+
+async fn run_action(
+    client: &DrataClient,
+    config: &Config,
+    confirm: &ConfirmFn,
+    vendor_id: &str,
+    security_review_id: u64,
+    action: &SecurityReviewAction,
+) -> Result<()> {
+    debug!(
+        vendor_id,
+        security_review_id,
+        action = action_str(action),
+        "security_review run-action"
+    );
+
+    let path = format!("/vendors/{}/security-reviews/{}/actions", vendor_id, security_review_id);
+
+    if !confirm("POST", &path)? {
+        bail!("aborted");
+    }
+
+    let body = json!({ "action": action_str(action) });
+    let result = client.post(&path, body).await?;
+    print_value(&result, &config.output_format);
+    debug!(
+        vendor_id,
+        security_review_id,
+        action = action_str(action),
+        "security_review run-action complete"
+    );
+    Ok(())
+}
+
+async fn questionnaires(client: &DrataClient, config: &Config, vendor_id: &str, security_review_id: u64) -> Result<()> {
+    debug!(vendor_id, security_review_id, "security_review questionnaires");
+    let path = format!(
+        "/vendors/{}/security-reviews/{}/security-questionnaires",
+        vendor_id, security_review_id
+    );
+    let items = client.get_all(&path).await?;
+    let count = items.len();
+    let result = json!({ "data": items });
+    print_value(&result, &config.output_format);
+    debug!(
+        vendor_id,
+        security_review_id, count, "security_review questionnaires complete"
+    );
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Insert `key: value` into `body` only when `value` is `Some`. Keeps update
+/// bodies sparse so unset fields are not overwritten.
+pub(crate) fn set_opt_str(body: &mut Value, key: &str, value: Option<&str>) {
+    if let Some(v) = value {
+        body[key] = json!(v);
     }
 }
 
