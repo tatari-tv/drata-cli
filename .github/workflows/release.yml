@@ -69,21 +69,21 @@ jobs:
       - name: Package binary
         run: |
           mkdir -p artifacts/
-          cp target/${{ matrix.target }}/release/drata-cli artifacts/
+          cp target/${{ matrix.target }}/release/drata artifacts/
 
       - name: Archive artifacts
-        run: tar -czvf drata-cli-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts drata-cli
+        run: tar -czvf drata-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts drata
 
       - name: Generate checksum
-        run: sha256sum drata-cli-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz > drata-cli-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
+        run: sha256sum drata-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz > drata-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: drata-cli-${{ matrix.suffix }}
+          name: drata-${{ matrix.suffix }}
           path: |
-            drata-cli-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz
-            drata-cli-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
+            drata-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz
+            drata-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
 
   build-macos:
     runs-on: macos-14
@@ -123,21 +123,21 @@ jobs:
       - name: Package binary
         run: |
           mkdir -p artifacts/
-          cp target/${{ matrix.target }}/release/drata-cli artifacts/
+          cp target/${{ matrix.target }}/release/drata artifacts/
 
       - name: Archive artifacts
-        run: tar -czvf drata-cli-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts drata-cli
+        run: tar -czvf drata-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz -C artifacts drata
 
       - name: Generate checksum
-        run: shasum -a 256 drata-cli-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz > drata-cli-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
+        run: shasum -a 256 drata-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz > drata-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: drata-cli-${{ matrix.suffix }}
+          name: drata-${{ matrix.suffix }}
           path: |
-            drata-cli-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz
-            drata-cli-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
+            drata-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz
+            drata-${{ github.ref_name }}-${{ matrix.suffix }}.tar.gz.sha256
 
   create-release:
     needs: [build-linux, build-macos]
