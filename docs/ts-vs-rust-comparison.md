@@ -16,8 +16,9 @@ The only differences are **structural and coverage-level**, not data-level:
 2. Curated-command coverage gaps (TS has curated commands for things Rust only exposes via `raw`).
 3. One TS error-handling bug (`vendors stats`).
 4. Entitlement-gated endpoints return 402 on both CLIs (not a CLI difference).
-5. A workflow gap: Rust can't create a vendor security review, so its `questionnaire send` is
-   not usable end-to-end without `raw`.
+5. ~~A workflow gap: Rust can't create a vendor security review~~ - **closed**: Rust now exposes
+   the full `vendor security-review` group, so `questionnaire send` is usable end-to-end without
+   `raw` (see 2.5).
 
 ## Method
 

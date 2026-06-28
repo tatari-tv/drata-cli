@@ -36,8 +36,10 @@
 //! requires `application/json`, it returns `415` and an actionable error message
 //! points the user at the `raw` JSON fallback (Q1b).
 
-use crate::cli::{SecurityReviewAction, SecurityReviewStatus, SecurityReviewType, VendorSecurityReviewAction};
-use crate::client::{ApiError, DrataClient, Multipart};
+use crate::cli::{
+    SecurityReviewAction, SecurityReviewDecision, SecurityReviewStatus, SecurityReviewType, VendorSecurityReviewAction,
+};
+use crate::client::{ApiError, DrataClient, Multipart, encode_query};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
@@ -80,6 +82,16 @@ pub(crate) fn action_str(a: &SecurityReviewAction) -> &'static str {
     }
 }
 
+/// Render a `SecurityReviewDecision` to its spec string value.
+pub(crate) fn decision_str(d: &SecurityReviewDecision) -> &'static str {
+    match d {
+        SecurityReviewDecision::Pending => "PENDING",
+        SecurityReviewDecision::Approved => "APPROVED",
+        SecurityReviewDecision::ApprovedWithConditions => "APPROVED_WITH_CONDITIONS",
+        SecurityReviewDecision::Rejected => "REJECTED",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Example skeletons
 // ---------------------------------------------------------------------------
@@ -97,9 +109,16 @@ const SECURITY_REVIEW_CREATE_EXAMPLE: &str = r#"{
 "#;
 
 /// JSON skeleton printed by `vendor security-review update --example`.
+/// `socForm` is a nested object (`SocReviewFormSaveRequestPublicV2Dto`); only a
+/// representative subset of its sections is shown. Pass it via `--data` or
+/// `--soc-form '<json object>'`.
 const SECURITY_REVIEW_UPDATE_EXAMPLE: &str = r#"{
   "title": "Updated review title",
-  "socForm": "SOC2_TYPE_II"
+  "socForm": {
+    "reviewerInformation": {},
+    "complianceScope": {},
+    "reportOpinion": {}
+  }
 }
 "#;
 
@@ -129,20 +148,10 @@ pub async fn handle(
             vendor_id,
             status,
             review_type,
+            decision,
             expand,
             all,
-        } => {
-            list(
-                client,
-                config,
-                vendor_id,
-                status.as_ref(),
-                review_type.as_ref(),
-                expand,
-                *all,
-            )
-            .await
-        }
+        } => list(client, config, vendor_id, status, review_type, decision, expand, *all).await,
         VendorSecurityReviewAction::Create {
             vendor_id,
             review_deadline_at,
@@ -181,6 +190,7 @@ pub async fn handle(
             security_review_id,
             title,
             soc_form,
+            data,
             example: _,
         } => {
             update(
@@ -191,6 +201,7 @@ pub async fn handle(
                 *security_review_id,
                 title.as_deref(),
                 soc_form.as_deref(),
+                data.as_deref(),
             )
             .await
         }
@@ -251,39 +262,28 @@ pub async fn handle(
 // Handlers
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 async fn list(
     client: &DrataClient,
     config: &Config,
     vendor_id: &str,
-    status: Option<&SecurityReviewStatus>,
-    review_type: Option<&SecurityReviewType>,
+    status: &[SecurityReviewStatus],
+    review_type: &[SecurityReviewType],
+    decision: &[SecurityReviewDecision],
     expand: &[String],
     all: bool,
 ) -> Result<()> {
     debug!(
         vendor_id,
-        status = status.map(status_str),
-        review_type = review_type.map(type_str),
+        status_len = status.len(),
+        type_len = review_type.len(),
+        decision_len = decision.len(),
         expand_len = expand.len(),
         all,
         "security_review list"
     );
 
-    let mut base = format!("/vendors/{}/security-reviews", vendor_id);
-
-    // Append filter query params before expand params.
-    let mut sep = '?';
-    if let Some(s) = status {
-        base.push(sep);
-        base.push_str(&format!("status={}", status_str(s)));
-        sep = '&';
-    }
-    if let Some(t) = review_type {
-        base.push(sep);
-        base.push_str(&format!("type={}", type_str(t)));
-    }
-
-    let path = append_expand(&base, expand);
+    let path = build_list_path(vendor_id, status, review_type, decision, expand);
 
     if all {
         let mut stdout = io::stdout();
@@ -395,12 +395,14 @@ async fn update(
     security_review_id: u64,
     title: Option<&str>,
     soc_form: Option<&str>,
+    data: Option<&str>,
 ) -> Result<()> {
     debug!(
         vendor_id,
         security_review_id,
         has_title = title.is_some(),
         has_soc_form = soc_form.is_some(),
+        has_data = data.is_some(),
         "security_review update"
     );
 
@@ -410,10 +412,21 @@ async fn update(
         bail!("aborted");
     }
 
-    // UpdateDTO has ONLY title and socForm - not create's fields.
-    let mut body = json!({});
-    set_opt_str(&mut body, "title", title);
-    set_opt_str(&mut body, "socForm", soc_form);
+    let body: Value = if let Some(raw) = data {
+        serde_json::from_str(raw).map_err(|e| eyre::eyre!("--data is not valid JSON: {}", e))?
+    } else {
+        // UpdateDTO has ONLY title and socForm - not create's fields. `socForm` is a
+        // nested object (SocReviewFormSaveRequestPublicV2Dto), so --soc-form is parsed
+        // as JSON rather than sent as a bare string. Use --data for the full body.
+        let mut b = json!({});
+        set_opt_str(&mut b, "title", title);
+        if let Some(sf) = soc_form {
+            let parsed: Value =
+                serde_json::from_str(sf).map_err(|e| eyre::eyre!("--soc-form must be a JSON object: {}", e))?;
+            b["socForm"] = parsed;
+        }
+        b
+    };
 
     let result = client.put(&path, body).await?;
     print_value(&result, &config.output_format);
@@ -478,6 +491,38 @@ async fn questionnaires(client: &DrataClient, config: &Config, vendor_id: &str, 
         security_review_id, count, "security_review questionnaires complete"
     );
     Ok(())
+}
+
+/// Build the `list` request path with bracketed array filter params and expand.
+/// Filters are `status[]` / `type[]` / `decision[]` per the spec; the brackets
+/// are percent-encoded in the key like `expand[]` (`src/expand.rs`). Pure - no
+/// I/O - so the query encoding can be unit-tested.
+fn build_list_path(
+    vendor_id: &str,
+    status: &[SecurityReviewStatus],
+    review_type: &[SecurityReviewType],
+    decision: &[SecurityReviewDecision],
+    expand: &[String],
+) -> String {
+    let mut base = format!("/vendors/{}/security-reviews", vendor_id);
+    let mut sep = '?';
+    let mut push_filter = |base: &mut String, key: &str, val: &str| {
+        base.push(sep);
+        base.push_str(&encode_query(key));
+        base.push('=');
+        base.push_str(&encode_query(val));
+        sep = '&';
+    };
+    for s in status {
+        push_filter(&mut base, "status[]", status_str(s));
+    }
+    for t in review_type {
+        push_filter(&mut base, "type[]", type_str(t));
+    }
+    for d in decision {
+        push_filter(&mut base, "decision[]", decision_str(d));
+    }
+    append_expand(&base, expand)
 }
 
 // ---------------------------------------------------------------------------

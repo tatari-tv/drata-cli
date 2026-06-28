@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
-use crate::cli::{SecurityReviewAction, SecurityReviewStatus, SecurityReviewType, VendorSecurityReviewAction};
+use crate::cli::{
+    SecurityReviewAction, SecurityReviewDecision, SecurityReviewStatus, SecurityReviewType, VendorSecurityReviewAction,
+};
 
 // ---------------------------------------------------------------------------
 // Enum -> spec string pinning
@@ -26,6 +28,58 @@ fn type_str_matches_spec() {
 fn action_str_matches_spec() {
     assert_eq!(action_str(&SecurityReviewAction::Finalize), "finalize");
     assert_eq!(action_str(&SecurityReviewAction::Reopen), "reopen");
+}
+
+#[test]
+fn decision_str_matches_spec() {
+    assert_eq!(decision_str(&SecurityReviewDecision::Pending), "PENDING");
+    assert_eq!(decision_str(&SecurityReviewDecision::Approved), "APPROVED");
+    assert_eq!(
+        decision_str(&SecurityReviewDecision::ApprovedWithConditions),
+        "APPROVED_WITH_CONDITIONS"
+    );
+    assert_eq!(decision_str(&SecurityReviewDecision::Rejected), "REJECTED");
+}
+
+// ---------------------------------------------------------------------------
+// list path / filter encoding (spec params status[] / type[] / decision[])
+// ---------------------------------------------------------------------------
+
+#[test]
+fn list_path_no_filters_is_bare() {
+    let path = build_list_path("v1", &[], &[], &[], &[]);
+    assert_eq!(path, "/vendors/v1/security-reviews");
+}
+
+#[test]
+fn list_path_encodes_bracketed_array_filters() {
+    let path = build_list_path(
+        "v1",
+        &[SecurityReviewStatus::InProgress],
+        &[SecurityReviewType::SocReport],
+        &[SecurityReviewDecision::Approved],
+        &[],
+    );
+    // Brackets must be percent-encoded in the key (status%5B%5D=...), matching expand[].
+    assert_eq!(
+        path,
+        "/vendors/v1/security-reviews?status%5B%5D=IN_PROGRESS&type%5B%5D=SOC_REPORT&decision%5B%5D=APPROVED"
+    );
+}
+
+#[test]
+fn list_path_repeats_multi_value_filters() {
+    let path = build_list_path(
+        "v1",
+        &[SecurityReviewStatus::NotYetStarted, SecurityReviewStatus::Completed],
+        &[],
+        &[],
+        &[],
+    );
+    assert_eq!(
+        path,
+        "/vendors/v1/security-reviews?status%5B%5D=NOT_YET_STARTED&status%5B%5D=COMPLETED"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +127,7 @@ fn example_only_for_update_with_flag() {
         security_review_id: 42,
         title: None,
         soc_form: None,
+        data: None,
         example: true,
     };
     assert!(example_if_requested(&update_example).is_some());
@@ -85,6 +140,7 @@ fn example_none_when_update_flag_false() {
         security_review_id: 42,
         title: None,
         soc_form: None,
+        data: None,
         example: false,
     };
     assert!(example_if_requested(&update_no_example).is_none());
@@ -94,8 +150,9 @@ fn example_none_when_update_flag_false() {
 fn example_none_for_non_create_non_update_actions() {
     let list = VendorSecurityReviewAction::List {
         vendor_id: "v1".to_string(),
-        status: None,
-        review_type: None,
+        status: vec![],
+        review_type: vec![],
+        decision: vec![],
         expand: vec![],
         all: false,
     };

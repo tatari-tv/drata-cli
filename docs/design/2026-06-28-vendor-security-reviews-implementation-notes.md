@@ -75,3 +75,41 @@
 
 ### Open questions
 - None.
+
+## Post-implementation review fixes (PR #5)
+
+Findings from CodeRabbit and the review-panel (Architect/Gemini + Staff Engineer/Codex)
+implementation audit, fixed on the PR branch after the four phases landed.
+
+### Deviations (from the as-shipped phases, now corrected)
+- `create`: `--review-deadline-at`/`--status`/`--type` were required at the clap layer, which
+  made the documented `--data`/`--example` override paths unreachable. Made them `Option` and
+  enforced at runtime when `--data` is absent (`src/cli.rs` `Create`, `security.rs::create`),
+  matching the house pattern at `src/resources/vendor.rs:182`.
+- `upload-questionnaire` / `upload-questionnaire-to-review`: `--file` (`num_args=1..`) allowed an
+  empty file list; added `required = true` so the curated verbs reject zero files at parse time
+  (the generic `raw --file` stays optional by design).
+- `list` filters were emitted as bare `status=`/`type=` and `--decision` was missing entirely.
+  The spec defines `status[]`/`type[]`/`decision[]` (bracketed array params); bare keys are
+  silently ignored by the API. Fixed: filters are now multi-value (`Vec`), `--decision` added
+  (new `SecurityReviewDecision` ValueEnum), and each is encoded as `status%5B%5D=` via the house
+  `encode_query("...[]")` convention (`security.rs::build_list_path`, a new pure, unit-tested
+  helper). Relates to API Design `list` row and Phase 2.
+- `update`: `socForm` is a nested object (`SocReviewFormSaveRequestPublicV2Dto`) but `--soc-form`
+  was serialized as a bare JSON string (API would reject it), and `update` lacked the `--data`
+  escape hatch the design prose (doc line 171) calls for. Fixed: `--soc-form` is parsed as a JSON
+  object, `--data <json>` added for the full body, and the `--example` skeleton now shows
+  `socForm` as an object. The "key set is only title/socForm" invariant is preserved.
+
+### Tradeoffs
+- `--soc-form` kept as a convenience flag that parses a JSON object (vs. dropping it in favor of
+  `--data` only) - preserves the documented surface while making it actually usable; `--data`
+  remains the full-body path.
+
+### Design decisions
+- `list` filters made repeatable `Vec` (not single `Option`) to honor the spec's array filter
+  semantics and the space-separated/repeated house convention (`cli.md`).
+
+### Open questions
+- None. (Q1b - `create-with-file` content-type - remains live-unverifiable until a write key
+  exists, unchanged by these fixes.)

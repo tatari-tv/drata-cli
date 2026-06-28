@@ -157,11 +157,11 @@ Surface: `drata vendor security-review <verb>`. All paths are under `/vendors/{v
 
 | Verb | Method + path | Body | Notes |
 |------|---------------|------|-------|
-| `list <vendor-id>` | GET `/security-reviews` | - | spec-only; cursor-paginated, filters `--status`/`--type`, plus `--expand`, `--all` (per house style, `src/cli.rs:235`) |
+| `list <vendor-id>` | GET `/security-reviews` | - | spec-only; cursor-paginated, multi-value filters `--status`/`--type`/`--decision` (bracketed array params `status[]`/`type[]`/`decision[]`), plus `--expand`, `--all` (per house style, `src/cli.rs:235`) |
 | `create <vendor-id>` | POST `/security-reviews` | JSON | required: `--review-deadline-at`, `--status`, `--type`; optional: `--title`, `--note`, `--requested-at`, `--requester-user-id`. Body keys: `securityReviewStatus`/`securityReviewType` (see Data Model) |
 | `create-with-file <vendor-id> --file <path>` | POST `/security-reviews/with-file` | multipart | required: `--file`, `--title`, `--review-deadline-at`, `--status`, `--type`; optional `--document-type`, `--note`, `--requested-at`, `--requester-user-id`. **Distinct required set from `create`** (`--title` + `--file` required here); see Open Q1 |
 | `get <vendor-id> <sr-id>` | GET `/security-reviews/{srId}` | - | supports `--expand` |
-| `update <vendor-id> <sr-id>` | PUT `/security-reviews/{srId}` | JSON | spec-only; UpdateDTO has **only** `--title` and `--soc-form` - NOT create's fields |
+| `update <vendor-id> <sr-id>` | PUT `/security-reviews/{srId}` | JSON | spec-only; UpdateDTO has **only** `--title` and `--soc-form` - NOT create's fields. `socForm` is a nested object (`SocReviewFormSaveRequestPublicV2Dto`), so `--soc-form` takes a JSON object; `--data <json>` carries the full body |
 | `actions <vendor-id> <sr-id>` | GET `/security-reviews/{srId}/actions` | - | spec-only; list actions |
 | `run-action <vendor-id> <sr-id> --action finalize\|reopen` | POST `/security-reviews/{srId}/actions` | JSON | spec-only; body `{"action": finalize\|reopen}` (typed `--action` ValueEnum) |
 | `questionnaires <vendor-id> <sr-id>` | GET `/security-reviews/{srId}/security-questionnaires` | - | spec-only; list questionnaires on a review |

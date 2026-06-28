@@ -387,18 +387,33 @@ pub enum SecurityReviewAction {
     Reopen,
 }
 
+/// Decision filter for `vendor security-review list`.
+/// Serializes to SCREAMING_SNAKE_CASE per the Drata spec
+/// (`VendorSecurityReviewDecisionEnum`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SecurityReviewDecision {
+    Pending,
+    Approved,
+    ApprovedWithConditions,
+    Rejected,
+}
+
 #[derive(Subcommand, Clone, Debug)]
 pub enum VendorSecurityReviewAction {
     /// List security reviews for a vendor
     List {
         /// Vendor ID
         vendor_id: String,
-        /// Filter by status
-        #[arg(long, value_enum, ignore_case = true)]
-        status: Option<SecurityReviewStatus>,
-        /// Filter by type
-        #[arg(long = "type", value_enum, ignore_case = true)]
-        review_type: Option<SecurityReviewType>,
+        /// Filter by status (space-separated, repeatable; spec param `status[]`)
+        #[arg(long, value_enum, ignore_case = true, num_args = 1..)]
+        status: Vec<SecurityReviewStatus>,
+        /// Filter by type (space-separated, repeatable; spec param `type[]`)
+        #[arg(long = "type", value_enum, ignore_case = true, num_args = 1..)]
+        review_type: Vec<SecurityReviewType>,
+        /// Filter by decision (space-separated, repeatable; spec param `decision[]`)
+        #[arg(long, value_enum, ignore_case = true, num_args = 1..)]
+        decision: Vec<SecurityReviewDecision>,
         /// Sub-collections to expand (space-separated, repeatable)
         #[arg(long, num_args = 1..)]
         expand: Vec<String>,
@@ -457,9 +472,12 @@ pub enum VendorSecurityReviewAction {
         /// New title
         #[arg(long)]
         title: Option<String>,
-        /// SOC form value
+        /// SOC form as a JSON object (per spec `SocReviewFormSaveRequestPublicV2Dto`)
         #[arg(long)]
         soc_form: Option<String>,
+        /// Full request body as JSON (overrides individual flags)
+        #[arg(long)]
+        data: Option<String>,
         /// Print a JSON skeleton and exit (no API call)
         #[arg(long)]
         example: bool,
