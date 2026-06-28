@@ -89,13 +89,19 @@ pub struct Credentials {
 /// Legacy single-key credential shape. Older installs (and the upstream TS CLI)
 /// stored a flat `{ "api_key": ..., "region": ... }`. On load we detect this and
 /// migrate it into a `default` profile.
+///
+/// The struct is kebab-case for consistency with the current shapes, but the
+/// real legacy files are snake_case (`api_key`, `allow_writes`), so each field
+/// carries a snake_case `alias` - otherwise a genuine legacy file would parse to
+/// empty credentials and never migrate.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 struct LegacyCredentials {
+    #[serde(alias = "api_key")]
     api_key: String,
     #[serde(default = "default_region")]
     region: String,
-    #[serde(default)]
+    #[serde(default, alias = "allow_writes")]
     allow_writes: bool,
 }
 
@@ -344,7 +350,15 @@ impl AuthDiagnostic {
             .or_else(|| std::env::var("DRATA_REGION").ok())
             .or_else(|| selected.map(|p| p.region.clone()));
 
-        let allow_writes = cli.allow_writes || selected.map(|p| p.allow_writes).unwrap_or(false);
+        // Mirror `Config::load`: the profile's write flag only counts when the
+        // token actually resolved from that profile. A CLI/env key stays
+        // read-only unless --allow-writes was passed, so the diagnostic does not
+        // claim writes are enabled when the runtime would fail them closed.
+        let allow_writes = cli.allow_writes
+            || match &token_source {
+                TokenSource::Profile(_) => selected.map(|p| p.allow_writes).unwrap_or(false),
+                _ => false,
+            };
 
         Ok(Self {
             profile: profile_name,

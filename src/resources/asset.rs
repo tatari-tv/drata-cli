@@ -7,7 +7,7 @@
 //!
 //! Phase 4 adds: `--all` NDJSON streaming, `--expand`, confirm-on-mutation.
 
-use crate::cli::{AssetAction, AssetType};
+use crate::cli::{AssetAction, AssetClassType, AssetType};
 use crate::client::DrataClient;
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
@@ -39,6 +39,8 @@ pub async fn handle(action: &AssetAction, client: &DrataClient, config: &Config,
             name,
             description,
             asset_type,
+            asset_class_types,
+            owner_id,
             notes,
             example: _,
         } => {
@@ -49,6 +51,8 @@ pub async fn handle(action: &AssetAction, client: &DrataClient, config: &Config,
                 name.as_deref(),
                 description.as_deref(),
                 asset_type.as_ref(),
+                asset_class_types,
+                *owner_id,
                 notes.as_deref(),
             )
             .await
@@ -113,19 +117,35 @@ async fn create(
     name: Option<&str>,
     description: Option<&str>,
     asset_type: Option<&AssetType>,
+    asset_class_types: &[AssetClassType],
+    owner_id: Option<u64>,
     notes: Option<&str>,
 ) -> Result<()> {
     debug!("asset create");
+    // Spec requires name, description, assetType, assetClassTypes, ownerId.
+    let name = name.ok_or_else(|| eyre::eyre!("`drata asset create` requires --name (or use --example)"))?;
+    let description =
+        description.ok_or_else(|| eyre::eyre!("`drata asset create` requires --description (or use --example)"))?;
+    let asset_type =
+        asset_type.ok_or_else(|| eyre::eyre!("`drata asset create` requires --asset-type (or use --example)"))?;
+    let owner_id =
+        owner_id.ok_or_else(|| eyre::eyre!("`drata asset create` requires --owner-id (or use --example)"))?;
+    if asset_class_types.is_empty() {
+        bail!("`drata asset create` requires at least one --asset-class-types (or use --example)");
+    }
+    let class_types: Vec<&str> = asset_class_types.iter().map(asset_class_type_str).collect();
+
     if !confirm("POST", "/assets")? {
         bail!("aborted");
     }
-    let mut body = json!({});
-    set_opt(&mut body, "name", name);
-    set_opt(&mut body, "description", description);
+    let mut body = json!({
+        "name": name,
+        "description": description,
+        "assetType": asset_type_str(asset_type),
+        "assetClassTypes": class_types,
+        "ownerId": owner_id,
+    });
     set_opt(&mut body, "notes", notes);
-    if let Some(at) = asset_type {
-        body["assetType"] = json!(asset_type_str(at));
-    }
     let result = client.post("/assets", body).await?;
     print_value(&result, &config.output_format);
     Ok(())
@@ -184,6 +204,22 @@ fn asset_type_str(at: &AssetType) -> &'static str {
     match at {
         AssetType::Physical => "PHYSICAL",
         AssetType::Virtual => "VIRTUAL",
+    }
+}
+
+fn asset_class_type_str(t: &AssetClassType) -> &'static str {
+    match t {
+        AssetClassType::Hardware => "HARDWARE",
+        AssetClassType::Policy => "POLICY",
+        AssetClassType::Document => "DOCUMENT",
+        AssetClassType::Personnel => "PERSONNEL",
+        AssetClassType::Software => "SOFTWARE",
+        AssetClassType::Code => "CODE",
+        AssetClassType::Container => "CONTAINER",
+        AssetClassType::Compute => "COMPUTE",
+        AssetClassType::Networking => "NETWORKING",
+        AssetClassType::Database => "DATABASE",
+        AssetClassType::Storage => "STORAGE",
     }
 }
 

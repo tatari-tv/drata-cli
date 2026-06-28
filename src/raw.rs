@@ -15,7 +15,7 @@
 //! Phase 4: confirm-on-mutation gate (all non-GET through `raw` now prompts).
 
 use crate::cli::RawArgs;
-use crate::client::{DrataClient, encode_query};
+use crate::client::{DrataClient, Multipart, encode_query};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::output::print_value;
@@ -72,7 +72,7 @@ pub async fn handle(args: &RawArgs, client: &DrataClient, config: &Config, confi
         path = %args.path,
         query_len = args.query.len(),
         has_data = args.data.is_some(),
-        has_file = args.file.is_some(),
+        file_count = args.file.len(),
         "raw request"
     );
 
@@ -92,12 +92,25 @@ pub async fn handle(args: &RawArgs, client: &DrataClient, config: &Config, confi
     let path = build_path(&args.path, &args.query)?;
 
     // Multipart upload takes priority over --data when both somehow supplied.
-    if let Some(ref file_path) = args.file {
-        // Multipart path - only valid for POST.
-        if upper != "POST" {
-            bail!("--file (multipart upload) is only supported for POST requests");
+    if !args.file.is_empty() {
+        // The spec's multipart operations are POST (uploads) and PUT (evidence
+        // update), so accept both rather than POST-only.
+        let field = args.file_field.as_deref().unwrap_or("file");
+        let mut form = Multipart::new();
+        for file_path in &args.file {
+            form.add_file(field, file_path.clone());
         }
-        let result = client.post_multipart(&path, file_path).await?;
+        for kv in &args.field {
+            let (key, value) = kv
+                .split_once('=')
+                .ok_or_else(|| eyre!("invalid --field `{}`: expected key=value", kv))?;
+            form.add_field(key, value);
+        }
+        let result = match upper.as_str() {
+            "POST" => client.post_multipart(&path, &form).await?,
+            "PUT" => client.put_multipart(&path, &form).await?,
+            other => bail!("--file (multipart upload) is only supported for POST and PUT requests (got {other})"),
+        };
         print_value(&result, &config.output_format);
         return Ok(());
     }

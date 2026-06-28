@@ -10,7 +10,7 @@
 //! and `--file` multipart upload on create and update.
 
 use crate::cli::{EvidenceAction, RenewalScheduleType};
-use crate::client::DrataClient;
+use crate::client::{DrataClient, Multipart};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
@@ -151,17 +151,25 @@ async fn create(
     file: Option<&std::path::Path>,
 ) -> Result<()> {
     debug!(workspace_id, has_file = file.is_some(), "evidence create");
+    // Spec requires `name` for both the JSON and multipart shapes.
+    let name = name.ok_or_else(|| eyre::eyre!("`drata evidence create` requires --name (or use --example)"))?;
     let path = format!("/workspaces/{}/evidence-library", workspace_id);
     if !confirm("POST", &path)? {
         bail!("aborted");
     }
     if let Some(f) = file {
-        let result = client.post_multipart(&path, f).await?;
+        let mut form = Multipart::single("file", f);
+        form.add_field("name", name)
+            .add_opt_field("description", description)
+            .add_opt_field(
+                "renewalScheduleType",
+                renewal_schedule_type.map(renewal_schedule_type_str),
+            );
+        let result = client.post_multipart(&path, &form).await?;
         print_value(&result, &config.output_format);
         return Ok(());
     }
-    let mut body = json!({});
-    set_opt(&mut body, "name", name);
+    let mut body = json!({ "name": name });
     set_opt(&mut body, "description", description);
     if let Some(rst) = renewal_schedule_type {
         body["renewalScheduleType"] = json!(renewal_schedule_type_str(rst));
@@ -192,7 +200,15 @@ async fn update(
     if let Some(f) = file {
         // The spec specifies PUT multipart/form-data for evidence update
         // (PUT /workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}).
-        let result = client.put_multipart(&path, f).await?;
+        // Carry any provided scalar fields alongside the file.
+        let mut form = Multipart::single("file", f);
+        form.add_opt_field("name", name)
+            .add_opt_field("description", description)
+            .add_opt_field(
+                "renewalScheduleType",
+                renewal_schedule_type.map(renewal_schedule_type_str),
+            );
+        let result = client.put_multipart(&path, &form).await?;
         print_value(&result, &config.output_format);
         return Ok(());
     }

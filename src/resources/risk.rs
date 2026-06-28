@@ -9,7 +9,7 @@
 //! document upload (multipart POST).
 
 use crate::cli::{RiskAction, RiskStatus, RiskTreatmentPlan};
-use crate::client::DrataClient;
+use crate::client::{DrataClient, Multipart};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
@@ -99,8 +99,8 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
         RiskAction::Upload {
             register_id,
             risk_id,
-            file,
-        } => upload(client, config, confirm, register_id, risk_id, file).await,
+            files,
+        } => upload(client, config, confirm, register_id, risk_id, files).await,
     }
 }
 
@@ -147,12 +147,14 @@ async fn create(
     status: Option<&RiskStatus>,
 ) -> Result<()> {
     debug!(register_id, "risk create");
+    // Spec requires title and description.
+    let title = title.ok_or_else(|| eyre::eyre!("`drata risk create` requires --title (or use --example)"))?;
+    let description =
+        description.ok_or_else(|| eyre::eyre!("`drata risk create` requires --description (or use --example)"))?;
     if !confirm("POST", &format!("/risk-registers/{}/risks", register_id))? {
         bail!("aborted");
     }
-    let mut body = json!({});
-    set_opt(&mut body, "title", title);
-    set_opt(&mut body, "description", description);
+    let mut body = json!({ "title": title, "description": description });
     if let Some(tp) = treatment_plan {
         body["treatmentPlan"] = json!(treatment_plan_str(tp));
     }
@@ -228,14 +230,23 @@ async fn upload(
     confirm: &ConfirmFn,
     register_id: &str,
     risk_id: &str,
-    file: &std::path::Path,
+    files: &[std::path::PathBuf],
 ) -> Result<()> {
-    debug!(register_id, risk_id, file = %file.display(), "risk upload document");
+    debug!(register_id, risk_id, file_count = files.len(), "risk upload document");
+    // The spec's request body is a required `files` array; send each file as a
+    // `files` part. Validate before confirming.
+    if files.is_empty() {
+        bail!("`drata risk upload` requires at least one --file");
+    }
     let path = format!("/risk-registers/{}/risks/{}/documents", register_id, risk_id);
     if !confirm("POST", &path)? {
         bail!("aborted");
     }
-    let result = client.post_multipart(&path, file).await?;
+    let mut form = Multipart::new();
+    for file in files {
+        form.add_file("files", file.clone());
+    }
+    let result = client.post_multipart(&path, &form).await?;
     print_value(&result, &config.output_format);
     Ok(())
 }

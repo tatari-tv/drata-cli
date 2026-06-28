@@ -336,3 +336,42 @@ Append-only. One section per phase.
 - **Live verification pass still pending.** The `drata verify` harness (Phase 4) has not been run against a real tenant. This remains the same open question from Phase 4; it is a manual step requiring a write-enabled credential and a clean test environment. The README documents this.
 - **`drata register` vs `drata risk-register`.** The current command is `drata register` (single word, per the naming rule). If users expect `risk-register` (matching the API path prefix), this could be an ergonomics issue. No action taken - single-word names are the rule; change only if user feedback warrants it.
 - **`--from-file` on register/monitor/audit/event create/update verbs.** Phase 4 added `--from-file` globally but the new Phase 5 modules (register, monitor) did not implement it on their update verbs. Monitor update body is small (name/enabled/description); register update body includes arrays (ownerIds/workspaceIds) which are awkward via CLI flags but fine via `raw`. Adding `--from-file` to these is a low-priority follow-up.
+
+## Post-implementation correctness review (Staff-Engineer/Codex panel)
+
+A correctness-focused review-panel (Architect/Gemini + Staff-Engineer/Codex) audited
+`rust-port` against the spec after Phase 5. Gemini's run had broken shell tooling and
+returned no findings; Codex verified by reading code and found six issues plus one
+lower-confidence concern. All were confirmed against `spec/drata-openapi-v2.json` and
+fixed (every fix rolled in, none deferred):
+
+- **`drata verify` was not wired.** `verify::run` and the README existed, but there
+  was no `Commands::Verify` variant or dispatch arm. Added the variant + dispatch in
+  `cli.rs`/`lib.rs`; it confirms once (`--yes` bypasses) before the create/delete cycle.
+- **Multipart was hard-coded to one part named `file` with no scalar fields.** Replaced
+  the `send_multipart(method, path, file_path)` signature with a `Multipart { files, fields }`
+  builder (`client.rs`): named file parts (`file`/`files`/`externalEvidence`), multiple
+  files, and scalar text fields. All upload callers now send the spec's required shape:
+  device documents send `type`, risk documents send `files` (multi-file), vendor documents
+  send optional `type`/`securityReviewId`, policy/evidence multipart carry their scalar
+  fields. `raw` builds the form from `--file`/`--file-field`/`--field`.
+- **`raw --file` rejected non-POST.** Evidence update is `PUT multipart`; `raw` now allows
+  POST and PUT multipart.
+- **Typed `create` commands omitted spec-required fields.** Added and validated required
+  fields before the confirm/API call (so we never prompt for a request the server would
+  reject): control `code`; asset `assetClassTypes`+`ownerId` (plus enforced name/description/
+  assetType); policy `description`+`renewalDate` (plus name/ownerId/sourceType); risk
+  `title`+`description`; register `name`; framework `name`+`shortName`+`description`;
+  evidence `name`. `--example` still bypasses validation (intercepted before the handler).
+- **`control compare` sent no `controlIds[]`.** The spec marks it required (minItems 1).
+  Added a required repeated `--control-ids`, encoded as `controlIds[]` query params.
+- **Legacy credentials migration was kebab-case only.** Real legacy/upstream files are
+  snake_case (`api_key`, `allow_writes`); added serde `alias`es so they migrate instead of
+  parsing to empty credentials. Added a snake_case migration test.
+- **(lower-confidence) `AuthDiagnostic` over-reported `allow_writes`.** It counted the
+  profile's write flag even when the token resolved from CLI/env. Aligned it with
+  `Config::load`'s `TokenSource` logic so `drata auth`/`whoami` match runtime behavior.
+
+New `clap::ValueEnum`s: `AssetClassType`, `DeviceDocumentType`. New tests: snake_case
+migration, auth-diagnostic write status vs resolved source, and the `Multipart` builder.
+`otto ci` green.

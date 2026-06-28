@@ -163,6 +163,10 @@ pub enum Commands {
     },
     /// Generic passthrough to any operation: `raw <METHOD> <path> ...`
     Raw(RawArgs),
+    /// Live write-path check: create, verify, then delete a throwaway
+    /// `zzz-clitest-` vendor against the real tenant. Requires a write-enabled
+    /// credential and confirms before mutating (bypass with --yes).
+    Verify,
 }
 
 /// Arguments for the generic `raw` passthrough namespace. Hits the active base
@@ -180,9 +184,17 @@ pub struct RawArgs {
     /// Request body: inline JSON, @file to read a file, or - for stdin
     #[arg(long)]
     pub data: Option<String>,
-    /// Path to a file to upload (for multipart operations)
+    /// Path(s) to file(s) to upload (multipart; space-separated or repeated).
+    /// Valid for POST and PUT multipart operations.
+    #[arg(long, num_args = 1..)]
+    pub file: Vec<std::path::PathBuf>,
+    /// Multipart form field name for the uploaded file(s) (default: `file`;
+    /// some endpoints expect `files` or `externalEvidence`)
     #[arg(long)]
-    pub file: Option<std::path::PathBuf>,
+    pub file_field: Option<String>,
+    /// Extra multipart scalar fields as key=value (repeated or space-separated)
+    #[arg(long, num_args = 1..)]
+    pub field: Vec<String>,
     /// Print the operation's request-body skeleton from the spec and exit
     #[arg(long)]
     pub example: bool,
@@ -262,6 +274,12 @@ pub enum VendorAction {
         /// Path to the file to upload
         #[arg(long)]
         file: std::path::PathBuf,
+        /// Vendor document type (optional, e.g. COMPLIANCE_REPORT)
+        #[arg(long = "type")]
+        doc_type: Option<String>,
+        /// Associate with a security review by ID (optional)
+        #[arg(long)]
+        security_review_id: Option<u64>,
     },
     /// Manage a vendor's questionnaires
     Questionnaire {
@@ -401,15 +419,16 @@ pub enum RiskAction {
         /// Risk register ID
         register_id: String,
     },
-    /// Upload a document to a risk (multipart)
+    /// Upload one or more documents to a risk (multipart)
     Upload {
         /// Risk register ID
         register_id: String,
         /// Risk ID
         risk_id: String,
-        /// Path to the file to upload
-        #[arg(long)]
-        file: std::path::PathBuf,
+        /// Path(s) to the file(s) to upload (space-separated or repeated; at
+        /// least one required). Sent as the spec's `files` multipart parts.
+        #[arg(long = "file", num_args = 1..)]
+        files: Vec<std::path::PathBuf>,
     },
 }
 
@@ -444,12 +463,15 @@ pub enum ControlAction {
     Create {
         /// Workspace ID
         workspace_id: String,
-        /// Control name
+        /// Control name (required unless --example)
         #[arg(long)]
         name: Option<String>,
-        /// Description
+        /// Description (required unless --example)
         #[arg(long)]
         description: Option<String>,
+        /// Control code (required unless --example)
+        #[arg(long)]
+        code: Option<String>,
         /// Guiding question
         #[arg(long)]
         question: Option<String>,
@@ -486,12 +508,26 @@ pub enum ControlAction {
     Compare {
         /// Workspace ID
         workspace_id: String,
+        /// Control IDs to compare (space-separated or repeated; at least one
+        /// required). Sent as the spec's `controlIds[]` query parameter.
+        #[arg(long, num_args = 1..)]
+        control_ids: Vec<u64>,
     },
 }
 
 // ---------------------------------------------------------------------------
 // Devices
 // ---------------------------------------------------------------------------
+
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DeviceDocumentType {
+    PasswordManagerEvidence,
+    AutoUpdatesEvidence,
+    HardDriveEncryptionEvidence,
+    AntivirusEvidence,
+    LockScreenEvidence,
+}
 
 #[derive(Subcommand, Debug)]
 pub enum DeviceAction {
@@ -532,6 +568,9 @@ pub enum DeviceAction {
         /// Path to the file to upload
         #[arg(long)]
         file: std::path::PathBuf,
+        /// Document type (required by the spec)
+        #[arg(long = "type", value_enum, ignore_case = true)]
+        doc_type: DeviceDocumentType,
     },
 }
 
@@ -624,15 +663,21 @@ pub enum PolicyAction {
     },
     /// Create a policy (supports multipart --file for uploaded policies)
     Create {
-        /// Policy name
+        /// Policy name (required unless --example)
         #[arg(long)]
         name: Option<String>,
-        /// Owner personnel ID
+        /// Owner personnel ID (required unless --example)
         #[arg(long)]
         owner_id: Option<u64>,
-        /// Source type
+        /// Source type (required unless --example)
         #[arg(long, value_enum, ignore_case = true)]
         source_type: Option<PolicySourceType>,
+        /// Description (required unless --example)
+        #[arg(long)]
+        description: Option<String>,
+        /// Renewal date, ISO 8601 e.g. 2026-01-01 (required unless --example)
+        #[arg(long)]
+        renewal_date: Option<String>,
         /// Path to a file to upload (for UPLOADED source type; multipart)
         #[arg(long)]
         file: Option<std::path::PathBuf>,
@@ -830,6 +875,22 @@ pub enum AssetType {
     Virtual,
 }
 
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum AssetClassType {
+    Hardware,
+    Policy,
+    Document,
+    Personnel,
+    Software,
+    Code,
+    Container,
+    Compute,
+    Networking,
+    Database,
+    Storage,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum AssetAction {
     /// List all assets
@@ -851,15 +912,22 @@ pub enum AssetAction {
     },
     /// Create an asset
     Create {
-        /// Asset name
+        /// Asset name (required unless --example)
         #[arg(long)]
         name: Option<String>,
-        /// Description
+        /// Description (required unless --example)
         #[arg(long)]
         description: Option<String>,
-        /// Asset type (PHYSICAL or VIRTUAL)
+        /// Asset type, PHYSICAL or VIRTUAL (required unless --example)
         #[arg(long, value_enum, ignore_case = true)]
         asset_type: Option<AssetType>,
+        /// Asset class types (space-separated or repeated; at least one
+        /// required unless --example)
+        #[arg(long, value_enum, ignore_case = true, num_args = 1..)]
+        asset_class_types: Vec<AssetClassType>,
+        /// Owner personnel ID (required unless --example)
+        #[arg(long)]
+        owner_id: Option<u64>,
         /// Free-form notes
         #[arg(long)]
         notes: Option<String>,

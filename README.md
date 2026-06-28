@@ -110,10 +110,11 @@ drata-cli register remove 1
 drata-cli risk list <register_id>
 drata-cli risk get <register_id> <risk_id>
 drata-cli risk create <register_id> --example
-drata-cli risk create <register_id> --title "Password Policies" --treatment-plan MITIGATE --impact 4 --likelihood 3
+drata-cli risk create <register_id> --title "Password Policies" --description "..." --treatment-plan MITIGATE --impact 4 --likelihood 3
 drata-cli risk update <register_id> <risk_id> --status CLOSED
 drata-cli risk insights <register_id>
-drata-cli risk upload <register_id> <risk_id> --file ./evidence.pdf
+drata-cli risk upload <register_id> <risk_id> --file ./evidence.pdf            # one or more --file
+drata-cli risk upload <register_id> <risk_id> --file ./a.pdf ./b.pdf
 ```
 
 ### Controls
@@ -122,10 +123,10 @@ drata-cli risk upload <register_id> <risk_id> --file ./evidence.pdf
 drata-cli control list <workspace_id>
 drata-cli control get <workspace_id> <control_id>
 drata-cli control create <workspace_id> --example
-drata-cli control create <workspace_id> --name "Access Control" --description "..."
+drata-cli control create <workspace_id> --name "Access Control" --description "..." --code "AC-1"
 drata-cli control update <workspace_id> <control_id> --name "Updated"
 drata-cli control requirements <workspace_id> <control_id>
-drata-cli control compare <workspace_id>
+drata-cli control compare <workspace_id> --control-ids 1 2 3
 ```
 
 ### Devices
@@ -135,7 +136,7 @@ drata-cli device list
 drata-cli device get <device_id>
 drata-cli device for-personnel <personnel_id>
 drata-cli device apps <device_id>
-drata-cli device upload <device_id> --file ./cert.pdf
+drata-cli device upload <device_id> --file ./cert.pdf --type ANTIVIRUS_EVIDENCE
 ```
 
 ### Personnel
@@ -152,7 +153,7 @@ drata-cli personnel update <personnel_id> --employment-status CURRENT_EMPLOYEE
 drata-cli policy list
 drata-cli policy get <policy_id>
 drata-cli policy create --example
-drata-cli policy create --name "Security Policy" --source-type UPLOADED --file ./policy.pdf
+drata-cli policy create --name "Security Policy" --owner-id 42 --source-type UPLOADED --description "..." --renewal-date 2027-01-01 --file ./policy.pdf
 drata-cli policy update <policy_id> --name "Updated Policy"
 drata-cli policy actions <policy_id>
 drata-cli policy versions <policy_id>
@@ -176,7 +177,7 @@ drata-cli evidence get-version <workspace_id> <evidence_id> <version_id>
 ```
 drata-cli framework list <workspace_id>
 drata-cli framework create <workspace_id> --example
-drata-cli framework create <workspace_id> --name "SOC 2" --short-name "SOC2"
+drata-cli framework create <workspace_id> --name "SOC 2" --short-name "SOC2" --description "..."
 drata-cli framework update <workspace_id> <framework_id> --name "Updated"
 drata-cli framework requirements <workspace_id> <framework_id>
 ```
@@ -187,7 +188,7 @@ drata-cli framework requirements <workspace_id> <framework_id>
 drata-cli asset list
 drata-cli asset get <asset_id>
 drata-cli asset create --example
-drata-cli asset create --name "Server" --asset-type PHYSICAL
+drata-cli asset create --name "Server" --description "..." --asset-type PHYSICAL --asset-class-types HARDWARE COMPUTE --owner-id 42
 drata-cli asset update <asset_id> --asset-type VIRTUAL
 drata-cli asset remove <asset_id>
 ```
@@ -273,7 +274,21 @@ JSON or YAML file (or stdin with `-`). CLI flags override file fields.
 ## Multipart uploads (--file)
 
 Operations that upload documents accept `--file <path>`. Supported on vendor upload,
-risk upload, device upload, policy create, evidence create/update.
+risk upload (one or more files), device upload (requires `--type`), policy create,
+evidence create/update. Each endpoint sends the spec's required scalar fields
+alongside the file (e.g. device documents send `type`, risk documents send the
+files under the `files` part).
+
+Via `raw`, multipart is available for both POST and PUT operations:
+
+```
+# device document upload: file part `file` plus a `type` scalar field
+drata-cli raw POST /devices/123/documents --file ./cert.pdf --field type=ANTIVIRUS_EVIDENCE --allow-writes --yes
+# evidence update is PUT multipart; --file-field overrides the part name when needed
+drata-cli raw PUT /workspaces/1/evidence-library/9 --file ./report.pdf --allow-writes --yes
+# array-valued file part (e.g. risk documents use `files`)
+drata-cli raw POST /risk-registers/1/risks/2/documents --file-field files --file ./a.pdf ./b.pdf --allow-writes --yes
+```
 
 ## Expanding sub-collections (--expand)
 

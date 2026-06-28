@@ -8,6 +8,8 @@ fn example_only_for_create_with_flag() {
         name: None,
         description: None,
         asset_type: None,
+        asset_class_types: vec![],
+        owner_id: None,
         notes: None,
         example: true,
     };
@@ -17,6 +19,8 @@ fn example_only_for_create_with_flag() {
         name: Some("a".to_string()),
         description: None,
         asset_type: None,
+        asset_class_types: vec![],
+        owner_id: None,
         notes: None,
         example: false,
     };

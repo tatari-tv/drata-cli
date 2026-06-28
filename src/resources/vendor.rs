@@ -17,7 +17,7 @@
 //! are built incrementally with `json!`.
 
 use crate::cli::{VendorAction, VendorQuestionnaireAction};
-use crate::client::DrataClient;
+use crate::client::{DrataClient, Multipart};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
@@ -99,7 +99,23 @@ pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config
             .await
         }
         VendorAction::Remove { id } => remove(client, config, confirm, id).await,
-        VendorAction::Upload { vendor_id, file } => upload(client, config, confirm, vendor_id, file).await,
+        VendorAction::Upload {
+            vendor_id,
+            file,
+            doc_type,
+            security_review_id,
+        } => {
+            upload(
+                client,
+                config,
+                confirm,
+                vendor_id,
+                file,
+                doc_type.as_deref(),
+                *security_review_id,
+            )
+            .await
+        }
         VendorAction::Questionnaire { action } => questionnaire(client, config, confirm, action).await,
     }
 }
@@ -227,14 +243,19 @@ async fn upload(
     confirm: &ConfirmFn,
     vendor_id: &str,
     file: &std::path::Path,
+    doc_type: Option<&str>,
+    security_review_id: Option<u64>,
 ) -> Result<()> {
     debug!(vendor_id, file = %file.display(), "vendor upload document");
-    if !confirm("POST", &format!("/vendors/{}/documents", vendor_id))? {
+    let path = format!("/vendors/{}/documents", vendor_id);
+    if !confirm("POST", &path)? {
         bail!("aborted");
     }
-    let result = client
-        .post_multipart(&format!("/vendors/{}/documents", vendor_id), file)
-        .await?;
+    // Spec requires the `file` part; `type` and `securityReviewId` are optional.
+    let mut form = Multipart::single("file", file);
+    form.add_opt_field("type", doc_type)
+        .add_opt_field("securityReviewId", security_review_id.map(|id| id.to_string()));
+    let result = client.post_multipart(&path, &form).await?;
     print_value(&result, &config.output_format);
     Ok(())
 }

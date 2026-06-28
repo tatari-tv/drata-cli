@@ -8,6 +8,8 @@ fn example_only_for_create_with_flag() {
         name: None,
         owner_id: None,
         source_type: None,
+        description: None,
+        renewal_date: None,
         file: None,
         example: true,
     };
@@ -17,6 +19,8 @@ fn example_only_for_create_with_flag() {
         name: Some("p".to_string()),
         owner_id: None,
         source_type: None,
+        description: None,
+        renewal_date: None,
         file: None,
         example: false,
     };

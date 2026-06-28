@@ -8,8 +8,8 @@
 //! Phase 4 adds: `--all` NDJSON streaming, `--expand`, confirm-on-mutation,
 //! document upload (multipart POST).
 
-use crate::cli::DeviceAction;
-use crate::client::DrataClient;
+use crate::cli::{DeviceAction, DeviceDocumentType};
+use crate::client::{DrataClient, Multipart};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
@@ -27,7 +27,22 @@ pub async fn handle(action: &DeviceAction, client: &DrataClient, config: &Config
             for_personnel(client, config, personnel_id, expand).await
         }
         DeviceAction::Apps { device_id } => apps(client, config, device_id).await,
-        DeviceAction::Upload { device_id, file } => upload(client, config, confirm, device_id, file).await,
+        DeviceAction::Upload {
+            device_id,
+            file,
+            doc_type,
+        } => upload(client, config, confirm, device_id, file, doc_type).await,
+    }
+}
+
+/// The spec's `DeviceDocumentTypeEnum` wire value for a CLI document type.
+fn device_document_type_str(t: &DeviceDocumentType) -> &'static str {
+    match t {
+        DeviceDocumentType::PasswordManagerEvidence => "PASSWORD_MANAGER_EVIDENCE",
+        DeviceDocumentType::AutoUpdatesEvidence => "AUTO_UPDATES_EVIDENCE",
+        DeviceDocumentType::HardDriveEncryptionEvidence => "HARD_DRIVE_ENCRYPTION_EVIDENCE",
+        DeviceDocumentType::AntivirusEvidence => "ANTIVIRUS_EVIDENCE",
+        DeviceDocumentType::LockScreenEvidence => "LOCK_SCREEN_EVIDENCE",
     }
 }
 
@@ -85,13 +100,17 @@ async fn upload(
     confirm: &ConfirmFn,
     device_id: &str,
     file: &std::path::Path,
+    doc_type: &DeviceDocumentType,
 ) -> Result<()> {
     debug!(device_id, file = %file.display(), "device upload document");
     let path = format!("/devices/{}/documents", device_id);
     if !confirm("POST", &path)? {
         bail!("aborted");
     }
-    let result = client.post_multipart(&path, file).await?;
+    // Spec requires the `type` field alongside the file.
+    let mut form = Multipart::single("file", file);
+    form.add_field("type", device_document_type_str(doc_type));
+    let result = client.post_multipart(&path, &form).await?;
     print_value(&result, &config.output_format);
     Ok(())
 }

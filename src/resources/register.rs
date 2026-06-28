@@ -105,13 +105,12 @@ async fn create(
     workspace_ids: Option<&[u64]>,
 ) -> Result<()> {
     debug!("register create");
+    // Spec requires name.
+    let name = name.ok_or_else(|| eyre::eyre!("`drata register create` requires --name (or use --example)"))?;
     if !confirm("POST", "/risk-registers")? {
         bail!("aborted");
     }
-    let mut body = json!({});
-    if let Some(v) = name {
-        body["name"] = json!(v);
-    }
+    let mut body = json!({ "name": name });
     if let Some(v) = description {
         body["description"] = json!(v);
     }

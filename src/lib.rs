@@ -132,6 +132,24 @@ pub async fn run(cli: &Cli, config: &Config, confirm: ConfirmFn) -> Result<()> {
         Commands::Raw(args) => {
             raw::handle(args, &client, config, &confirm).await?;
         }
+        Commands::Verify => {
+            // Live create -> verify -> delete cycle against the real tenant.
+            // The harness only ever touches a throwaway `zzz-clitest-` vendor,
+            // but it does mutate, so confirm once before starting (--yes skips).
+            if !confirm("POST", "/vendors (create + delete a throwaway zzz-clitest- vendor)")? {
+                return Err(eyre::eyre!("aborted"));
+            }
+            let result = verify::run(&client).await?;
+            let json = serde_json::json!({
+                "vendorId": result.vendor_id,
+                "created": result.created,
+                "verifiedList": result.verified_list,
+                "verifiedGet": result.verified_get,
+                "deleted": result.deleted,
+                "verifiedDeleted": result.verified_deleted,
+            });
+            output::print_value(&json, &config.output_format);
+        }
         // Auth commands normally take the no-key bypass in main; if they reach
         // `run`, a key is configured. Re-derive the diagnostic to report source.
         Commands::Login { .. } | Commands::Logout | Commands::Whoami | Commands::Auth => {

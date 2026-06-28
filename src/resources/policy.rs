@@ -9,7 +9,7 @@
 //! and `--file` multipart upload (for UPLOADED source type on create).
 
 use crate::cli::{PolicyAction, PolicySourceType};
-use crate::client::DrataClient;
+use crate::client::{DrataClient, Multipart};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
@@ -40,6 +40,8 @@ pub async fn handle(action: &PolicyAction, client: &DrataClient, config: &Config
             name,
             owner_id,
             source_type,
+            description,
+            renewal_date,
             file,
             example: _,
         } => {
@@ -50,6 +52,8 @@ pub async fn handle(action: &PolicyAction, client: &DrataClient, config: &Config
                 name.as_deref(),
                 *owner_id,
                 source_type.as_ref(),
+                description.as_deref(),
+                renewal_date.as_deref(),
                 file.as_deref(),
             )
             .await
@@ -116,9 +120,24 @@ async fn create(
     name: Option<&str>,
     owner_id: Option<u64>,
     source_type: Option<&PolicySourceType>,
+    description: Option<&str>,
+    renewal_date: Option<&str>,
     file: Option<&std::path::Path>,
 ) -> Result<()> {
     debug!(has_file = file.is_some(), "policy create");
+    // Spec requires name, ownerId, sourceType, renewalDate, and description for
+    // both the JSON and multipart shapes. Validate before confirming.
+    let name = name.ok_or_else(|| eyre::eyre!("`drata policy create` requires --name (or use --example)"))?;
+    let owner_id =
+        owner_id.ok_or_else(|| eyre::eyre!("`drata policy create` requires --owner-id (or use --example)"))?;
+    let source_type =
+        source_type.ok_or_else(|| eyre::eyre!("`drata policy create` requires --source-type (or use --example)"))?;
+    let description =
+        description.ok_or_else(|| eyre::eyre!("`drata policy create` requires --description (or use --example)"))?;
+    let renewal_date =
+        renewal_date.ok_or_else(|| eyre::eyre!("`drata policy create` requires --renewal-date (or use --example)"))?;
+    let source_type_value = source_type_str(source_type);
+
     if !confirm("POST", "/policies")? {
         bail!("aborted");
     }
@@ -126,25 +145,30 @@ async fn create(
     // sourceType UPLOADED (or when sourceType is omitted, implying UPLOADED).
     // EXTERNAL policies use an externalFileId, not a file upload.
     if let Some(path) = file {
-        if let Some(PolicySourceType::External) = source_type {
+        if let PolicySourceType::External = source_type {
             bail!(
                 "--file is only valid for UPLOADED policies. \
                  EXTERNAL policies reference an existing file via --source-type external \
                  and do not accept a file upload. Remove --file or change --source-type."
             );
         }
-        let result = client.post_multipart("/policies", path).await?;
+        let mut form = Multipart::single("file", path);
+        form.add_field("name", name)
+            .add_field("ownerId", owner_id.to_string())
+            .add_field("sourceType", source_type_value)
+            .add_field("description", description)
+            .add_field("renewalDate", renewal_date);
+        let result = client.post_multipart("/policies", &form).await?;
         print_value(&result, &config.output_format);
         return Ok(());
     }
-    let mut body = json!({});
-    set_opt(&mut body, "name", name);
-    if let Some(id) = owner_id {
-        body["ownerId"] = json!(id);
-    }
-    if let Some(st) = source_type {
-        body["sourceType"] = json!(source_type_str(st));
-    }
+    let body = json!({
+        "name": name,
+        "ownerId": owner_id,
+        "sourceType": source_type_value,
+        "description": description,
+        "renewalDate": renewal_date,
+    });
     let result = client.post("/policies", body).await?;
     print_value(&result, &config.output_format);
     Ok(())

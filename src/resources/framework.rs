@@ -110,14 +110,17 @@ async fn create(
     description: Option<&str>,
 ) -> Result<()> {
     debug!(workspace_id, "framework create");
+    // Spec requires name, shortName, description.
+    let name = name.ok_or_else(|| eyre::eyre!("`drata framework create` requires --name (or use --example)"))?;
+    let short_name =
+        short_name.ok_or_else(|| eyre::eyre!("`drata framework create` requires --short-name (or use --example)"))?;
+    let description =
+        description.ok_or_else(|| eyre::eyre!("`drata framework create` requires --description (or use --example)"))?;
     let path = format!("/workspaces/{}/frameworks", workspace_id);
     if !confirm("POST", &path)? {
         bail!("aborted");
     }
-    let mut body = json!({});
-    set_opt(&mut body, "name", name);
-    set_opt(&mut body, "shortName", short_name);
-    set_opt(&mut body, "description", description);
+    let body = json!({ "name": name, "shortName": short_name, "description": description });
     let result = client.post(&path, body).await?;
     print_value(&result, &config.output_format);
     Ok(())

@@ -212,6 +212,20 @@ fn test_credentials_legacy_migration() {
 }
 
 #[test]
+fn test_credentials_legacy_migration_snake_case() {
+    // The real upstream/legacy files are snake_case (`api_key`, `allow_writes`).
+    // serde aliases must accept them, or a genuine legacy file would parse to
+    // empty credentials and never migrate.
+    let json = r#"{"api_key":"legacy-key","region":"eu","allow_writes":true}"#;
+    let (creds, migrated) = Credentials::parse(json).unwrap();
+    assert!(migrated, "snake_case legacy single-key file should migrate");
+    let p = creds.profiles.get("default").expect("default profile created");
+    assert_eq!(p.api_key, "legacy-key");
+    assert_eq!(p.region, "eu");
+    assert!(p.allow_writes, "snake_case allow_writes should carry over");
+}
+
+#[test]
 fn test_credentials_profiles_shape_not_migrated() {
     let json = r#"{"profiles":{"prod":{"api-key":"k","region":"us","allow-writes":true}}}"#;
     let (creds, migrated) = Credentials::parse(json).unwrap();
@@ -287,5 +301,39 @@ fn test_auth_diagnostic_detects_sources() {
     let diag = AuthDiagnostic::load(&make_cli(None)).unwrap();
     assert_eq!(diag.token_source, TokenSource::Profile("default".to_string()));
     assert!(diag.known_profiles.contains(&"default".to_string()));
+    drop(env);
+}
+
+#[test]
+fn test_auth_diagnostic_write_status_matches_resolved_source() {
+    let env = Env::new();
+
+    // A write-enabled profile exists, but the token resolves from a CLI key.
+    // The diagnostic must NOT claim writes are enabled (runtime Config::load
+    // fails them closed), so the two views agree.
+    save_profile(
+        "default",
+        Profile {
+            api_key: "profile-key".to_string(),
+            region: "us".to_string(),
+            allow_writes: true,
+        },
+    )
+    .unwrap();
+
+    let diag = AuthDiagnostic::load(&make_cli(Some("cli-key"))).unwrap();
+    assert_eq!(diag.token_source, TokenSource::CliFlag);
+    assert!(
+        !diag.allow_writes,
+        "CLI-key token must not inherit the profile's write flag"
+    );
+
+    // Resolving from the profile DOES report its write flag.
+    let diag = AuthDiagnostic::load(&make_cli(None)).unwrap();
+    assert_eq!(diag.token_source, TokenSource::Profile("default".to_string()));
+    assert!(
+        diag.allow_writes,
+        "profile-resolved token reports the profile write flag"
+    );
     drop(env);
 }

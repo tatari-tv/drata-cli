@@ -217,7 +217,8 @@ async fn post_multipart_sends_file() {
     writeln!(tmp, "hello drata").unwrap();
     let path = tmp.path().to_path_buf();
 
-    let result = client.post_multipart("/vendors/1/documents", &path).await.unwrap();
+    let form = Multipart::single("file", path);
+    let result = client.post_multipart("/vendors/1/documents", &form).await.unwrap();
     assert_eq!(result["id"].as_u64(), Some(10));
 }
 
@@ -231,10 +232,30 @@ async fn post_multipart_blocked_on_readonly_client() {
     let mut tmp = NamedTempFile::new().unwrap();
     writeln!(tmp, "data").unwrap();
 
-    let err = client
-        .post_multipart("/vendors/1/documents", tmp.path())
-        .await
-        .unwrap_err();
+    let form = Multipart::single("file", tmp.path());
+    let err = client.post_multipart("/vendors/1/documents", &form).await.unwrap_err();
     let downcast = err.downcast_ref::<WriteGuardError>();
     assert!(downcast.is_some(), "expected WriteGuardError, got: {err}");
+}
+
+#[test]
+fn multipart_builder_collects_files_and_fields() {
+    let mut form = Multipart::single("file", "/tmp/a.pdf");
+    form.add_file("files", "/tmp/b.pdf")
+        .add_field("type", "ANTIVIRUS_EVIDENCE")
+        .add_opt_field("description", Some("d"))
+        .add_opt_field("skip", None::<String>);
+
+    assert_eq!(form.files.len(), 2);
+    assert_eq!(form.files[0].field, "file");
+    assert_eq!(form.files[1].field, "files");
+    // The None field is dropped; only `type` and `description` survive.
+    assert_eq!(form.fields.len(), 2);
+    assert!(
+        form.fields
+            .iter()
+            .any(|(k, v)| k == "type" && v == "ANTIVIRUS_EVIDENCE")
+    );
+    assert!(form.fields.iter().any(|(k, v)| k == "description" && v == "d"));
+    assert!(!form.is_empty());
 }

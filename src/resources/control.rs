@@ -9,7 +9,7 @@
 //! when `--file` is provided the upload path is used.
 
 use crate::cli::ControlAction;
-use crate::client::DrataClient;
+use crate::client::{DrataClient, encode_query};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
@@ -50,6 +50,7 @@ pub async fn handle(action: &ControlAction, client: &DrataClient, config: &Confi
             workspace_id,
             name,
             description,
+            code,
             question,
             activity,
             example: _,
@@ -61,6 +62,7 @@ pub async fn handle(action: &ControlAction, client: &DrataClient, config: &Confi
                 workspace_id,
                 name.as_deref(),
                 description.as_deref(),
+                code.as_deref(),
                 question.as_deref(),
                 activity.as_deref(),
             )
@@ -91,7 +93,10 @@ pub async fn handle(action: &ControlAction, client: &DrataClient, config: &Confi
             workspace_id,
             control_id,
         } => requirements(client, config, workspace_id, control_id).await,
-        ControlAction::Compare { workspace_id } => compare(client, config, workspace_id).await,
+        ControlAction::Compare {
+            workspace_id,
+            control_ids,
+        } => compare(client, config, workspace_id, control_ids).await,
     }
 }
 
@@ -138,17 +143,22 @@ async fn create(
     workspace_id: &str,
     name: Option<&str>,
     description: Option<&str>,
+    code: Option<&str>,
     question: Option<&str>,
     activity: Option<&str>,
 ) -> Result<()> {
     debug!(workspace_id, "control create");
+    // Spec requires name, description, and code. Validate before confirming so
+    // we never prompt for a request the server would reject.
+    let name = name.ok_or_else(|| eyre::eyre!("`drata control create` requires --name (or use --example)"))?;
+    let description =
+        description.ok_or_else(|| eyre::eyre!("`drata control create` requires --description (or use --example)"))?;
+    let code = code.ok_or_else(|| eyre::eyre!("`drata control create` requires --code (or use --example)"))?;
     let path = format!("/workspaces/{}/controls", workspace_id);
     if !confirm("POST", &path)? {
         bail!("aborted");
     }
-    let mut body = json!({});
-    set_opt(&mut body, "name", name);
-    set_opt(&mut body, "description", description);
+    let mut body = json!({ "name": name, "description": description, "code": code });
     set_opt(&mut body, "question", question);
     set_opt(&mut body, "activity", activity);
     let result = client.post(&path, body).await?;
@@ -199,11 +209,23 @@ async fn requirements(client: &DrataClient, config: &Config, workspace_id: &str,
 }
 
 #[instrument(skip(client, config))]
-async fn compare(client: &DrataClient, config: &Config, workspace_id: &str) -> Result<()> {
-    debug!(workspace_id, "control compare");
-    let resp = client
-        .get(&format!("/workspaces/{}/controls-requirement-comparison", workspace_id))
-        .await?;
+async fn compare(client: &DrataClient, config: &Config, workspace_id: &str, control_ids: &[u64]) -> Result<()> {
+    debug!(workspace_id, control_count = control_ids.len(), "control compare");
+    // The spec marks `controlIds[]` required (minItems 1); fail before the call
+    // rather than send a request the server would reject with a 400.
+    if control_ids.is_empty() {
+        bail!("`drata control compare` requires at least one --control-ids value");
+    }
+    let mut path = format!("/workspaces/{}/controls-requirement-comparison", workspace_id);
+    let mut sep = '?';
+    for id in control_ids {
+        path.push(sep);
+        path.push_str(&encode_query("controlIds[]"));
+        path.push('=');
+        path.push_str(&id.to_string());
+        sep = '&';
+    }
+    let resp = client.get(&path).await?;
     print_value(&resp, &config.output_format);
     Ok(())
 }

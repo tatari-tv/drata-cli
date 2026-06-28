@@ -24,7 +24,7 @@ use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use reqwest::{Client, Method, StatusCode};
 use serde_json::Value;
 use std::io::Write;
-use std::path::Path;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
@@ -53,6 +53,76 @@ pub struct ApiError {
 pub struct WriteGuardError {
     pub method: String,
     pub path: String,
+}
+
+/// A single named file part of a multipart/form-data body. `field` is the form
+/// field name the endpoint expects (`file`, `files`, `externalEvidence`, ...);
+/// `path` is the local file to read and send.
+#[derive(Debug, Clone)]
+pub struct FilePart {
+    pub field: String,
+    pub path: PathBuf,
+}
+
+/// A multipart/form-data body: named file parts plus scalar text fields.
+///
+/// Drata's upload endpoints vary in both the file field name and the required
+/// scalar fields, so each caller builds the exact shape for its endpoint rather
+/// than relying on a single hard-coded `file` part.
+#[derive(Debug, Default)]
+pub struct Multipart {
+    pub files: Vec<FilePart>,
+    pub fields: Vec<(String, String)>,
+}
+
+impl Multipart {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Build a body with a single file part under `field`.
+    pub fn single(field: impl Into<String>, path: impl Into<PathBuf>) -> Self {
+        let mut form = Self::new();
+        form.add_file(field, path);
+        form
+    }
+
+    /// Append a file part under the form field name `field`.
+    pub fn add_file(&mut self, field: impl Into<String>, path: impl Into<PathBuf>) -> &mut Self {
+        self.files.push(FilePart {
+            field: field.into(),
+            path: path.into(),
+        });
+        self
+    }
+
+    /// Append a scalar text field.
+    pub fn add_field(&mut self, name: impl Into<String>, value: impl Into<String>) -> &mut Self {
+        self.fields.push((name.into(), value.into()));
+        self
+    }
+
+    /// Append a scalar text field only when `value` is `Some`.
+    pub fn add_opt_field(&mut self, name: impl Into<String>, value: Option<impl Into<String>>) -> &mut Self {
+        if let Some(v) = value {
+            self.fields.push((name.into(), v.into()));
+        }
+        self
+    }
+
+    /// True when the body carries no files and no fields.
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty() && self.fields.is_empty()
+    }
+}
+
+/// A file part with its bytes read into memory, ready to (re)build a reqwest
+/// `Part` on each retry attempt.
+struct LoadedPart {
+    field: String,
+    file_name: String,
+    mime: String,
+    bytes: Vec<u8>,
 }
 
 /// Characters that must be percent-encoded in query parameter values.
@@ -232,13 +302,16 @@ impl DrataClient {
 
     /// Send a multipart/form-data request. Used for the upload operations
     /// identified by `spec::Operation.multipart`. The write guardrail applies:
-    /// the client must be write-enabled. The file is read from `file_path` and
-    /// sent as the `file` part. Retries on 429 with `Retry-After` (bounded),
+    /// the client must be write-enabled.
+    ///
+    /// Drata's upload endpoints differ in both the file field name (`file`,
+    /// `files`, `externalEvidence`) and the scalar fields they require, so the
+    /// caller supplies the exact shape via `Multipart` rather than a single
+    /// hard-coded `file` part. Retries on 429 with `Retry-After` (bounded),
     /// matching `send_inner`'s contract.
-    #[instrument(skip(self, file_path), fields(%method, %path))]
-    pub async fn send_multipart(&self, method: Method, path: &str, file_path: impl AsRef<Path>) -> Result<Value> {
-        let file_path = file_path.as_ref();
-        debug!(%method, path, file = %file_path.display(), "multipart request");
+    #[instrument(skip(self, form), fields(%method, %path))]
+    pub async fn send_multipart(&self, method: Method, path: &str, form: &Multipart) -> Result<Value> {
+        debug!(%method, path, files = form.files.len(), fields = form.fields.len(), "multipart request");
 
         if !self.allow_writes {
             warn!(%method, %path, "write blocked: credential not write-enabled");
@@ -249,16 +322,27 @@ impl DrataClient {
             .into());
         }
 
-        let file_bytes = std::fs::read(file_path)
-            .with_context(|| format!("Failed to read upload file `{}`", file_path.display()))?;
-        let file_name = file_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("upload")
-            .to_string();
-        let mime = mime_guess::from_path(file_path).first_or_octet_stream().to_string();
-
-        debug!(bytes = file_bytes.len(), %mime, "file loaded for multipart upload");
+        // Read every file part upfront. reqwest consumes the `Form` on send, so
+        // the retry loop rebuilds it each attempt from these buffered bytes.
+        let mut loaded: Vec<LoadedPart> = Vec::with_capacity(form.files.len());
+        for fp in &form.files {
+            let bytes = std::fs::read(&fp.path)
+                .with_context(|| format!("Failed to read upload file `{}`", fp.path.display()))?;
+            let file_name = fp
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("upload")
+                .to_string();
+            let mime = mime_guess::from_path(&fp.path).first_or_octet_stream().to_string();
+            trace!(field = %fp.field, file = %fp.path.display(), bytes = bytes.len(), %mime, "loaded multipart file part");
+            loaded.push(LoadedPart {
+                field: fp.field.clone(),
+                file_name,
+                mime,
+                bytes,
+            });
+        }
 
         let url = format!("{}{}", self.base_url, path);
         let mut attempts = 0u32;
@@ -266,18 +350,24 @@ impl DrataClient {
         loop {
             attempts += 1;
 
-            let part = reqwest::multipart::Part::bytes(file_bytes.clone())
-                .file_name(file_name.clone())
-                .mime_str(&mime)
-                .context("Failed to set MIME type on multipart part")?;
-            let form = reqwest::multipart::Form::new().part("file", part);
+            let mut multipart = reqwest::multipart::Form::new();
+            for (name, value) in &form.fields {
+                multipart = multipart.text(name.clone(), value.clone());
+            }
+            for part in &loaded {
+                let file_part = reqwest::multipart::Part::bytes(part.bytes.clone())
+                    .file_name(part.file_name.clone())
+                    .mime_str(&part.mime)
+                    .context("Failed to set MIME type on multipart part")?;
+                multipart = multipart.part(part.field.clone(), file_part);
+            }
 
             let resp = self
                 .http
                 .request(method.clone(), &url)
                 .header("Accept", "application/json")
                 .header("Authorization", format!("Bearer {}", self.api_key))
-                .multipart(form)
+                .multipart(multipart)
                 .send()
                 .await
                 .context("Multipart HTTP request failed")?;
@@ -328,16 +418,16 @@ impl DrataClient {
 
     /// POST a multipart/form-data request. Convenience wrapper around
     /// `send_multipart` for upload operations that use POST.
-    #[instrument(skip(self, file_path), fields(%path))]
-    pub async fn post_multipart(&self, path: &str, file_path: impl AsRef<Path>) -> Result<Value> {
-        self.send_multipart(Method::POST, path, file_path).await
+    #[instrument(skip(self, form), fields(%path))]
+    pub async fn post_multipart(&self, path: &str, form: &Multipart) -> Result<Value> {
+        self.send_multipart(Method::POST, path, form).await
     }
 
     /// PUT a multipart/form-data request. Used for update operations where the
     /// spec specifies a PUT with `multipart/form-data` (e.g. evidence update).
-    #[instrument(skip(self, file_path), fields(%path))]
-    pub async fn put_multipart(&self, path: &str, file_path: impl AsRef<Path>) -> Result<Value> {
-        self.send_multipart(Method::PUT, path, file_path).await
+    #[instrument(skip(self, form), fields(%path))]
+    pub async fn put_multipart(&self, path: &str, form: &Multipart) -> Result<Value> {
+        self.send_multipart(Method::PUT, path, form).await
     }
 
     #[instrument(skip(self))]
