@@ -45,6 +45,7 @@ const VENDOR_CREATE_EXAMPLE: &str = r#"{
 pub fn example_if_requested(action: &VendorAction) -> Option<&'static str> {
     match action {
         VendorAction::Create { example: true, .. } => Some(VENDOR_CREATE_EXAMPLE),
+        VendorAction::SecurityReview { action: sub } => security::example_if_requested(sub),
         _ => None,
     }
 }
@@ -117,6 +118,7 @@ pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config
             .await
         }
         VendorAction::Questionnaire { action } => questionnaire(client, config, confirm, action).await,
+        VendorAction::SecurityReview { action } => security::handle(action, client, config, confirm).await,
     }
 }
 
@@ -340,3 +342,5 @@ fn vendor_name(value: &Value) -> &str {
 
 #[cfg(test)]
 mod tests;
+
+pub mod security;

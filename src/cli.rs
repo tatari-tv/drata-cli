@@ -311,6 +311,11 @@ pub enum VendorAction {
         #[command(subcommand)]
         action: VendorQuestionnaireAction,
     },
+    /// Manage a vendor's security reviews
+    SecurityReview {
+        #[command(subcommand)]
+        action: VendorSecurityReviewAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -346,6 +351,139 @@ pub enum VendorQuestionnaireAction {
         /// Optional email subject
         #[arg(long)]
         email_subject: Option<String>,
+    },
+}
+
+/// Status filter / create field for security reviews.
+/// Serializes to SCREAMING_SNAKE_CASE per the Drata spec
+/// (`VendorSecurityReviewStatusEnum`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SecurityReviewStatus {
+    NotYetStarted,
+    InProgress,
+    Completed,
+    NotRequired,
+}
+
+/// Type filter / create field for security reviews.
+/// Serializes to SCREAMING_SNAKE_CASE per the Drata spec
+/// (`VendorSecurityReviewTypeEnum`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SecurityReviewType {
+    Security,
+    SocReport,
+    UploadReport,
+}
+
+/// Action for `vendor security-review run-action`.
+/// Serializes to lowercase per the Drata spec
+/// (`SecurityReviewActionEnum`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "lowercase")]
+pub enum SecurityReviewAction {
+    Finalize,
+    Reopen,
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum VendorSecurityReviewAction {
+    /// List security reviews for a vendor
+    List {
+        /// Vendor ID
+        vendor_id: String,
+        /// Filter by status
+        #[arg(long, value_enum, ignore_case = true)]
+        status: Option<SecurityReviewStatus>,
+        /// Filter by type
+        #[arg(long = "type", value_enum, ignore_case = true)]
+        review_type: Option<SecurityReviewType>,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+    },
+    /// Create a security review for a vendor
+    Create {
+        /// Vendor ID
+        vendor_id: String,
+        /// Review deadline (ISO 8601, e.g. 2026-12-31)
+        #[arg(long)]
+        review_deadline_at: String,
+        /// Review status
+        #[arg(long, value_enum, ignore_case = true)]
+        status: SecurityReviewStatus,
+        /// Review type
+        #[arg(long = "type", value_enum, ignore_case = true)]
+        review_type: SecurityReviewType,
+        /// Optional title
+        #[arg(long)]
+        title: Option<String>,
+        /// Optional note
+        #[arg(long)]
+        note: Option<String>,
+        /// Requested-at timestamp (ISO 8601)
+        #[arg(long)]
+        requested_at: Option<String>,
+        /// Requester user ID
+        #[arg(long)]
+        requester_user_id: Option<u64>,
+        /// Full request body as JSON (overrides individual flags)
+        #[arg(long)]
+        data: Option<String>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
+    },
+    /// Get a single security review by ID
+    Get {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
+    },
+    /// Update a security review (title and/or soc-form only)
+    Update {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+        /// New title
+        #[arg(long)]
+        title: Option<String>,
+        /// SOC form value
+        #[arg(long)]
+        soc_form: Option<String>,
+    },
+    /// List available actions for a security review
+    Actions {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+    },
+    /// Run a lifecycle action (finalize or reopen) on a security review
+    RunAction {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+        /// Action to run
+        #[arg(long, value_enum, ignore_case = true)]
+        action: SecurityReviewAction,
+    },
+    /// List security questionnaires attached to a security review
+    Questionnaires {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
     },
 }
 
