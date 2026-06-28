@@ -218,3 +218,192 @@ fn run_action_body_uses_action_string() {
     assert_eq!(finalize_body["action"], serde_json::json!("finalize"));
     assert_eq!(reopen_body["action"], serde_json::json!("reopen"));
 }
+
+// ---------------------------------------------------------------------------
+// Multipart part shapes (Phase 3)
+// Pure assertions on the constructed `Multipart`: file part name and count,
+// scalar field names/values, required-set vs optional behavior. Wire format
+// (boundary, headers) is covered by src/client/tests.rs.
+// ---------------------------------------------------------------------------
+
+use std::path::PathBuf;
+
+/// Helper: find a scalar field value by name in a `Multipart`.
+fn field<'a>(form: &'a Multipart, name: &str) -> Option<&'a str> {
+    form.fields.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_str())
+}
+
+#[test]
+fn create_with_file_uses_single_file_part_named_file() {
+    let form = build_create_with_file_form(
+        &PathBuf::from("/tmp/report.pdf"),
+        "Annual review",
+        "2026-12-31",
+        &SecurityReviewStatus::InProgress,
+        &SecurityReviewType::SocReport,
+        None,
+        None,
+        None,
+        None,
+    );
+    assert_eq!(form.files.len(), 1, "create-with-file sends exactly one file part");
+    assert_eq!(
+        form.files[0].field, "file",
+        "the file part field is `file`, not `files`"
+    );
+    assert_eq!(form.files[0].path, PathBuf::from("/tmp/report.pdf"));
+}
+
+#[test]
+fn create_with_file_required_fields_use_translated_keys() {
+    let form = build_create_with_file_form(
+        &PathBuf::from("/tmp/report.pdf"),
+        "Annual review",
+        "2026-12-31",
+        &SecurityReviewStatus::InProgress,
+        &SecurityReviewType::SocReport,
+        None,
+        None,
+        None,
+        None,
+    );
+    assert_eq!(field(&form, "title"), Some("Annual review"));
+    assert_eq!(field(&form, "reviewDeadlineAt"), Some("2026-12-31"));
+    // --status / --type translate to the long body keys, same as JSON create.
+    assert_eq!(field(&form, "securityReviewStatus"), Some("IN_PROGRESS"));
+    assert_eq!(field(&form, "securityReviewType"), Some("SOC_REPORT"));
+    // Flag names must NOT leak through as field names.
+    assert!(field(&form, "status").is_none());
+    assert!(field(&form, "type").is_none());
+}
+
+#[test]
+fn create_with_file_omits_unset_optionals() {
+    let form = build_create_with_file_form(
+        &PathBuf::from("/tmp/report.pdf"),
+        "Annual review",
+        "2026-12-31",
+        &SecurityReviewStatus::NotYetStarted,
+        &SecurityReviewType::Security,
+        None,
+        None,
+        None,
+        None,
+    );
+    assert!(field(&form, "documentType").is_none());
+    assert!(field(&form, "note").is_none());
+    assert!(field(&form, "requestedAt").is_none());
+    assert!(field(&form, "requesterUserId").is_none());
+}
+
+#[test]
+fn create_with_file_includes_set_optionals() {
+    let form = build_create_with_file_form(
+        &PathBuf::from("/tmp/report.pdf"),
+        "Annual review",
+        "2026-12-31",
+        &SecurityReviewStatus::Completed,
+        &SecurityReviewType::UploadReport,
+        Some("COMPLIANCE_REPORT"),
+        Some("a note"),
+        Some("2026-06-28T00:00:00.000Z"),
+        Some(42),
+    );
+    assert_eq!(field(&form, "documentType"), Some("COMPLIANCE_REPORT"));
+    assert_eq!(field(&form, "note"), Some("a note"));
+    assert_eq!(field(&form, "requestedAt"), Some("2026-06-28T00:00:00.000Z"));
+    // u64 requester id is stringified for the multipart text field.
+    assert_eq!(field(&form, "requesterUserId"), Some("42"));
+}
+
+#[test]
+fn files_form_appends_each_file_under_files_field() {
+    let files = vec![
+        PathBuf::from("/tmp/q1.pdf"),
+        PathBuf::from("/tmp/q2.docx"),
+        PathBuf::from("/tmp/q3.xlsx"),
+    ];
+    let form = build_files_form(&files);
+    assert_eq!(form.files.len(), 3, "every input file becomes a part");
+    for part in &form.files {
+        assert_eq!(part.field, "files", "questionnaire uploads use the `files` array field");
+    }
+    assert_eq!(form.files[0].path, PathBuf::from("/tmp/q1.pdf"));
+    assert_eq!(form.files[2].path, PathBuf::from("/tmp/q3.xlsx"));
+    // The questionnaire endpoints carry no scalar fields.
+    assert!(form.fields.is_empty());
+}
+
+#[test]
+fn files_form_single_file() {
+    let files = vec![PathBuf::from("/tmp/only.pdf")];
+    let form = build_files_form(&files);
+    assert_eq!(form.files.len(), 1);
+    assert_eq!(form.files[0].field, "files");
+}
+
+#[test]
+fn map_with_file_415_rewrites_415_into_actionable_error() {
+    let api = ApiError {
+        status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        body: "unsupported".to_string(),
+        formatted: "415 from server".to_string(),
+    };
+    let mapped = map_with_file_415(eyre::Report::new(api), "/vendors/v1/security-reviews/with-file");
+    let msg = format!("{}", mapped);
+    assert!(msg.contains("415"), "message mentions the 415 status");
+    assert!(
+        msg.contains("drata raw POST"),
+        "message points at the raw JSON fallback"
+    );
+    assert!(msg.contains("/vendors/v1/security-reviews/with-file"));
+}
+
+#[test]
+fn map_with_file_415_passes_through_non_415_errors() {
+    let api = ApiError {
+        status: StatusCode::BAD_REQUEST,
+        body: "bad".to_string(),
+        formatted: "400 bad request".to_string(),
+    };
+    let mapped = map_with_file_415(eyre::Report::new(api), "/vendors/v1/security-reviews/with-file");
+    let msg = format!("{}", mapped);
+    // A 400 is unchanged - no spurious 415 guidance.
+    assert!(!msg.contains("drata raw POST"));
+    assert!(msg.contains("400 bad request"));
+}
+
+#[test]
+fn create_with_file_action_constructs() {
+    // The clap variant carries its own required set distinct from JSON create.
+    let action = VendorSecurityReviewAction::CreateWithFile {
+        vendor_id: "v1".to_string(),
+        file: PathBuf::from("/tmp/report.pdf"),
+        title: "t".to_string(),
+        review_deadline_at: "2026-12-31".to_string(),
+        status: SecurityReviewStatus::NotYetStarted,
+        review_type: SecurityReviewType::Security,
+        document_type: None,
+        note: None,
+        requested_at: None,
+        requester_user_id: None,
+    };
+    // create-with-file never prints an example skeleton.
+    assert!(example_if_requested(&action).is_none());
+}
+
+#[test]
+fn upload_questionnaire_actions_have_no_example() {
+    let upload = VendorSecurityReviewAction::UploadQuestionnaire {
+        vendor_id: "v1".to_string(),
+        file: vec![PathBuf::from("/tmp/q1.pdf")],
+    };
+    assert!(example_if_requested(&upload).is_none());
+
+    let upload_to_review = VendorSecurityReviewAction::UploadQuestionnaireToReview {
+        vendor_id: "v1".to_string(),
+        security_review_id: 42,
+        file: vec![PathBuf::from("/tmp/q1.pdf")],
+    };
+    assert!(example_if_requested(&upload_to_review).is_none());
+}

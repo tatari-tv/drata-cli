@@ -16,6 +16,26 @@
 ### Open questions
 - None.
 
+## Phase 3: Multipart handlers
+
+### Design decisions
+- Factored each multipart body into a pure builder fn (`build_create_with_file_form`, `build_files_form`) that returns a `Multipart` with no I/O - `src/resources/vendor/security.rs` - lets the unit tests assert file-part name/count and scalar field shapes without wiremock or a live server (the design's "pure unit, no wiremock" testing strategy); the async handlers are then a thin confirm-gate + build + `post_multipart` + print.
+- `create-with-file` stringifies `requester_user_id: Option<u64>` via `id.to_string()` for the multipart text field (`add_opt_field` takes `Option<impl Into<String>>`) - `src/resources/vendor/security.rs:build_create_with_file_form` - multipart fields are text; the JSON `create` path keeps it numeric, this path serializes it as a decimal string.
+- `--status`/`--type` translate to the same long body keys (`securityReviewStatus`/`securityReviewType`) in the multipart form as in JSON `create`, matching the create DTO; a unit test asserts the flag names never leak through as field names.
+- Q1b 415 path implemented as `map_with_file_415`, applied only to `create-with-file` via `.map_err(...)` - `src/resources/vendor/security.rs` - it `downcast_ref::<ApiError>()`s and rewrites only `415 Unsupported Media Type` into an actionable message naming the endpoint and the `drata raw POST <path> --data '<json>'` fallback; all other statuses (and non-`ApiError` errors) pass through unchanged (asserted by a 400-passthrough test). This reuses the existing typed `ApiError.status` rather than string-matching the error text (per rust.md "typed values at seams").
+- Reused the existing confirm gate (`confirm("POST", &path)?`) and the client write guardrail (fail-closed in `send_multipart` without `--allow-writes`) for all three new verbs - no new credential handling.
+- Per logging.md, each handler emits a `debug!` entry log (fn + params, file paths and counts only - never file contents or the key) and a `debug!` exit log on success; file size/contents are never logged here (the client logs byte lengths at TRACE in `send_multipart`).
+
+### Deviations
+- None. The three verbs, their required/optional sets, and the multipart field names match the design's API Design table and Phase 3 scope exactly.
+
+### Tradeoffs
+- Pure builder fns + thin async handlers vs. building the `Multipart` inline in each handler - chose the split so the part shapes are unit-testable (the only way to assert field/file-part names without a wire test); marginal extra indirection, but it is the design's stated testing strategy.
+- `map_with_file_415` lives in `security.rs` (verb-specific) rather than in the client - chosen because the "fall back to `raw --data <json>`" guidance is specific to the `create-with-file` JSON-vs-multipart ambiguity (Q1b), not a generic client concern; the questionnaire endpoints are confirmed multipart (Q1a) and do not get this treatment.
+
+### Open questions
+- Q1b remains UNVERIFIED LIVE. `create-with-file` (POST /vendors/{id}/security-reviews/with-file) is sent as `multipart/form-data` with a single `file` part per the design's decision. The available Drata credential is read-only, so this mutating path could not be probed against the real endpoint in this phase; if the endpoint actually requires `application/json` with a base64 `file` field, the request returns `415` and the new `map_with_file_415` error path points the user at the `raw` JSON fallback. This should be confirmed with a live write key when one exists (it is the least-critical verb: `create` + a separate upload achieves the same result).
+
 ## Phase 2: Read + JSON-create handlers
 
 ### Design decisions

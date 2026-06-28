@@ -488,6 +488,56 @@ pub enum VendorSecurityReviewAction {
         /// Security review ID
         security_review_id: u64,
     },
+    /// Create a security review with an attached file (multipart upload)
+    CreateWithFile {
+        /// Vendor ID
+        vendor_id: String,
+        /// Path to the file to upload (single `file` part)
+        #[arg(long)]
+        file: std::path::PathBuf,
+        /// Review title (required for create-with-file)
+        #[arg(long)]
+        title: String,
+        /// Review deadline (ISO 8601, e.g. 2026-12-31)
+        #[arg(long)]
+        review_deadline_at: String,
+        /// Review status
+        #[arg(long, value_enum, ignore_case = true)]
+        status: SecurityReviewStatus,
+        /// Review type
+        #[arg(long = "type", value_enum, ignore_case = true)]
+        review_type: SecurityReviewType,
+        /// Document type (optional, e.g. COMPLIANCE_REPORT)
+        #[arg(long)]
+        document_type: Option<String>,
+        /// Optional note
+        #[arg(long)]
+        note: Option<String>,
+        /// Requested-at timestamp (ISO 8601)
+        #[arg(long)]
+        requested_at: Option<String>,
+        /// Requester user ID
+        #[arg(long)]
+        requester_user_id: Option<u64>,
+    },
+    /// Upload one or more completed questionnaire files for a vendor (multipart)
+    UploadQuestionnaire {
+        /// Vendor ID
+        vendor_id: String,
+        /// Path(s) to questionnaire file(s) (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        file: Vec<std::path::PathBuf>,
+    },
+    /// Upload one or more completed questionnaire files to a security review (multipart)
+    UploadQuestionnaireToReview {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+        /// Path(s) to questionnaire file(s) (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        file: Vec<std::path::PathBuf>,
+    },
 }
 
 // ---------------------------------------------------------------------------
