@@ -1,20 +1,40 @@
-//! `drata vendor security-review ...` - security reviews for a vendor.
+//! `drata vendor security-review ...` - security review command group for a vendor.
 //!
-//! All paths are nested under `/vendors/{vendorId}/security-reviews`.
-//! Enum serialization confirmed against the Drata spec:
-//!   - status: `NOT_YET_STARTED | IN_PROGRESS | COMPLETED | NOT_REQUIRED`
-//!     (body key: `securityReviewStatus`)
-//!   - type: `SECURITY | SOC_REPORT | UPLOAD_REPORT`
-//!     (body key: `securityReviewType`)
-//!   - action: `finalize | reopen`
+//! Implements all 10 security-review operations from the Drata spec under
+//! `drata vendor security-review <verb>`. All paths are nested under
+//! `/vendors/{vendorId}`.
 //!
-//! Phase 2 implements all GET handlers (list, get, actions, questionnaires)
-//! and JSON mutating handlers (create, update, run-action).
-//! Phase 3 adds the multipart handlers: `create-with-file` (single `file` part)
-//! and `upload-questionnaire` / `upload-questionnaire-to-review` (multi-file
-//! `files` array). The questionnaire endpoints are confirmed multipart (Q1a);
-//! `create-with-file`'s content-type is unverified (Q1b), so a `415` rejection
-//! is mapped to an actionable error pointing at the `raw` JSON fallback.
+//! ## Verb map
+//!
+//! | Verb | Method | Path |
+//! |------|--------|------|
+//! | `list` | GET | `/security-reviews` |
+//! | `create` | POST | `/security-reviews` |
+//! | `create-with-file` | POST | `/security-reviews/with-file` |
+//! | `get` | GET | `/security-reviews/{srId}` |
+//! | `update` | PUT | `/security-reviews/{srId}` |
+//! | `actions` | GET | `/security-reviews/{srId}/actions` |
+//! | `run-action` | POST | `/security-reviews/{srId}/actions` |
+//! | `questionnaires` | GET | `/security-reviews/{srId}/security-questionnaires` |
+//! | `upload-questionnaire` | POST | `/security-questionnaires` |
+//! | `upload-questionnaire-to-review` | POST | `/security-reviews/{srId}/security-questionnaires` |
+//!
+//! ## Enum serialization (confirmed against spec)
+//!
+//! - `SecurityReviewStatus` -> body key `securityReviewStatus`:
+//!   `NOT_YET_STARTED | IN_PROGRESS | COMPLETED | NOT_REQUIRED`
+//! - `SecurityReviewType` -> body key `securityReviewType`:
+//!   `SECURITY | SOC_REPORT | UPLOAD_REPORT`
+//! - `SecurityReviewAction` -> body key `action`:
+//!   `finalize | reopen`
+//!
+//! ## Content-type notes
+//!
+//! The `upload-questionnaire` and `upload-questionnaire-to-review` endpoints are
+//! confirmed `multipart/form-data` with a `files` array (Q1a). `create-with-file`
+//! is sent as multipart with a single `file` part; if the endpoint actually
+//! requires `application/json`, it returns `415` and an actionable error message
+//! points the user at the `raw` JSON fallback (Q1b).
 
 use crate::cli::{SecurityReviewAction, SecurityReviewStatus, SecurityReviewType, VendorSecurityReviewAction};
 use crate::client::{ApiError, DrataClient, Multipart};

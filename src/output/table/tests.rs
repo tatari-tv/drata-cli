@@ -67,3 +67,88 @@ fn truncate_is_char_boundary_safe() {
     assert!(out.chars().count() <= 8);
     assert!(out.ends_with('…'));
 }
+
+// ---------------------------------------------------------------------------
+// Security review renderer
+// ---------------------------------------------------------------------------
+
+#[test]
+fn render_security_reviews_list_shape() {
+    let v = json!({
+        "data": [
+            {
+                "id": 1,
+                "title": "Annual SOC2 Review",
+                "status": "IN_PROGRESS",
+                "type": "SOC_REPORT",
+                "decision": null,
+                "reviewDeadlineAt": "2026-12-31T00:00:00.000Z"
+            },
+            {
+                "id": 2,
+                "title": "Security Assessment",
+                "status": "NOT_YET_STARTED",
+                "type": "SECURITY",
+                "decision": "APPROVED",
+                "reviewDeadlineAt": "2026-06-30T00:00:00.000Z"
+            }
+        ]
+    });
+    let out = render(&v, DEFAULT_WIDTH).unwrap();
+    assert!(out.contains("ID"));
+    assert!(out.contains("TITLE"));
+    assert!(out.contains("STATUS"));
+    assert!(out.contains("TYPE"));
+    assert!(out.contains("DECISION"));
+    assert!(out.contains("DEADLINE"));
+    assert!(out.contains("Annual SOC2 Review"));
+    assert!(out.contains("IN_PROGRESS"));
+    assert!(out.contains("SOC_REPORT"));
+    assert!(out.contains("Security Assessment"));
+    assert!(out.contains("NOT_YET_STARTED"));
+    assert!(out.contains("APPROVED"));
+    // Numeric IDs render as numbers.
+    assert!(out.contains("1"));
+    assert!(out.contains("2"));
+}
+
+#[test]
+fn render_security_review_single_get() {
+    // Single-object get response (no "data" wrapper) is wrapped as a one-row list.
+    let v = json!({
+        "id": 42,
+        "title": "Vendor Review",
+        "status": "COMPLETED",
+        "type": "UPLOAD_REPORT",
+        "decision": "APPROVED",
+        "reviewDeadlineAt": "2026-09-01T00:00:00.000Z"
+    });
+    let out = render(&v, DEFAULT_WIDTH).unwrap();
+    assert!(out.contains("42"));
+    assert!(out.contains("Vendor Review"));
+    assert!(out.contains("COMPLETED"));
+    assert!(out.contains("UPLOAD_REPORT"));
+    assert!(out.contains("APPROVED"));
+}
+
+#[test]
+fn render_security_reviews_null_title_and_decision() {
+    // Nullable fields (title, decision) render as empty string, not "null".
+    let v = json!({
+        "data": [
+            {
+                "id": 5,
+                "title": null,
+                "status": "NOT_YET_STARTED",
+                "type": "SECURITY",
+                "decision": null,
+                "reviewDeadlineAt": "2027-01-01T00:00:00.000Z"
+            }
+        ]
+    });
+    let out = render(&v, DEFAULT_WIDTH).unwrap();
+    assert!(out.contains("5"));
+    assert!(out.contains("NOT_YET_STARTED"));
+    // Null fields must not render as the word "null".
+    assert!(!out.contains("null"), "null fields should render as empty, got: {out}");
+}

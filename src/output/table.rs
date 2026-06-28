@@ -114,6 +114,10 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("requestDescription") || obj.contains_key("testName") {
         return Some(render_events);
     }
+    // Security review rows carry `reviewDeadlineAt` (unique to the security-review DTO).
+    if obj.contains_key("reviewDeadlineAt") {
+        return Some(render_security_reviews);
+    }
     None
 }
 
@@ -375,6 +379,22 @@ fn render_events(rows: &[Value], width: usize) -> String {
             |r| str_field(r, "category"),
             |r| str_field(r, "source"),
             |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_security_reviews(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "TITLE", "STATUS", "TYPE", "DECISION", "DEADLINE"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "title"),
+            |r| str_field(r, "status"),
+            |r| str_field(r, "type"),
+            |r| str_field(r, "decision"),
+            |r| str_field(r, "reviewDeadlineAt"),
         ],
         width,
     )

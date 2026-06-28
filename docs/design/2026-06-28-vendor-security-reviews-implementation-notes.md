@@ -56,3 +56,22 @@
 
 ### Open questions
 - None.
+
+## Phase 4: Output + polish
+
+### Design decisions
+- `render_security_reviews` sniffs on `reviewDeadlineAt` - `src/output/table.rs:pick_renderer` - this field is present on every security-review response DTO (`VendorSecurityReviewResponsePublicV2Dto` and compact variant) and does not appear in any other Drata response shape in the spec; it is therefore the minimal, unambiguous discriminator. Using `status`+`type` alone would risk false-positive matches against other resources that carry `status` (policies, vendors, devices all do); `reviewDeadlineAt` is unique.
+- Table columns chosen as `ID | TITLE | STATUS | TYPE | DECISION | DEADLINE` - `src/output/table.rs:render_security_reviews` - covers the most operator-relevant fields at a glance: identity (id, title), current state (status, decision), resource type (type), and timeline (deadline). Fields `note`, `userId`, `requesterUserId`, `socReviewForm`, and `_links` are detail fields better served by JSON output.
+- Module doc comment on `security.rs` expanded to a full verb-map table and enum-serialization reference section - `src/resources/vendor/security.rs` - the per-phase implementation notes that the prior comment contained (Phase 2/3 references) were replaced with a stable, reader-facing API map that will remain accurate post-implementation.
+- Three renderer tests added: list shape (two rows, all columns), single-get shape (one-row wrap), and null-field behavior (nullable `title`/`decision` must render as empty string not the word "null") - `src/output/table/tests.rs` - the null test protects against a regression if `str_field` behavior changes; JSON null is not the same as an absent key and both already return empty via `as_str()` returning `None`.
+- `docs/ts-vs-rust-comparison.md` section 2.5 rewritten from "gap" to "closed" with the full verb list and coverage table row updated (TS's 5 verbs vs. Rust's 10-verb superset); section 5 recommendation 1 struck through and marked Done.
+
+### Deviations
+- None. All Phase 4 deliverables (renderer, sniff branch, module doc, tests, ts-vs-rust update, design doc status flip, notes append) match the design doc's Phase 4 scope.
+
+### Tradeoffs
+- `reviewDeadlineAt` as sole sniff key vs. `reviewDeadlineAt` + `decision` combined - single key chosen because the compound check adds no discrimination benefit (both are unique to the security-review DTO); simpler sniff, same correctness.
+- Six columns (ID/TITLE/STATUS/TYPE/DECISION/DEADLINE) vs. a minimal three-column (ID/STATUS/DEADLINE) - six chosen to match the depth of the existing vendor renderer (6 cols) and to give operators enough context to act without running a `get`; the shrink-to-width engine handles narrow terminals.
+
+### Open questions
+- None.
