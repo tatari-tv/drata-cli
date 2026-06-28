@@ -160,6 +160,9 @@ const APAC_BASE_URL: &str = "https://public-api.apac.drata.com/public/v2";
 const PAGINATION_SIZE: u32 = 50;
 const MAX_RETRY_ATTEMPTS: u32 = 3;
 const DEFAULT_RETRY_DELAY_SECS: u64 = 5;
+/// Upper bound on a server-provided `Retry-After`. A hostile or buggy server
+/// could otherwise stall the CLI for minutes/hours despite bounded attempts.
+const MAX_RETRY_DELAY_SECS: u64 = 60;
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 /// Hard cap on pages drained by cursor pagination, so a server that never
 /// returns a null cursor cannot loop forever.
@@ -268,7 +271,8 @@ impl DrataClient {
                     .get("Retry-After")
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(DEFAULT_RETRY_DELAY_SECS);
+                    .unwrap_or(DEFAULT_RETRY_DELAY_SECS)
+                    .min(MAX_RETRY_DELAY_SECS);
                 warn!(delay, attempts, max = MAX_RETRY_ATTEMPTS, "rate limited, retrying");
                 sleep(Duration::from_secs(delay)).await;
                 continue;
@@ -383,7 +387,8 @@ impl DrataClient {
                     .get("Retry-After")
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(DEFAULT_RETRY_DELAY_SECS);
+                    .unwrap_or(DEFAULT_RETRY_DELAY_SECS)
+                    .min(MAX_RETRY_DELAY_SECS);
                 warn!(
                     delay,
                     attempts,

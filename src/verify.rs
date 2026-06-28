@@ -151,7 +151,10 @@ async fn verify_inner(client: &DrataClient, name: &str, id_str: &str) -> Result<
         }
         Ok(Some(v)) => {
             warn!(?v, "verify step 4: vendor still exists after delete");
-            false
+            bail!(
+                "verify step 4: vendor still exists after delete (deletion not confirmed): {:?}",
+                v
+            );
         }
         Err(e) => {
             // An ApiError with 404 is expected; treat other errors as a failure.

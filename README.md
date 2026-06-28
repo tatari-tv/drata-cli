@@ -281,7 +281,7 @@ files under the `files` part).
 
 Via `raw`, multipart is available for both POST and PUT operations:
 
-```
+```bash
 # device document upload: file part `file` plus a `type` scalar field
 drata-cli raw POST /devices/123/documents --file ./cert.pdf --field type=ANTIVIRUS_EVIDENCE --allow-writes --yes
 # evidence update is PUT multipart; --file-field overrides the part name when needed
