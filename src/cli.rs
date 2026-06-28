@@ -311,6 +311,11 @@ pub enum VendorAction {
         #[command(subcommand)]
         action: VendorQuestionnaireAction,
     },
+    /// Manage a vendor's security reviews
+    SecurityReview {
+        #[command(subcommand)]
+        action: VendorSecurityReviewAction,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -346,6 +351,210 @@ pub enum VendorQuestionnaireAction {
         /// Optional email subject
         #[arg(long)]
         email_subject: Option<String>,
+    },
+}
+
+/// Status filter / create field for security reviews.
+/// Serializes to SCREAMING_SNAKE_CASE per the Drata spec
+/// (`VendorSecurityReviewStatusEnum`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SecurityReviewStatus {
+    NotYetStarted,
+    InProgress,
+    Completed,
+    NotRequired,
+}
+
+/// Type filter / create field for security reviews.
+/// Serializes to SCREAMING_SNAKE_CASE per the Drata spec
+/// (`VendorSecurityReviewTypeEnum`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SecurityReviewType {
+    Security,
+    SocReport,
+    UploadReport,
+}
+
+/// Action for `vendor security-review run-action`.
+/// Serializes to lowercase per the Drata spec
+/// (`SecurityReviewActionEnum`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "lowercase")]
+pub enum SecurityReviewAction {
+    Finalize,
+    Reopen,
+}
+
+/// Decision filter for `vendor security-review list`.
+/// Serializes to SCREAMING_SNAKE_CASE per the Drata spec
+/// (`VendorSecurityReviewDecisionEnum`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SecurityReviewDecision {
+    Pending,
+    Approved,
+    ApprovedWithConditions,
+    Rejected,
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum VendorSecurityReviewAction {
+    /// List security reviews for a vendor
+    List {
+        /// Vendor ID
+        vendor_id: String,
+        /// Filter by status (space-separated, repeatable; spec param `status[]`)
+        #[arg(long, value_enum, ignore_case = true, num_args = 1..)]
+        status: Vec<SecurityReviewStatus>,
+        /// Filter by type (space-separated, repeatable; spec param `type[]`)
+        #[arg(long = "type", value_enum, ignore_case = true, num_args = 1..)]
+        review_type: Vec<SecurityReviewType>,
+        /// Filter by decision (space-separated, repeatable; spec param `decision[]`)
+        #[arg(long, value_enum, ignore_case = true, num_args = 1..)]
+        decision: Vec<SecurityReviewDecision>,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
+        /// Stream all pages as NDJSON instead of buffering
+        #[arg(long)]
+        all: bool,
+    },
+    /// Create a security review for a vendor
+    Create {
+        /// Vendor ID
+        vendor_id: String,
+        /// Review deadline (ISO 8601, e.g. 2026-12-31). Required unless --data/--example.
+        #[arg(long)]
+        review_deadline_at: Option<String>,
+        /// Review status. Required unless --data/--example.
+        #[arg(long, value_enum, ignore_case = true)]
+        status: Option<SecurityReviewStatus>,
+        /// Review type. Required unless --data/--example.
+        #[arg(long = "type", value_enum, ignore_case = true)]
+        review_type: Option<SecurityReviewType>,
+        /// Optional title
+        #[arg(long)]
+        title: Option<String>,
+        /// Optional note
+        #[arg(long)]
+        note: Option<String>,
+        /// Requested-at timestamp (ISO 8601)
+        #[arg(long)]
+        requested_at: Option<String>,
+        /// Requester user ID
+        #[arg(long)]
+        requester_user_id: Option<u64>,
+        /// Full request body as JSON (overrides individual flags)
+        #[arg(long)]
+        data: Option<String>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
+    },
+    /// Get a single security review by ID
+    Get {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+        /// Sub-collections to expand (space-separated, repeatable)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
+    },
+    /// Update a security review (title and/or soc-form only)
+    Update {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+        /// New title
+        #[arg(long)]
+        title: Option<String>,
+        /// SOC form as a JSON object (per spec `SocReviewFormSaveRequestPublicV2Dto`)
+        #[arg(long)]
+        soc_form: Option<String>,
+        /// Full request body as JSON (overrides individual flags)
+        #[arg(long)]
+        data: Option<String>,
+        /// Print a JSON skeleton and exit (no API call)
+        #[arg(long)]
+        example: bool,
+    },
+    /// List available actions for a security review
+    Actions {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+    },
+    /// Run a lifecycle action (finalize or reopen) on a security review
+    RunAction {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+        /// Action to run
+        #[arg(long, value_enum, ignore_case = true)]
+        action: SecurityReviewAction,
+    },
+    /// List security questionnaires attached to a security review
+    Questionnaires {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+    },
+    /// Create a security review with an attached file (multipart upload)
+    CreateWithFile {
+        /// Vendor ID
+        vendor_id: String,
+        /// Path to the file to upload (single `file` part)
+        #[arg(long)]
+        file: std::path::PathBuf,
+        /// Review title (required for create-with-file)
+        #[arg(long)]
+        title: String,
+        /// Review deadline (ISO 8601, e.g. 2026-12-31)
+        #[arg(long)]
+        review_deadline_at: String,
+        /// Review status
+        #[arg(long, value_enum, ignore_case = true)]
+        status: SecurityReviewStatus,
+        /// Review type
+        #[arg(long = "type", value_enum, ignore_case = true)]
+        review_type: SecurityReviewType,
+        /// Document type (optional, e.g. COMPLIANCE_REPORT)
+        #[arg(long)]
+        document_type: Option<String>,
+        /// Optional note
+        #[arg(long)]
+        note: Option<String>,
+        /// Requested-at timestamp (ISO 8601)
+        #[arg(long)]
+        requested_at: Option<String>,
+        /// Requester user ID
+        #[arg(long)]
+        requester_user_id: Option<u64>,
+    },
+    /// Upload one or more completed questionnaire files for a vendor (multipart)
+    UploadQuestionnaire {
+        /// Vendor ID
+        vendor_id: String,
+        /// Path(s) to questionnaire file(s) (space-separated, repeatable)
+        #[arg(long, num_args = 1.., required = true)]
+        file: Vec<std::path::PathBuf>,
+    },
+    /// Upload one or more completed questionnaire files to a security review (multipart)
+    UploadQuestionnaireToReview {
+        /// Vendor ID
+        vendor_id: String,
+        /// Security review ID
+        security_review_id: u64,
+        /// Path(s) to questionnaire file(s) (space-separated, repeatable)
+        #[arg(long, num_args = 1.., required = true)]
+        file: Vec<std::path::PathBuf>,
     },
 }
 
