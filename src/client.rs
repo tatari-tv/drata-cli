@@ -156,8 +156,10 @@ const US_BASE_URL: &str = "https://public-api.drata.com/public/v2";
 const EU_BASE_URL: &str = "https://public-api.eu.drata.com/public/v2";
 const APAC_BASE_URL: &str = "https://public-api.apac.drata.com/public/v2";
 
-/// Per-page size requested from cursor-paginated list endpoints.
-const PAGINATION_SIZE: u32 = 50;
+/// Per-page size requested from cursor-paginated list endpoints: the spec's
+/// `size` maximum on every cursor endpoint. The server default of 50 put the
+/// page cap at 500k items, below a real tenant's `/events` count (~945k).
+const PAGINATION_SIZE: u32 = 500;
 const MAX_RETRY_ATTEMPTS: u32 = 3;
 const DEFAULT_RETRY_DELAY_SECS: u64 = 5;
 /// Upper bound on a server-provided `Retry-After`. A hostile or buggy server
@@ -165,7 +167,7 @@ const DEFAULT_RETRY_DELAY_SECS: u64 = 5;
 const MAX_RETRY_DELAY_SECS: u64 = 60;
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 /// Hard cap on pages drained by cursor pagination, so a server that never
-/// returns a null cursor cannot loop forever.
+/// returns a null cursor cannot loop forever. At `PAGINATION_SIZE` this is 5M items.
 const MAX_PAGES: u32 = 10_000;
 
 /// Resolve a region string to its base URL. Returns `Err` for unknown regions
@@ -495,11 +497,12 @@ impl DrataClient {
             pages += 1;
             if pages > MAX_PAGES {
                 bail!(
-                    "cursor pagination exceeded MAX_PAGES ({}) for path {}; \
-                     the server may not be returning a terminal null cursor. \
-                     Use --all for streaming instead of buffering.",
+                    "cursor pagination hit the {}-page cap on {} after {} items (size {}) \
+                     without a null cursor; the result set is larger than the cap allows",
                     MAX_PAGES,
-                    path
+                    path,
+                    all.len(),
+                    PAGINATION_SIZE
                 );
             }
 
@@ -563,10 +566,12 @@ impl DrataClient {
             pages += 1;
             if pages > MAX_PAGES {
                 bail!(
-                    "stream_all exceeded MAX_PAGES ({}) for path {}; \
-                     the server may not be returning a terminal null cursor.",
+                    "stream_all hit the {}-page cap on {} after {} items (size {}) \
+                     without a null cursor; the result set is larger than the cap allows",
                     MAX_PAGES,
-                    path
+                    path,
+                    total_items,
+                    PAGINATION_SIZE
                 );
             }
 

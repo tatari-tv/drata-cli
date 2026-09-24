@@ -87,7 +87,7 @@ async fn cursor_pagination_drains_all_pages() {
     // Page 1: no cursor param, returns a non-null cursor.
     Mock::given(method("GET"))
         .and(path("/vendors"))
-        .and(query_param("size", "50"))
+        .and(query_param("size", "500"))
         .and(query_param("cursor", "abc"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "data": [{"id": 3, "name": "C"}],
@@ -98,7 +98,7 @@ async fn cursor_pagination_drains_all_pages() {
     // First call has no cursor; respond with cursor=abc to fetch page 2.
     Mock::given(method("GET"))
         .and(path("/vendors"))
-        .and(query_param("size", "50"))
+        .and(query_param("size", "500"))
         .and(wiremock::matchers::query_param_is_missing("cursor"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "data": [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}],

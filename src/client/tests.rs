@@ -130,7 +130,7 @@ async fn stream_all_writes_ndjson_lines() {
     // Two-page response.
     Mock::given(method("GET"))
         .and(path("/vendors"))
-        .and(query_param("size", "50"))
+        .and(query_param("size", PAGINATION_SIZE.to_string()))
         .and(query_param_is_missing("cursor"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "data": [{"id": 1, "name": "A"}, {"id": 2, "name": "B"}],
@@ -140,7 +140,7 @@ async fn stream_all_writes_ndjson_lines() {
         .await;
     Mock::given(method("GET"))
         .and(path("/vendors"))
-        .and(query_param("size", "50"))
+        .and(query_param("size", PAGINATION_SIZE.to_string()))
         .and(query_param("cursor", "next"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "data": [{"id": 3, "name": "C"}],
