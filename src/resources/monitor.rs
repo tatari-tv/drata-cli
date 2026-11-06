@@ -6,15 +6,25 @@
 //!
 //! Sub-commands: list/get/update/exclusions/failures/passes.
 
-use crate::cli::MonitorAction;
+use crate::cli::{MonitorAction, MonitorTicketAction};
 use crate::client::DrataClient;
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::output::print_value;
 use crate::query::QueryPath;
+use crate::resources::ticket;
 use eyre::{Result, bail};
 use serde_json::json;
 use tracing::{debug, instrument};
+
+pub fn example_if_requested(action: &MonitorAction) -> Option<Result<String>> {
+    match action {
+        MonitorAction::Ticket {
+            action: MonitorTicketAction::Create { args, .. },
+        } => ticket::create_example(args, ticket::MONITOR_CREATE_SPEC_PATH),
+        _ => None,
+    }
+}
 
 pub async fn handle(action: &MonitorAction, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     match action {
@@ -50,6 +60,10 @@ pub async fn handle(action: &MonitorAction, client: &DrataClient, config: &Confi
         MonitorAction::Exclusions { workspace_id, test_id } => exclusions(client, config, workspace_id, test_id).await,
         MonitorAction::Failures { workspace_id, test_id } => failures(client, config, workspace_id, test_id).await,
         MonitorAction::Passes { workspace_id, test_id } => passes(client, config, workspace_id, test_id).await,
+        MonitorAction::Ticket { action } => {
+            let (tickets, op) = ticket::monitor_target(action)?;
+            ticket::handle(client, config, confirm, &tickets, op).await
+        }
     }
 }
 

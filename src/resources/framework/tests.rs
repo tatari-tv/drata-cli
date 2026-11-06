@@ -36,3 +36,11 @@ fn set_opt_inserts_only_present_values() {
     assert_eq!(body["name"], json!("SOC 2"));
     assert!(body.get("shortName").is_none());
 }
+
+#[test]
+fn requirement_controls_path_nests_framework_and_requirement() {
+    assert_eq!(
+        requirement_controls_path("1", "2", "3"),
+        "/workspaces/1/frameworks/2/requirements/3/controls"
+    );
+}

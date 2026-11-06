@@ -152,3 +152,23 @@ fn render_security_reviews_null_title_and_decision() {
     // Null fields must not render as the word "null".
     assert!(!out.contains("null"), "null fields should render as empty, got: {out}");
 }
+
+#[test]
+fn render_ticket_rows_by_external_ticket_id() {
+    // Shape of `TicketResponsePublicV2Dto`; `isDone` must not be mistaken for
+    // a questionnaire (`isCompleted`) or any looser sniff.
+    let v = json!({
+        "data": [{
+            "id": 12, "externalTicketId": "SEC-101", "isDone": false,
+            "createdAt": "2025-07-01T16:45:55.246Z", "updatedAt": "2025-07-02T16:45:55.246Z",
+            "connectionId": 4, "lastSyncedAt": null, "completionDate": null
+        }]
+    });
+    assert!(std::ptr::fn_addr_eq(
+        pick_renderer(&v["data"][0]).unwrap(),
+        render_tickets as RowRenderer
+    ));
+    let out = render(&v, DEFAULT_WIDTH).unwrap();
+    assert!(out.contains("EXTERNAL_ID"));
+    assert!(out.contains("SEC-101"));
+}

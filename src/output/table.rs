@@ -46,6 +46,10 @@ pub fn render(value: &Value, width: usize) -> Option<String> {
 /// Choose a renderer by sniffing the fields present on a sample row.
 fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     let obj = sample.as_object()?;
+    // Ticket rows carry `externalTicketId`.
+    if obj.contains_key("externalTicketId") {
+        return Some(render_tickets);
+    }
     // Questionnaire rows carry `recipientEmail` + `isCompleted`.
     if obj.contains_key("recipientEmail") || obj.contains_key("isCompleted") {
         return Some(render_questionnaires);
@@ -151,6 +155,22 @@ fn render_questionnaires(rows: &[Value], width: usize) -> String {
             |r| str_field(r, "recipientEmail"),
             |r| bool_field(r, "isCompleted"),
             |r| str_field(r, "dateSent"),
+        ],
+        width,
+    )
+}
+
+fn render_tickets(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "EXTERNAL_ID", "DONE", "CONNECTION", "CREATED", "UPDATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "externalTicketId"),
+            |r| bool_field(r, "isDone"),
+            |r| scalar_field(r, "connectionId"),
+            |r| str_field(r, "createdAt"),
+            |r| str_field(r, "updatedAt"),
         ],
         width,
     )

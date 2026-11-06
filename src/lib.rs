@@ -39,6 +39,7 @@ pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
         Commands::Framework { action } => resources::framework::example_if_requested(action),
         Commands::Asset { action } => resources::asset::example_if_requested(action),
         Commands::Register { action } => resources::register::example_if_requested(action),
+        Commands::Monitor { action } => resources::monitor::example_if_requested(action),
         Commands::Raw(args) => raw::example_if_requested(args),
         _ => None,
     }

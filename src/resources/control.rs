@@ -15,6 +15,7 @@ use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
 use crate::output::print_value;
 use crate::query::{QueryPath, wire_name};
+use crate::resources::ticket;
 use crate::spec;
 use eyre::{Result, bail};
 use serde_json::{Value, json};
@@ -106,6 +107,10 @@ pub async fn handle(action: &ControlAction, client: &DrataClient, config: &Confi
             workspace_id,
             control_ids,
         } => compare(client, config, workspace_id, control_ids).await,
+        ControlAction::Ticket { action } => {
+            let (tickets, op) = ticket::control_target(action);
+            ticket::handle(client, config, confirm, &tickets, op).await
+        }
     }
 }
 

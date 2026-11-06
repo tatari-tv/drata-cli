@@ -10,8 +10,8 @@ use clap::ValueEnum;
 use std::fmt::Display;
 
 /// The wire string of a clap `ValueEnum`: its possible-value name. Every
-/// filter enum is declared with `rename_all = "SCREAMING_SNAKE_CASE"`, so the
-/// clap name and the spec value are the same string.
+/// filter enum is declared with a `rename_all` that makes the clap name equal
+/// the spec value (`SCREAMING_SNAKE_CASE` or `camelCase`).
 pub fn wire_name<E: ValueEnum>(value: &E) -> String {
     value
         .to_possible_value()

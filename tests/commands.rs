@@ -312,3 +312,138 @@ async fn security_review_update_sends_updated_at() {
     .await;
     assert_eq!(body(&req), json!({"updatedAt": "2025-07-01T16:45:55.246Z"}));
 }
+
+#[tokio::test]
+async fn ticket_link_sends_ticket_url_to_the_parent_collection() {
+    let req = sent(
+        &["risk", "ticket", "link", "1", "2", "--ticket-url", "https://x.test/T-1"],
+        Response::Object,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/risk-registers/1/risks/2/tickets");
+    assert_eq!(body(&req), json!({"ticketUrl": "https://x.test/T-1"}));
+}
+
+#[tokio::test]
+async fn ticket_list_encodes_done_filter() {
+    let req = sent(
+        &["control", "ticket", "list", "1", "2", "--done", "false"],
+        Response::Page,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/workspaces/1/controls/2/tickets");
+    assert!(req.url.query().unwrap_or_default().contains("isDone=false"));
+}
+
+#[tokio::test]
+async fn monitor_ticket_create_sends_connection_and_fields() {
+    let req = sent(
+        &[
+            "monitor",
+            "ticket",
+            "create",
+            "1",
+            "2",
+            "--connection-id",
+            "3",
+            "--project-id",
+            "P",
+            "--field",
+            "summary",
+            "string",
+            "Fix it",
+            "--field",
+            "labels",
+            "labels",
+            "a",
+            "--use-rich-content",
+        ],
+        Response::Object,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/workspaces/1/monitoring-tests/2/tickets/action-create");
+    assert_eq!(
+        body(&req),
+        json!({
+            "connectionId": 3,
+            "projectId": "P",
+            "fields": [
+                {"field": "summary", "type": "string", "value": "Fix it"},
+                {"field": "labels", "type": "labels", "value": "a"}
+            ],
+            "useRichContent": true
+        })
+    );
+}
+
+#[tokio::test]
+async fn ticket_create_data_is_the_whole_body() {
+    let req = sent(
+        &[
+            "risk",
+            "ticket",
+            "create",
+            "1",
+            "2",
+            "--data",
+            r#"{"connectionId":9,"fields":[]}"#,
+        ],
+        Response::Object,
+    )
+    .await;
+    assert_eq!(body(&req), json!({"connectionId": 9, "fields": []}));
+}
+
+#[tokio::test]
+async fn risk_search_encodes_filters_for_one_register() {
+    let req = sent(
+        &[
+            "risk",
+            "search",
+            "--register-id",
+            "4",
+            "--q",
+            "access",
+            "--status",
+            "active",
+            "closed",
+            "--treatment-plan",
+            "mitigate",
+            "--type",
+            "external",
+            "--owner-email",
+            "a@x.test",
+        ],
+        Response::Page,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/risk-registers/4/risks-search");
+    let q = req.url.query().unwrap_or_default().to_string();
+    for want in [
+        "q=access",
+        "status%5B%5D=ACTIVE",
+        "status%5B%5D=CLOSED",
+        "treatmentPlan%5B%5D=MITIGATE",
+        "type%5B%5D=EXTERNAL",
+        "ownerEmails%5B%5D=a@x.test",
+    ] {
+        assert!(q.contains(want), "{want} missing from {q}");
+    }
+    assert!(!q.contains("facets"), "no facets requested: {q}");
+}
+
+#[tokio::test]
+async fn risk_search_facet_requests_one_page_and_prints_the_envelope() {
+    // Page responses carry a null cursor, so a single request is also what the
+    // default path sends; the facet assertion is what differs.
+    let req = sent(
+        &["risk", "search", "--facet", "status", "riskRegisterId"],
+        Response::Page,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/risks-search");
+    let q = req.url.query().unwrap_or_default().to_string();
+    assert!(q.contains("facets%5B%5D=status"), "{q}");
+    assert!(q.contains("facets%5B%5D=riskRegisterId"), "{q}");
+    assert!(!q.contains("size="), "facet mode fetches the server's one page: {q}");
+}

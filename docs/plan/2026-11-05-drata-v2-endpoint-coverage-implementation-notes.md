@@ -68,3 +68,27 @@
 
 ### Open questions
 - None.
+
+## Phase 3: Tickets, risk remove and search, framework requirement controls
+### Design decisions
+- One ticket implementation in `src/resources/ticket.rs`: `control_target`, `risk_target` and `monitor_target` fold each parent's ids into its `.../tickets` path and yield a `TicketOp` (`List | Link | Unlink | Create`); `ticket::handle` runs it | the three parents differ only by path, so the verbs exist once. `ControlTicketAction` has no `Create` variant, so `control ticket create` is a clap exit 2 by construction.
+- Three clap enums (`ControlTicketAction`, `RiskTicketAction`, `MonitorTicketAction`) in `src/cli/ticket.rs`, with `create`'s flags in one flattened `TicketCreateArgs` | positional names differ per parent (`<control_id>`, `<risk_id>`, `<test_id>`) and help should say so; one shared enum would print a generic "parent id".
+- `ticket create` flags: `--connection-id`, `--project-id`, `--issue-type-id`, `--list-id`, `--team-id`, `--field <field> <type> <value>` (repeatable, `num_args = 3`), `--use-rich-content`, `--data`, `--example`. `--data` conflicts with every field flag. The field `type` is checked against the spec's `TicketFieldTypePublicV2Enum` before the confirm prompt | a triple avoids a delimiter that a ticket value could contain.
+- `src/resources/search.rs` is the reusable search verb: `search::run(client, config, QueryPath, &[facet])`. No facets: `get_all`, rows. Facets: one `client.get` with `facets[]`, the whole envelope printed as JSON regardless of `--output` | the table renderer shows only `data[]` and would silently drop the facet counts. Phase 4 and Phase 7 pass their own `QueryPath`.
+- `risk search` is one verb over both ops: `--register-id` switches `/risks-search` to `/risk-registers/{id}/risks-search`. `--facet riskRegisterId` with `--register-id` fails before any request, since `RiskSearchInRegisterFacetEnum` omits it. `--facet` and `--expand` are camelCase `ValueEnum`s (`RiskSearchFacet`, `RiskSearchExpand` in `src/cli/risk.rs`) read through `wire_name`.
+- `risk remove` is `DELETE /risk-registers/{id}/risks/{riskId}` through confirm. `framework requirement controls <ws> <fw> <req>` is a new `requirement` noun under `framework`, via `get_all`.
+- `render_tickets` in `src/output/table.rs`, sniffed on `externalTicketId` and placed first | a unique key in first position cannot collide with a looser sniff.
+- `monitor::example_if_requested` and its arm in `lib.rs::example_if_requested` added | monitor had no `--example` before, and `monitor ticket create --example` must run without credentials.
+- Coverage floor raised to 99; 15 rows added to `tests/commands/table.rs`.
+
+### Deviations
+- None from the doc's command names or ops. Same effect, different seam: the ticket-create `--example` skeletons come from `spec::example_for_operation` rather than hand-written text, since the generator already tracks the spec.
+
+### Tradeoffs
+- No flags for `risk search`'s date-range params (`anticipatedCompletionDate*`, `completedDate*`), `sort`, `sortDir`, `customFields`, `customRangeFields` | the doc names no flag list and the structured custom-field filters have no obvious flag shape. They stay reachable through `drata raw GET /risks-search?...`.
+- No `--sort`/`--sort-dir` on the ticket lists | nothing in the plan needs ordering; `get_all` returns the server default.
+- `risk search` as one verb with an optional `--register-id` vs two verbs | the doc names one `risk search`; the facet rule that differs between the ops is a pre-request check.
+- Ticket `create` builds its body before the confirm prompt (Phase 1/2 handlers build after) | flag errors and unreadable `--data` files should fail before asking.
+
+### Open questions
+- None.

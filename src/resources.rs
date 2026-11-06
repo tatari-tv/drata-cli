@@ -15,6 +15,8 @@ pub mod personnel;
 pub mod policy;
 pub mod register;
 pub mod risk;
+pub mod search;
+pub mod ticket;
 pub mod upload;
 pub mod user;
 pub mod vendor;

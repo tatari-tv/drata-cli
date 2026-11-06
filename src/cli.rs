@@ -7,8 +7,12 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+mod risk;
+mod ticket;
 mod upload;
 mod vendor;
+pub use risk::*;
+pub use ticket::*;
 pub use upload::*;
 pub use vendor::*;
 
@@ -348,6 +352,20 @@ pub enum RiskAction {
         #[arg(long = "file", num_args = 1..)]
         files: Vec<std::path::PathBuf>,
     },
+    /// Delete a risk
+    Remove {
+        /// Risk register ID
+        register_id: String,
+        /// Risk ID
+        risk_id: String,
+    },
+    /// Search risks across all registers, or within one with --register-id
+    Search(RiskSearchArgs),
+    /// Tickets linked to a risk
+    Ticket {
+        #[command(subcommand)]
+        action: RiskTicketAction,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -453,6 +471,11 @@ pub enum ControlAction {
         /// required). Sent as the spec's `controlIds[]` query parameter.
         #[arg(long, num_args = 1..)]
         control_ids: Vec<u64>,
+    },
+    /// Tickets linked to a control
+    Ticket {
+        #[command(subcommand)]
+        action: ControlTicketAction,
     },
 }
 
@@ -825,6 +848,11 @@ pub enum FrameworkAction {
         /// Framework ID
         framework_id: String,
     },
+    /// A single framework requirement
+    Requirement {
+        #[command(subcommand)]
+        action: FrameworkRequirementAction,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1093,6 +1121,11 @@ pub enum MonitorAction {
         /// Test ID
         test_id: String,
     },
+    /// Tickets linked to a monitoring test
+    Ticket {
+        #[command(subcommand)]
+        action: MonitorTicketAction,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -1137,5 +1170,18 @@ pub enum EventAction {
     Get {
         /// Event ID
         event_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum FrameworkRequirementAction {
+    /// List controls mapped to a framework requirement
+    Controls {
+        /// Workspace ID
+        workspace_id: String,
+        /// Framework ID
+        framework_id: String,
+        /// Requirement ID
+        requirement_id: String,
     },
 }
