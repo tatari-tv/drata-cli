@@ -784,3 +784,52 @@ async fn finalizations_422_fails_and_prints_the_servers_message() {
     assert_eq!(requests.len(), 1, "a 422 is not retried");
     assert_eq!(requests[0].url.path(), "/vendors/1/security-reviews/2/finalizations");
 }
+
+/// Dispatch `provide-trust-center-access-link` with `--data <data>` against a
+/// fresh mock; returns the dispatch result and every request the server saw.
+async fn access_link(data: &str) -> (eyre::Result<()>, Vec<wiremock::Request>) {
+    let server = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(template(Response::Accepted))
+        .mount(&server)
+        .await;
+    let cli = Cli::try_parse_from([
+        "drata",
+        "vendor",
+        "security-review",
+        "provide-trust-center-access-link",
+        "1",
+        "2",
+        "--data",
+        data,
+        "--yes",
+    ])
+    .expect("argv parses");
+    let config = test_config();
+    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+        .expect("client builds")
+        .with_base_url(server.uri());
+    let result = drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes)).await;
+    (result, server.received_requests().await.unwrap_or_default())
+}
+
+#[tokio::test]
+async fn access_link_inline_data_is_rejected_before_any_request() {
+    let (result, requests) = access_link(r#"{"accessLink":"https://t.example/share?token=s3cret"}"#).await;
+    let msg = format!("{:#}", result.expect_err("inline JSON is rejected"));
+    assert!(msg.contains("@file") && msg.contains("stdin"), "{msg}");
+    assert!(!msg.contains("s3cret"), "the link leaked into the error: {msg}");
+    assert!(requests.is_empty(), "server saw {} requests", requests.len());
+}
+
+#[tokio::test]
+async fn access_link_file_data_sends_the_access_link_body() {
+    let (result, requests) = access_link(table::ACCESS_LINK_DATA).await;
+    result.expect("dispatch succeeds");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].url.path(), "/vendors/1/security-reviews/2/access-links");
+    assert_eq!(
+        body(&requests[0]),
+        json!({"accessLink": "https://trust.vendor.test/share?token=fixture"})
+    );
+}

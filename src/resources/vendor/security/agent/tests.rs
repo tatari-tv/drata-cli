@@ -22,6 +22,9 @@ fn action(argv: &[&str]) -> SecurityReviewAgentAction {
     }
 }
 
+/// A committed `--data` file holding an access-link body.
+const ACCESS_LINK_FILE: &str = concat!("@", env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/access-link.json");
+
 fn planned(argv: &[&str]) -> Call {
     plan(&action(argv)).unwrap()
 }
@@ -53,13 +56,7 @@ fn every_verb_plans_its_method_and_path() {
         ),
         (&["request-trust-center-access", "1", "2"], "POST", "access-requests"),
         (
-            &[
-                "provide-trust-center-access-link",
-                "1",
-                "2",
-                "--access-link",
-                "https://t.example",
-            ],
+            &["provide-trust-center-access-link", "1", "2", "--data", ACCESS_LINK_FILE],
             "POST",
             "access-links",
         ),
@@ -159,12 +156,63 @@ fn request_trust_center_access_reads_inline_fields() {
 }
 
 #[test]
-fn access_link_body_requires_the_link() {
-    assert_eq!(
-        build_access_link_body(Some("https://t.example/share")).unwrap(),
-        json!({"accessLink": "https://t.example/share"})
-    );
-    assert!(build_access_link_body(None).is_err());
+fn access_link_body_needs_a_non_empty_link_and_never_quotes_it() {
+    let body = json!({"accessLink": "https://t.example/share?token=s3cret"});
+    assert_eq!(check_access_link_body(body.clone()).unwrap(), body);
+    for bad in [
+        json!({}),
+        json!({"accessLink": "  "}),
+        json!({"accessLink": 7}),
+        json!("https://t.example/share?token=s3cret"),
+    ] {
+        let err = check_access_link_body(bad).unwrap_err().to_string();
+        assert!(err.contains("accessLink"), "{err}");
+        assert!(!err.contains("s3cret"), "the link leaked into the error: {err}");
+    }
+}
+
+#[test]
+fn access_link_rejects_inline_data_without_echoing_it() {
+    let a = action(&[
+        "provide-trust-center-access-link",
+        "1",
+        "2",
+        "--data",
+        r#"{"accessLink":"https://t.example/share?token=s3cret"}"#,
+    ]);
+    let err = plan(&a).unwrap_err().to_string();
+    assert!(err.contains("@file") && err.contains("stdin"), "{err}");
+    assert!(!err.contains("s3cret"), "the link leaked into the error: {err}");
+}
+
+#[test]
+fn access_link_reads_its_body_from_a_file() {
+    match planned(&["provide-trust-center-access-link", "1", "2", "--data", ACCESS_LINK_FILE]) {
+        Call::Post { path, body } => {
+            assert_eq!(path, "/vendors/1/security-reviews/2/access-links");
+            assert_eq!(
+                body,
+                json!({"accessLink": "https://trust.vendor.test/share?token=fixture"})
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn access_link_has_no_inline_flag() {
+    let err = Cli::try_parse_from([
+        "drata",
+        "vendor",
+        "security-review",
+        "provide-trust-center-access-link",
+        "1",
+        "2",
+        "--access-link",
+        "https://t.example",
+    ])
+    .unwrap_err();
+    assert_eq!(err.exit_code(), 2);
 }
 
 #[test]

@@ -75,13 +75,11 @@ pub enum SecurityReviewAgentAction {
     ProvideTrustCenterAccessLink {
         #[command(flatten)]
         ids: ExampleReviewIds,
-        /// The shared link; a secret, since anyone holding it reads the documents
-        #[arg(long, conflicts_with = "data")]
-        access_link: Option<String>,
-        /// Full request body: inline JSON, @file, or - for stdin (overrides individual flags)
-        #[arg(long)]
+        /// The body `{"accessLink": "<url>"}` from @file or - (stdin) only; inline JSON is
+        /// rejected, since anyone holding the link reads the documents
+        #[arg(long, required_unless_present = "example")]
         data: Option<String>,
-        /// Print a JSON skeleton and exit (no API call)
+        /// Print the JSON body skeleton to fill in and pass as --data @file (no API call)
         #[arg(long)]
         example: bool,
     },

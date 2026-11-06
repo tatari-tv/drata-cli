@@ -11,7 +11,7 @@
 //! | `collect-public-documents` | POST | `public-document-collections` | 202 |
 //! | `access-request-requirements` | GET | `access-request-requirements` | 200 |
 //! | `request-trust-center-access` | POST | `access-requests` | 202 |
-//! | `provide-trust-center-access-link` | POST | `access-links` | 202 |
+//! | `provide-trust-center-access-link` | POST | `access-links` (body from @file or stdin only) | 202 |
 //! | `skip-trust-center-access-request` | POST | `access-request-skips` | 202 |
 //! | `add-documents` | POST (multipart) | `documents` | 201 |
 //! | `generate-follow-up-questionnaire` | POST | `follow-up-questionnaires` | 202 |
@@ -166,10 +166,22 @@ fn json_kind(v: &Value) -> &'static str {
     }
 }
 
-/// `provide-trust-center-access-link` body. The link is required. Pure.
-pub fn build_access_link_body(access_link: Option<&str>) -> Result<Value> {
-    let link = access_link.ok_or_else(|| eyre::eyre!("requires --access-link (or use --data/--example)"))?;
-    Ok(json!({ "accessLink": link }))
+/// Check a `provide-trust-center-access-link` body: an object whose
+/// `accessLink` is a non-empty string. The link is a secret, so no error here
+/// quotes it. Pure.
+pub fn check_access_link_body(body: Value) -> Result<Value> {
+    let ok = body
+        .get("accessLink")
+        .and_then(Value::as_str)
+        .is_some_and(|link| !link.trim().is_empty());
+    if !ok {
+        bail!(
+            "--data must be a JSON object with a non-empty string `accessLink` \
+             (see --example), got {} without one",
+            json_kind(&body)
+        );
+    }
+    Ok(body)
 }
 
 /// `add-documents` multipart body: every file under `files`, plus `type` when
@@ -270,16 +282,16 @@ pub fn plan(action: &SecurityReviewAgentAction) -> Result<Call> {
                 })?,
             }
         }
-        A::ProvideTrustCenterAccessLink {
-            ids,
-            access_link,
-            data,
-            example: _,
-        } => {
+        A::ProvideTrustCenterAccessLink { ids, data, example: _ } => {
             let (v, r) = required_ids(ids, "provide-trust-center-access-link")?;
+            // The link is a secret: file or stdin only, so it never lands in
+            // shell history or the process table.
+            let data = data
+                .as_deref()
+                .ok_or_else(|| eyre::eyre!("`provide-trust-center-access-link` requires --data <@file|->"))?;
             Call::Post {
                 path: review_path(&v, r, "access-links"),
-                body: body_or_data(data.as_deref(), || build_access_link_body(access_link.as_deref()))?,
+                body: check_access_link_body(read_data(data, DataSource::FileOrStdinOnly)?)?,
             }
         }
         A::SkipTrustCenterAccessRequest(ids) => empty_post(ids_path(ids, "access-request-skips")),

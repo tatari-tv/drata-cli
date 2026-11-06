@@ -165,3 +165,20 @@
 
 ### Open questions
 - Should `provide-trust-center-access-link` accept the link only from a file or stdin, like the Standard Connections credentials? The spec says to treat it as a secret ("anyone with it can read those documents"), and as a flag it lands in shell history and the process table.
+
+### Phase 5 follow-up: access link from a file or stdin only (supersedes the `--access-link` tradeoff and closes the open question above)
+#### Design decisions
+- `provide-trust-center-access-link` takes its body only as `--data <@file|->`, read through `read_data` with `DataSource::FileOrStdinOnly`; `--access-link <url>` is gone (`--access-link` is now a clap usage error, exit 2). Of the two shapes offered (`--access-link <@file|->` holding one URL, or `--data <@file|->` holding the JSON body) I chose `--data`. It reuses the one reader and rule the Standard Connections credentials get, and `--example` prints exactly the file to fill in (`{"accessLink": "..."}`) with no second format to explain.
+- Inline JSON fails in `plan`, before confirm and before any request, with the shared `read_data` message naming `@file` and `-` (stdin). `--data` is `required_unless_present = "example"`.
+- `check_access_link_body` (`src/resources/vendor/security/agent.rs`) requires an object with a non-empty string `accessLink` and its error names only the JSON kind, never the value. The confirm prompt shows method and path; `agent::handle` logs method and path only; `read_data` logs the file path, never the body.
+- The command-table row now passes `--data @tests/fixtures/access-link.json` (`ACCESS_LINK_DATA` in `tests/commands/table.rs`). The fixture is a test input under `tests/`, not `docs/`.
+- Tests: `access_link_inline_data_is_rejected_before_any_request` (wiremock sees zero requests, the error never contains the link), `access_link_file_data_sends_the_access_link_body`, and unit tests `access_link_rejects_inline_data_without_echoing_it`, `access_link_reads_its_body_from_a_file`, `access_link_body_needs_a_non_empty_link_and_never_quotes_it`, `access_link_has_no_inline_flag`. Each was run against its reverted change and failed.
+
+#### Deviations
+- None.
+
+#### Tradeoffs
+- `--data` holding JSON vs `--access-link` holding a bare URL | one reader and one rule for every secret body, at the cost of wrapping one URL in JSON; `--example` prints that wrapper.
+
+#### Open questions
+- None. The Phase 5 open question is closed: yes, file or stdin only.

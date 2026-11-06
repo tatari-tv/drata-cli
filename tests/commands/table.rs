@@ -38,6 +38,10 @@ pub struct Row {
 /// A readable file for the multipart upload rows.
 pub const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/LICENSE");
 
+/// `--data` for `provide-trust-center-access-link`, which takes its body from a
+/// file or stdin only.
+pub const ACCESS_LINK_DATA: &str = concat!("@", env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/access-link.json");
+
 const fn row(method: &'static str, path: &'static str, argv: &'static [&'static str], response: Response) -> Row {
     Row {
         method,
@@ -842,8 +846,8 @@ pub const ROWS: &[Row] = &[
             "provide-trust-center-access-link",
             "1",
             "2",
-            "--access-link",
-            "https://trust.vendor.test/share",
+            "--data",
+            ACCESS_LINK_DATA,
         ],
         Accepted,
     ),
