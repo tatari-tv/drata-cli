@@ -2,9 +2,7 @@
 //! `vendor-criteria-creation`, `vendor-questionnaire-template`,
 //! `vendor-risk-level` and the cross-vendor `vendor-security-review`.
 
-use super::{
-    ImpactLevel, SecurityReviewDecision, SecurityReviewStatus, SecurityReviewType, VendorCategory, VendorRisk,
-};
+use super::{ImpactLevel, SecurityReviewDecision, SecurityReviewStatus, SecurityReviewType, VendorRisk};
 use clap::{Subcommand, ValueEnum};
 
 /// Severity (spec `severities[]` items, criteria and assessments).
@@ -14,6 +12,34 @@ pub enum Severity {
     Low,
     Medium,
     High,
+}
+
+/// Category for the questionnaire-template filter (spec `categories[]` items
+/// on `/vendor-questionnaire-templates`). Not `VendorCategory`: templates have
+/// no `NONE`.
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TemplateCategory {
+    Engineering,
+    Product,
+    Marketing,
+    Cs,
+    Sales,
+    Finance,
+    Hr,
+    Administrative,
+    Security,
+    Legal,
+    InformationTechnology,
+}
+
+/// Sub-collections `vendor-security-review list` can expand (spec `expand[]`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "camelCase")]
+pub enum ReviewListExpand {
+    User,
+    RequesterUser,
+    Vendor,
 }
 
 /// Criterion origin (spec `criterionTypes[]` items).
@@ -114,7 +140,7 @@ pub enum VendorQuestionnaireTemplateAction {
         risk_level: Vec<VendorRisk>,
         /// Categories to match (space-separated)
         #[arg(long, value_enum, ignore_case = true, num_args = 1..)]
-        category: Vec<VendorCategory>,
+        category: Vec<TemplateCategory>,
     },
     /// List the questions of a questionnaire template
     Questions {
@@ -157,8 +183,8 @@ pub enum VendorSecurityReviewsAction {
         /// Only reviews of these vendor IDs (space-separated)
         #[arg(long, num_args = 1..)]
         vendor_id: Vec<u64>,
-        /// Sub-collections to expand: user, requesterUser, vendor (space-separated)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
+        /// Sub-collections to expand (space-separated)
+        #[arg(long, value_enum, num_args = 1..)]
+        expand: Vec<ReviewListExpand>,
     },
 }

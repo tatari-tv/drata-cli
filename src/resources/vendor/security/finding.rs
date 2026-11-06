@@ -12,14 +12,14 @@
 //! | `update` | PUT | `.../<collection>/{id}` |
 //! | `remove` | DELETE | `.../<collection>/{id}` |
 
-use crate::cli::{SecurityReviewNoteAction, SecurityReviewObservationAction};
+use crate::cli::{FindingExpand, SecurityReviewNoteAction, SecurityReviewObservationAction};
 use crate::client::DrataClient;
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::data::{DataSource, read_data};
 use crate::expand::append_expand;
 use crate::output::print_value;
-use crate::query::QueryPath;
+use crate::query::{QueryPath, wire_name};
 use crate::spec;
 use eyre::{Result, bail};
 use serde_json::{Value, json};
@@ -78,11 +78,11 @@ pub struct Target<'a> {
 pub enum Op<'a> {
     List {
         assessment_id: Option<u64>,
-        expand: &'a [String],
+        expand: Vec<String>,
     },
     Get {
         id: u64,
-        expand: &'a [String],
+        expand: Vec<String>,
     },
     Create {
         text: Option<&'a str>,
@@ -112,6 +112,10 @@ pub fn collection_path(vendor_id: &str, security_review_id: u64, kind: Kind) -> 
     )
 }
 
+fn wire_names(expand: &[FindingExpand]) -> Vec<String> {
+    expand.iter().map(wire_name).collect()
+}
+
 const MISSING_IDS: &str =
     "requires <vendor_id> <security_review_id> (and the item id for update); use --example to print the body skeleton";
 
@@ -130,7 +134,7 @@ pub fn note_target(action: &SecurityReviewNoteAction) -> Result<Target<'_>> {
             collection: collection_path(vendor_id, *security_review_id, kind),
             op: Op::List {
                 assessment_id: *assessment_id,
-                expand,
+                expand: wire_names(expand),
             },
         },
         SecurityReviewNoteAction::Get {
@@ -141,7 +145,10 @@ pub fn note_target(action: &SecurityReviewNoteAction) -> Result<Target<'_>> {
         } => Target {
             kind,
             collection: collection_path(vendor_id, *security_review_id, kind),
-            op: Op::Get { id: *note_id, expand },
+            op: Op::Get {
+                id: *note_id,
+                expand: wire_names(expand),
+            },
         },
         SecurityReviewNoteAction::Create {
             vendor_id,
@@ -218,7 +225,7 @@ pub fn observation_target(action: &SecurityReviewObservationAction) -> Result<Ta
             collection: collection_path(vendor_id, *security_review_id, kind),
             op: Op::List {
                 assessment_id: *assessment_id,
-                expand,
+                expand: wire_names(expand),
             },
         },
         SecurityReviewObservationAction::Get {
@@ -231,7 +238,7 @@ pub fn observation_target(action: &SecurityReviewObservationAction) -> Result<Ta
             collection: collection_path(vendor_id, *security_review_id, kind),
             op: Op::Get {
                 id: *observation_id,
-                expand,
+                expand: wire_names(expand),
             },
         },
         SecurityReviewObservationAction::Create {
@@ -378,12 +385,12 @@ pub async fn handle(client: &DrataClient, config: &Config, confirm: &ConfirmFn, 
     match op {
         Op::List { assessment_id, expand } => {
             let items = client
-                .get_all(&build_list_path(&collection, assessment_id, expand))
+                .get_all(&build_list_path(&collection, assessment_id, &expand))
                 .await?;
             print_value(&json!({ "data": items }), &config.output_format);
         }
         Op::Get { id, expand } => {
-            let path = append_expand(&build_item_path(&collection, id), expand);
+            let path = append_expand(&build_item_path(&collection, id), &expand);
             let resp = client.get(&path).await?;
             print_value(&resp, &config.output_format);
         }

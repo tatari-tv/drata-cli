@@ -5,6 +5,13 @@
 use super::Severity;
 use clap::{Subcommand, ValueEnum};
 
+/// Sub-collections notes and observations can expand (spec `expand[]`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "camelCase")]
+pub enum FindingExpand {
+    User,
+}
+
 /// Assessment status (spec `statuses[]` items).
 #[derive(ValueEnum, Clone, Debug)]
 #[clap(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -28,9 +35,9 @@ pub enum SecurityReviewNoteAction {
         /// Only notes related to this assessment
         #[arg(long)]
         assessment_id: Option<u64>,
-        /// Sub-collections to expand: user (space-separated)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
+        /// Sub-collections to expand (space-separated)
+        #[arg(long, value_enum, num_args = 1..)]
+        expand: Vec<FindingExpand>,
     },
     /// Get one note (beta)
     Get {
@@ -40,9 +47,9 @@ pub enum SecurityReviewNoteAction {
         security_review_id: u64,
         /// Note ID
         note_id: u64,
-        /// Sub-collections to expand: user (space-separated)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
+        /// Sub-collections to expand (space-separated)
+        #[arg(long, value_enum, num_args = 1..)]
+        expand: Vec<FindingExpand>,
     },
     /// Create a note (beta)
     Create {
@@ -117,9 +124,9 @@ pub enum SecurityReviewObservationAction {
         /// Only observations related to this assessment
         #[arg(long)]
         assessment_id: Option<u64>,
-        /// Sub-collections to expand: user (space-separated)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
+        /// Sub-collections to expand (space-separated)
+        #[arg(long, value_enum, num_args = 1..)]
+        expand: Vec<FindingExpand>,
     },
     /// Get one observation (beta)
     Get {
@@ -129,9 +136,9 @@ pub enum SecurityReviewObservationAction {
         security_review_id: u64,
         /// Observation ID
         observation_id: u64,
-        /// Sub-collections to expand: user (space-separated)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
+        /// Sub-collections to expand (space-separated)
+        #[arg(long, value_enum, num_args = 1..)]
+        expand: Vec<FindingExpand>,
     },
     /// Create an observation (beta)
     Create {

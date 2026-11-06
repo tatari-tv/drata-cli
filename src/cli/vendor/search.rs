@@ -1,7 +1,24 @@
 //! clap types for `drata vendor search` (`GET /vendors-search`).
 
-use super::{ReviewDeadlineStatus, SecurityReviewDecision, SecurityReviewStatus, VendorCategory, VendorStatus};
+use super::{ReviewDeadlineStatus, SecurityReviewDecision, SecurityReviewStatus, VendorCategory};
 use clap::{Args, ValueEnum};
+
+/// Vendor status for `vendor search` (spec `/vendors-search` `status[]` items).
+/// Not `VendorStatus`: `vendor list` also accepts `CURRENT`, search does not.
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum VendorSearchStatus {
+    Prospective,
+    Active,
+    Archived,
+    Approved,
+    Rejected,
+    Flagged,
+    OnHold,
+    Offboarded,
+    UnderReview,
+    None,
+}
 
 /// Vendor risk level (spec `risk` param and `riskLevels[]` items).
 #[derive(ValueEnum, Clone, Debug)]
@@ -58,7 +75,7 @@ pub struct VendorSearchArgs {
     pub q: Option<String>,
     /// Vendor statuses to match (space-separated)
     #[arg(long, value_enum, ignore_case = true, num_args = 1..)]
-    pub status: Vec<VendorStatus>,
+    pub status: Vec<VendorSearchStatus>,
     /// Categories to match (space-separated)
     #[arg(long, value_enum, ignore_case = true, num_args = 1..)]
     pub category: Vec<VendorCategory>,

@@ -13,13 +13,13 @@
 //! Every list has a `cursor` param, so each goes through `get_all`.
 
 use crate::cli::{
-    CriteriaCreationStatus, CriteriaExpand, CriterionType, ImpactLevel, SecurityReviewDecision, SecurityReviewStatus,
-    SecurityReviewType, Severity, TemplateStatus, VendorCategory, VendorCriteriaAction, VendorCriteriaCreationAction,
-    VendorQuestionnaireTemplateAction, VendorRisk, VendorRiskLevelAction, VendorSecurityReviewsAction,
+    CriteriaCreationStatus, CriteriaExpand, CriterionType, ImpactLevel, ReviewListExpand, SecurityReviewDecision,
+    SecurityReviewStatus, SecurityReviewType, Severity, TemplateCategory, TemplateStatus, VendorCriteriaAction,
+    VendorCriteriaCreationAction, VendorQuestionnaireTemplateAction, VendorRisk, VendorRiskLevelAction,
+    VendorSecurityReviewsAction,
 };
 use crate::client::DrataClient;
 use crate::config::Config;
-use crate::expand::append_expand;
 use crate::output::print_value;
 use crate::query::{QueryPath, wire_name};
 use crate::resources::vendor::security::{decision_str, status_str, type_str};
@@ -65,7 +65,7 @@ pub fn build_template_path(
     title: Option<&str>,
     status: Option<&TemplateStatus>,
     risk_level: &[VendorRisk],
-    category: &[VendorCategory],
+    category: &[TemplateCategory],
 ) -> String {
     let mut q = QueryPath::new("/vendor-questionnaire-templates");
     q.push_opt("title", title)
@@ -91,7 +91,7 @@ pub fn build_security_reviews_path(
     updated_from: Option<&str>,
     updated_to: Option<&str>,
     vendor_id: &[u64],
-    expand: &[String],
+    expand: &[ReviewListExpand],
 ) -> String {
     let mut q = QueryPath::new("/vendor-security-reviews");
     q.push_each("status[]", status.iter().map(status_str))
@@ -101,8 +101,9 @@ pub fn build_security_reviews_path(
         .push_opt("createdAtTo", created_to)
         .push_opt("updatedAtFrom", updated_from)
         .push_opt("updatedAtTo", updated_to)
-        .push_each("vendorIds[]", vendor_id);
-    append_expand(&q.finish(), expand)
+        .push_each("vendorIds[]", vendor_id)
+        .push_each("expand[]", expand.iter().map(wire_name));
+    q.finish()
 }
 
 async fn print_all(client: &DrataClient, config: &Config, path: &str) -> Result<()> {

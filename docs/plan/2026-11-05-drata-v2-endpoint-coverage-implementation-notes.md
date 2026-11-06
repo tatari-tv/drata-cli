@@ -120,3 +120,19 @@
 
 ### Open questions
 - None.
+
+### Phase 4 follow-up (supersedes the enum-reuse tradeoff above)
+#### Design decisions
+- Every enum flag added in Phase 4 now accepts exactly the spec's values for its op's param. `vendor search --status` takes `VendorSearchStatus` (no `CURRENT`); `vendor-questionnaire-template list --category` takes `TemplateCategory` (no `NONE`). `vendor list` keeps `VendorStatus` with `CURRENT`, `vendor search --category` keeps `VendorCategory` with `NONE`. A value the spec omits is a clap usage error (exit 2), not a server 400.
+- The audit found two more free-string flags whose params are spec enums: `expand` on `vendor-security-review list` (now `ReviewListExpand`: user, requesterUser, vendor) and on note/observation list and get (now `FindingExpand`: user). Both were `Vec<String>`.
+- `tests/enums.rs` compares each Phase 4 enum's wire names with the `enum` of its op's param in the embedded spec (set equality, both directions), so a spec refresh that adds or drops a value fails the test. Parse tests pin the two rejections and that the sibling commands still accept those values.
+- Every other Phase 4 enum already matched its op's spec enum exactly.
+
+#### Deviations
+- None.
+
+#### Tradeoffs
+- Two near-duplicate enums (`VendorSearchStatus`, `TemplateCategory`) instead of reuse | the spec's value sets differ per op, and a flag must never accept a value the spec does not list.
+
+#### Open questions
+- None.

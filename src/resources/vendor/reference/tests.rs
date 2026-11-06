@@ -50,7 +50,7 @@ fn template_paths() {
             Some("sec"),
             Some(&TemplateStatus::Active),
             &[VendorRisk::High],
-            &[VendorCategory::Security]
+            &[TemplateCategory::Security]
         ),
         "/vendor-questionnaire-templates?title=sec&status=ACTIVE\
          &riskLevels%5B%5D=HIGH&categories%5B%5D=SECURITY"
@@ -72,7 +72,7 @@ fn security_reviews_path_is_cross_vendor() {
         None,
         Some("2026-12-31"),
         &[8, 9],
-        &["vendor".to_string()],
+        &[ReviewListExpand::Vendor],
     );
     assert_eq!(
         path,
