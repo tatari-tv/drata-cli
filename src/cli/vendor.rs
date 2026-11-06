@@ -3,9 +3,11 @@
 
 use clap::{Subcommand, ValueEnum};
 
+mod agent;
 mod finding;
 mod reference;
 mod search;
+pub use agent::*;
 pub use finding::*;
 pub use reference::*;
 pub use search::*;
@@ -496,4 +498,7 @@ pub enum VendorSecurityReviewAction {
         #[arg(long, num_args = 1.., required = true)]
         file: Vec<std::path::PathBuf>,
     },
+    /// The agent review workflow verbs (beta), flattened into this group
+    #[command(flatten)]
+    Agent(SecurityReviewAgentAction),
 }

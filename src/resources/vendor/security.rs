@@ -1,6 +1,6 @@
 //! `drata vendor security-review ...` - security review command group for a vendor.
 //!
-//! Implements all 10 security-review operations from the Drata spec under
+//! Implements the 10 base security-review operations from the Drata spec under
 //! `drata vendor security-review <verb>`. All paths are nested under
 //! `/vendors/{vendorId}`.
 //!
@@ -18,6 +18,9 @@
 //! | `questionnaires` | GET | `/security-reviews/{srId}/security-questionnaires` |
 //! | `upload-questionnaire` | POST | `/security-questionnaires` |
 //! | `upload-questionnaire-to-review` | POST | `/security-reviews/{srId}/security-questionnaires` |
+//!
+//! The beta notes, observations, assessments and agent workflow verbs live in
+//! the `finding`, `assessment` and `agent` submodules.
 //!
 //! ## Enum serialization (confirmed against spec)
 //!
@@ -54,6 +57,7 @@ use std::io;
 use std::path::Path;
 use tracing::debug;
 
+pub mod agent;
 pub mod assessment;
 pub mod finding;
 
@@ -143,6 +147,7 @@ pub fn example_if_requested(action: &VendorSecurityReviewAction) -> Option<Resul
         }
         VendorSecurityReviewAction::Note { action } => finding::example_if_requested(Some(action), None),
         VendorSecurityReviewAction::Observation { action } => finding::example_if_requested(None, Some(action)),
+        VendorSecurityReviewAction::Agent(action) => agent::example_if_requested(action),
         _ => None,
     }
 }
@@ -302,6 +307,7 @@ pub async fn handle(
             security_review_id,
             file,
         } => upload_questionnaire_to_review(client, config, confirm, vendor_id, *security_review_id, file).await,
+        VendorSecurityReviewAction::Agent(action) => agent::handle(action, client, config, confirm).await,
     }
 }
 

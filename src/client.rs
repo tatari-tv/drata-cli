@@ -484,6 +484,14 @@ impl DrataClient {
         self.send_inner(Method::DELETE, path, None, Retry429::Default).await
     }
 
+    /// DELETE with a JSON body, for the ops whose spec requires one (the agent
+    /// review's `assessment-runs/current` takes `{}`).
+    #[instrument(skip(self, body))]
+    pub async fn delete_with_body(&self, path: &str, body: Value) -> Result<Value> {
+        self.send_inner(Method::DELETE, path, Some(body), Retry429::Default)
+            .await
+    }
+
     /// Generic passthrough for the `raw` namespace. Non-GET is subject to the
     /// same write guardrail as the typed verbs.
     #[instrument(skip(self, body))]
@@ -671,6 +679,7 @@ fn format_api_error(method: &Method, url: &str, status: StatusCode, body: &str) 
                 if !details.is_empty() {
                     s.push_str(&format!("\nDetails: {}", details.join("; ")));
                 }
+                s.push_str(&agent_guidance(&parsed));
                 s
             }
             // No message at the expected path: surface the raw body verbatim so
@@ -682,6 +691,38 @@ fn format_api_error(method: &Method, url: &str, status: StatusCode, body: &str) 
     }
 
     format!("API error {} on {}: {}", status, target, body)
+}
+
+/// The agent review's 422 (`AgentActionNotAvailableResponsePublicV2Dto`)
+/// carries what to do next beside its `message`: one line per blocker
+/// (`reason: message [resolution]`), the actions available now, and the
+/// current step. Empty for any body without those keys.
+fn agent_guidance(parsed: &Value) -> String {
+    let mut out = String::new();
+    if let Some(blockers) = parsed.get("blockers").and_then(|b| b.as_array()) {
+        for b in blockers {
+            let reason = b.get("reason").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
+            let message = b.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            out.push_str(&format!("\nBlocker {}: {}", reason, message));
+            let resolution = b.get("resolution");
+            let r_type = resolution.and_then(|r| r.get("type")).and_then(|v| v.as_str());
+            let r_action = resolution.and_then(|r| r.get("action")).and_then(|v| v.as_str());
+            match (r_type, r_action) {
+                (Some(t), Some(a)) => out.push_str(&format!(" [{}: {}]", t, a)),
+                (Some(t), None) => out.push_str(&format!(" [{}]", t)),
+                _ => {}
+            }
+        }
+    }
+    if let Some(actions) = parsed.get("availableActions").and_then(|a| a.as_array()) {
+        let names: Vec<&str> = actions.iter().filter_map(|a| a.as_str()).collect();
+        let shown = if names.is_empty() { "none".to_string() } else { names.join(", ") };
+        out.push_str(&format!("\nAvailable actions: {}", shown));
+    }
+    if let Some(step) = parsed.get("currentStep").and_then(|s| s.as_str()) {
+        out.push_str(&format!("\nCurrent step: {}", step));
+    }
+    out
 }
 
 pub mod presigned;

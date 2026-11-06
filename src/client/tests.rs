@@ -312,3 +312,54 @@ async fn retry_default_retries_429() {
     assert_eq!(v["id"], 1);
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
 }
+
+#[test]
+fn agent_422_prints_message_blockers_and_available_actions() {
+    let body = r#"{
+        "name": "AgentActionNotAvailable", "statusCode": 422, "code": 422,
+        "message": "The agent does not offer the finalize action right now.",
+        "requestedAction": "finalize",
+        "blockers": [
+            {"reason": "RESIDUAL_RISK_NOT_REVIEWED", "message": "Review the residual risk first.",
+             "resolution": {"type": "UI_ONLY", "action": "Review residual risk"}},
+            {"reason": "ASSESSMENT_IN_PROGRESS", "message": "An assessment is running.",
+             "resolution": {"type": "WAIT"}}
+        ],
+        "availableActions": ["stop_assessment"],
+        "currentStep": "ASSESS"
+    }"#;
+    let msg = format_api_error(
+        &Method::POST,
+        "https://x/vendors/1/security-reviews/2/finalizations",
+        StatusCode::UNPROCESSABLE_ENTITY,
+        body,
+    );
+    assert!(msg.contains("422"), "{msg}");
+    assert!(
+        msg.contains("The agent does not offer the finalize action right now."),
+        "{msg}"
+    );
+    assert!(
+        msg.contains(
+            "Blocker RESIDUAL_RISK_NOT_REVIEWED: Review the residual risk first. [UI_ONLY: Review residual risk]"
+        ),
+        "{msg}"
+    );
+    assert!(
+        msg.contains("Blocker ASSESSMENT_IN_PROGRESS: An assessment is running. [WAIT]"),
+        "{msg}"
+    );
+    assert!(msg.contains("Available actions: stop_assessment"), "{msg}");
+    assert!(msg.contains("Current step: ASSESS"), "{msg}");
+}
+
+#[test]
+fn plain_errors_carry_no_agent_guidance() {
+    let msg = format_api_error(
+        &Method::GET,
+        "https://x/vendors",
+        StatusCode::BAD_REQUEST,
+        r#"{"message":"bad"}"#,
+    );
+    assert!(!msg.contains("Blocker") && !msg.contains("Available actions"), "{msg}");
+}

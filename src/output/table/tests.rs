@@ -177,6 +177,13 @@ fn render_ticket_rows_by_external_ticket_id() {
 /// response (the item schema for a `data[]` list, the schema itself for a
 /// single object), straight from the committed spec.
 fn spec_response_row(path: &str) -> Value {
+    spec_response_object("get", path, "200", false)
+}
+
+/// `spec_response_row` for any method and success status. With `every_key`,
+/// a property with no `example` is present as `null`, so a key-sniffing
+/// renderer still sees the whole shape.
+fn spec_response_object(method: &str, path: &str, status: &str, every_key: bool) -> Value {
     let spec: Value = serde_json::from_str(include_str!("../../../spec/drata-openapi-v2.json")).unwrap();
     let schemas = &spec["components"]["schemas"];
     fn resolve<'a>(schemas: &'a Value, mut node: &'a Value) -> Value {
@@ -187,15 +194,21 @@ fn spec_response_row(path: &str) -> Value {
     }
     let mut schema = resolve(
         schemas,
-        &spec["paths"][path]["get"]["responses"]["200"]["content"]["application/json"]["schema"],
+        &spec["paths"][path][method]["responses"][status]["content"]["application/json"]["schema"],
     );
     if let Some(items) = schema["properties"].get("data").and_then(|d| d.get("items")) {
         schema = resolve(schemas, items);
     }
     let mut row = serde_json::Map::new();
     for (key, prop) in schema["properties"].as_object().unwrap() {
-        if let Some(example) = resolve(schemas, prop).get("example") {
-            row.insert(key.clone(), example.clone());
+        match resolve(schemas, prop).get("example") {
+            Some(example) => {
+                row.insert(key.clone(), example.clone());
+            }
+            None if every_key => {
+                row.insert(key.clone(), Value::Null);
+            }
+            None => {}
         }
     }
     Value::Object(row)
@@ -285,4 +298,43 @@ fn new_sniffs_do_not_steal_the_rows_that_came_first() {
 fn criteria_creation_sniff_needs_exactly_its_four_keys() {
     let extra = json!({"id": 1, "workspaceId": 1, "status": "X", "createdAt": "t", "name": "n"});
     assert!(pick_renderer(&extra).is_none_or(|r| !std::ptr::fn_addr_eq(r, render_criteria_creations as RowRenderer)));
+}
+
+#[test]
+fn agent_workflow_responses_print_whole_as_json() {
+    // No sniff may claim an agent response: a 202 acceptance body, a
+    // finalization or a residual-risk evaluation prints whole, not as a
+    // partial table of some other resource.
+    let cases = [
+        ("post", "agent", "202"),
+        ("post", "criteria-confirmations", "200"),
+        ("post", "assessment-runs", "202"),
+        ("delete", "assessment-runs/current", "202"),
+        ("post", "public-document-collections", "202"),
+        ("get", "access-request-requirements", "200"),
+        ("post", "access-requests", "202"),
+        ("post", "access-links", "202"),
+        ("post", "access-request-skips", "202"),
+        ("post", "documents", "201"),
+        ("post", "follow-up-questionnaires", "202"),
+        ("get", "follow-up-questionnaire", "200"),
+        ("post", "follow-up-questionnaire-sends", "202"),
+        ("get", "residual-risk", "200"),
+        ("post", "finalizations", "200"),
+        ("get", "summary/status", "200"),
+        ("get", "workflow", "200"),
+    ];
+    for (method, segment, status) in cases {
+        let path = format!("{REVIEW}/{segment}");
+        let body = spec_response_object(method, &path, status, true);
+        assert!(
+            body.as_object().is_some_and(|o| !o.is_empty()),
+            "{method} {path}: no response properties"
+        );
+        assert!(
+            pick_renderer(&body).is_none(),
+            "{method} {path}: a renderer claimed {body}"
+        );
+        assert!(render(&body, DEFAULT_WIDTH).is_none(), "{method} {path}");
+    }
 }

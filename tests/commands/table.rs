@@ -22,6 +22,9 @@ pub enum Response {
     Object,
     /// `204 No Content`.
     Empty,
+    /// `202 Accepted` with the agent review's acceptance body:
+    /// `{"securityReviewId": 2, "workflowId": 1, "action": "start_assessment"}`.
+    Accepted,
 }
 
 #[derive(Debug)]
@@ -44,7 +47,7 @@ const fn row(method: &'static str, path: &'static str, argv: &'static [&'static 
     }
 }
 
-use Response::{Empty, Object, Page};
+use Response::{Accepted, Empty, Object, Page};
 
 pub const ROWS: &[Row] = &[
     // vendors
@@ -827,6 +830,153 @@ pub const ROWS: &[Row] = &[
         "GET",
         "/vendors/{vendorId}/security-reviews/{securityReviewId}/assessments-stats",
         &["vendor", "security-review", "assessment", "stats", "1", "2"],
+        Object,
+    ),
+    // security-review agent workflow (beta); the 202 ops answer Accepted
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/access-links",
+        &[
+            "vendor",
+            "security-review",
+            "provide-trust-center-access-link",
+            "1",
+            "2",
+            "--access-link",
+            "https://trust.vendor.test/share",
+        ],
+        Accepted,
+    ),
+    row(
+        "GET",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/access-request-requirements",
+        &["vendor", "security-review", "access-request-requirements", "1", "2"],
+        Object,
+    ),
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/access-request-skips",
+        &[
+            "vendor",
+            "security-review",
+            "skip-trust-center-access-request",
+            "1",
+            "2",
+        ],
+        Accepted,
+    ),
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/access-requests",
+        &["vendor", "security-review", "request-trust-center-access", "1", "2"],
+        Accepted,
+    ),
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/agent",
+        &["vendor", "security-review", "start-agent", "1", "2"],
+        Accepted,
+    ),
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/assessment-runs",
+        &["vendor", "security-review", "start-assessment", "1", "2"],
+        Accepted,
+    ),
+    row(
+        "DELETE",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/assessment-runs/current",
+        &["vendor", "security-review", "stop-assessment", "1", "2"],
+        Accepted,
+    ),
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/criteria-confirmations",
+        &["vendor", "security-review", "confirm-criteria", "1", "2"],
+        Object,
+    ),
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/documents",
+        &[
+            "vendor",
+            "security-review",
+            "add-documents",
+            "1",
+            "2",
+            "--file",
+            FIXTURE,
+        ],
+        Object,
+    ),
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/finalizations",
+        &[
+            "vendor",
+            "security-review",
+            "finalize",
+            "1",
+            "2",
+            "--decision",
+            "approved",
+        ],
+        Object,
+    ),
+    row(
+        "GET",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/follow-up-questionnaire",
+        &["vendor", "security-review", "follow-up-questionnaire", "1", "2"],
+        Object,
+    ),
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/follow-up-questionnaire-sends",
+        &[
+            "vendor",
+            "security-review",
+            "send-follow-up-questionnaire",
+            "1",
+            "2",
+            "--email",
+            "sec@vendor.test",
+        ],
+        Accepted,
+    ),
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/follow-up-questionnaires",
+        &[
+            "vendor",
+            "security-review",
+            "generate-follow-up-questionnaire",
+            "1",
+            "2",
+        ],
+        Accepted,
+    ),
+    row(
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/public-document-collections",
+        &["vendor", "security-review", "collect-public-documents", "1", "2"],
+        Accepted,
+    ),
+    row(
+        "GET",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/residual-risk",
+        &["vendor", "security-review", "residual-risk", "1", "2"],
+        Object,
+    ),
+    row(
+        "GET",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/summary/status",
+        &["vendor", "security-review", "summary", "1", "2"],
+        Object,
+    ),
+    row(
+        "GET",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/workflow",
+        &["vendor", "security-review", "workflow", "1", "2"],
         Object,
     ),
 ];

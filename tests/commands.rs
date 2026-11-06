@@ -29,6 +29,8 @@ fn template(response: Response) -> ResponseTemplate {
         Response::Page => ResponseTemplate::new(200).set_body_json(json!({"data": [], "pagination": {"cursor": null}})),
         Response::Object => ResponseTemplate::new(200).set_body_json(json!({"id": 1})),
         Response::Empty => ResponseTemplate::new(204),
+        Response::Accepted => ResponseTemplate::new(202)
+            .set_body_json(json!({"securityReviewId": 2, "workflowId": 1, "action": "start_assessment"})),
     }
 }
 
@@ -644,4 +646,141 @@ fn finding_create_without_ids_or_example_is_a_usage_error() {
     let err = Cli::try_parse_from(["drata", "vendor", "security-review", "note", "create", "--note", "x"])
         .expect_err("ids are required without --example");
     assert_eq!(err.exit_code(), 2);
+}
+
+#[tokio::test]
+async fn finalize_body_carries_decision_and_note() {
+    let req = sent(
+        &[
+            "vendor",
+            "security-review",
+            "finalize",
+            "1",
+            "2",
+            "--decision",
+            "approved_with_conditions",
+            "--note",
+            "ok",
+        ],
+        Response::Object,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/vendors/1/security-reviews/2/finalizations");
+    assert_eq!(
+        body(&req),
+        json!({"decision": "APPROVED_WITH_CONDITIONS", "note": "ok"})
+    );
+}
+
+#[tokio::test]
+async fn confirm_criteria_sends_criterion_ids() {
+    let req = sent(
+        &[
+            "vendor",
+            "security-review",
+            "confirm-criteria",
+            "1",
+            "2",
+            "--criterion-id",
+            "101",
+            "102",
+        ],
+        Response::Object,
+    )
+    .await;
+    assert_eq!(body(&req), json!({"criterionIds": [101, 102]}));
+}
+
+#[tokio::test]
+async fn stop_assessment_sends_delete_with_an_empty_object() {
+    let req = sent(
+        &["vendor", "security-review", "stop-assessment", "1", "2"],
+        Response::Accepted,
+    )
+    .await;
+    assert_eq!(req.method.as_str(), "DELETE");
+    assert_eq!(req.url.path(), "/vendors/1/security-reviews/2/assessment-runs/current");
+    assert_eq!(body(&req), json!({}));
+}
+
+#[tokio::test]
+async fn add_documents_sends_multipart_files_and_type() {
+    let req = sent(
+        &[
+            "vendor",
+            "security-review",
+            "add-documents",
+            "1",
+            "2",
+            "--file",
+            table::FIXTURE,
+            table::FIXTURE,
+            "--type",
+            "bridge_letter",
+        ],
+        Response::Object,
+    )
+    .await;
+    let content_type = req
+        .headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert!(content_type.starts_with("multipart/form-data"), "{content_type}");
+    let raw = String::from_utf8_lossy(&req.body);
+    assert_eq!(raw.matches("name=\"files\"").count(), 2, "two files parts");
+    assert!(raw.contains("name=\"type\"\r\n\r\nBRIDGE_LETTER"), "type field");
+}
+
+#[tokio::test]
+async fn finalizations_422_fails_and_prints_the_servers_message() {
+    let server = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(422).set_body_json(json!({
+            "name": "AgentActionNotAvailable",
+            "statusCode": 422,
+            "code": 422,
+            "message": "The agent does not offer the finalize action right now.",
+            "requestedAction": "finalize",
+            "blockers": [{
+                "reason": "ASSESSMENT_NOT_COMPLETED",
+                "message": "The assessment has not completed.",
+                "resolution": {"type": "PUBLIC_ACTION", "action": "start_assessment"}
+            }],
+            "availableActions": ["start_assessment"],
+            "currentStep": "ASSESS"
+        })))
+        .mount(&server)
+        .await;
+    let cli = Cli::try_parse_from([
+        "drata",
+        "vendor",
+        "security-review",
+        "finalize",
+        "1",
+        "2",
+        "--decision",
+        "approved",
+        "--yes",
+    ])
+    .expect("argv parses");
+    let config = test_config();
+    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+        .expect("client builds")
+        .with_base_url(server.uri());
+    let err = drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes))
+        .await
+        .expect_err("a 422 fails the command, so main exits non-zero");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("422"), "{msg}");
+    assert!(
+        msg.contains("The agent does not offer the finalize action right now."),
+        "{msg}"
+    );
+    assert!(msg.contains("Blocker ASSESSMENT_NOT_COMPLETED"), "{msg}");
+    assert!(msg.contains("Available actions: start_assessment"), "{msg}");
+    let requests = server.received_requests().await.unwrap_or_default();
+    assert_eq!(requests.len(), 1, "a 422 is not retried");
+    assert_eq!(requests[0].url.path(), "/vendors/1/security-reviews/2/finalizations");
 }

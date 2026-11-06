@@ -130,3 +130,59 @@ fn rejection_is_a_clap_usage_error() {
     let err = Cli::try_parse_from(["drata", "vendor", "search", "--status", "CURRENT"]).expect_err("rejected");
     assert_eq!(err.exit_code(), 2);
 }
+
+/// The spec's enum values for body field `field` of `POST path`, read from the
+/// `content_type` request schema.
+fn body_values(path: &str, content_type: &str, field: &str) -> BTreeSet<String> {
+    let spec = spec();
+    let schema = resolve(
+        &spec,
+        &spec["paths"][path]["post"]["requestBody"]["content"][content_type]["schema"],
+    );
+    let mut prop = resolve(&spec, &schema["properties"][field]);
+    if let Some(inner) = prop.get("allOf").and_then(|a| a.get(0)) {
+        prop = resolve(&spec, inner);
+    }
+    prop["enum"]
+        .as_array()
+        .unwrap_or_else(|| panic!("POST {path} {field} has no enum"))
+        .iter()
+        .map(|v| v.as_str().expect("string enum").to_string())
+        .collect()
+}
+
+#[test]
+fn agent_body_enums_match_the_spec() {
+    assert_eq!(
+        flag_values::<SecurityReviewDecision>(),
+        body_values(&format!("{REVIEW}/finalizations"), "application/json", "decision"),
+        "finalize --decision"
+    );
+    assert_eq!(
+        flag_values::<SecurityReviewDocumentType>(),
+        body_values(&format!("{REVIEW}/documents"), "multipart/form-data", "type"),
+        "add-documents --type"
+    );
+}
+
+#[test]
+fn finalize_requires_a_spec_decision() {
+    assert!(parses(&[
+        "vendor",
+        "security-review",
+        "finalize",
+        "1",
+        "2",
+        "--decision",
+        "pending"
+    ]));
+    assert!(!parses(&[
+        "vendor",
+        "security-review",
+        "finalize",
+        "1",
+        "2",
+        "--decision",
+        "MAYBE"
+    ]));
+}
