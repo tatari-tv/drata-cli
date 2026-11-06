@@ -28,7 +28,7 @@ mod table;
 /// Curated ops floor: the ops the curated commands reach as of the latest
 /// phase of `docs/plan/2026-11-05-drata-v2-endpoint-coverage.md`. A floor, not
 /// an equality: each phase raises it.
-const CURATED_FLOOR: usize = 99;
+const CURATED_FLOOR: usize = 121;
 
 /// The curated set, derived from the command table: every `(method, path)`
 /// here is reached by a command that `tests/commands.rs` dispatches and

@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::output::print_value;
 use crate::query::QueryPath;
 use eyre::Result;
-use serde_json::json;
+use serde_json::{Value, json};
 use tracing::{debug, instrument};
 
 /// Append `facets[]=<name>` once per facet. Pure.
@@ -21,19 +21,28 @@ pub fn facet_path(mut query: QueryPath, facets: &[String]) -> String {
     query.finish()
 }
 
-/// Run a search over `query`. Every page and rows when `facets` is empty; one
-/// page and the whole envelope when it is not.
-#[instrument(skip(client, config, query))]
-pub async fn run(client: &DrataClient, config: &Config, query: QueryPath, facets: &[String]) -> Result<()> {
+/// Fetch a search over `query`. Every page as `{data: rows}` when `facets` is
+/// empty; one page and the whole `{data, pagination, facets}` envelope when it
+/// is not.
+#[instrument(skip(client, query))]
+pub async fn fetch(client: &DrataClient, query: QueryPath, facets: &[String]) -> Result<Value> {
     if facets.is_empty() {
         let items = client.get_all(&query.finish()).await?;
         debug!(rows = items.len(), "search: all pages");
-        print_value(&json!({ "data": items }), &config.output_format);
+        Ok(json!({ "data": items }))
     } else {
         debug!(?facets, "search: single page with facets");
-        let envelope = client.get(&facet_path(query, facets)).await?;
-        print_value(&envelope, &OutputFormat::Json);
+        client.get(&facet_path(query, facets)).await
     }
+}
+
+/// Run a search and print it: rows in the configured format, or (with facets)
+/// the whole envelope as JSON.
+#[instrument(skip(client, config, query))]
+pub async fn run(client: &DrataClient, config: &Config, query: QueryPath, facets: &[String]) -> Result<()> {
+    let value = fetch(client, query, facets).await?;
+    let format = if facets.is_empty() { &config.output_format } else { &OutputFormat::Json };
+    print_value(&value, format);
     Ok(())
 }
 

@@ -447,3 +447,201 @@ async fn risk_search_facet_requests_one_page_and_prints_the_envelope() {
     assert!(q.contains("facets%5B%5D=riskRegisterId"), "{q}");
     assert!(!q.contains("size="), "facet mode fetches the server's one page: {q}");
 }
+
+/// Mount `response` on a fresh mock and run a vendor search through the shared
+/// search verb; returns the value it would print and the requests it sent.
+async fn searched(facets: &[&str], response: serde_json::Value) -> (serde_json::Value, Vec<wiremock::Request>) {
+    let server = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_body_json(response))
+        .mount(&server)
+        .await;
+    let client = DrataClient::new("test-key".to_string(), "us", true)
+        .expect("client builds")
+        .with_base_url(server.uri());
+    let facets: Vec<String> = facets.iter().map(|f| f.to_string()).collect();
+    let query = drata_cli::query::QueryPath::new("/vendors-search");
+    let value = drata_cli::resources::search::fetch(&client, query, &facets)
+        .await
+        .expect("search succeeds");
+    (value, server.received_requests().await.unwrap_or_default())
+}
+
+#[tokio::test]
+async fn vendor_search_facet_returns_envelope() {
+    // The server has a next page; facet mode must still request only one.
+    let page = json!({
+        "data": [{"id": 1, "name": "Okta"}],
+        "pagination": {"cursor": "next"},
+        "facets": {"status": [{"value": "ACTIVE", "count": 1}]}
+    });
+    let (value, requests) = searched(&["status"], page.clone()).await;
+    assert_eq!(requests.len(), 1, "one page");
+    let q = requests[0].url.query().unwrap_or_default().to_string();
+    assert!(q.contains("facets%5B%5D=status"), "{q}");
+    assert_eq!(value, page, "the whole envelope, facets included");
+    assert!(value.get("facets").is_some());
+}
+
+#[tokio::test]
+async fn vendor_search_without_facet_walks_every_page_and_drops_the_envelope() {
+    let server = MockServer::start().await;
+    Mock::given(wiremock::matchers::query_param("cursor", "next"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{"id": 2}], "pagination": {"cursor": null}
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{"id": 1}], "pagination": {"cursor": "next"}
+        })))
+        .mount(&server)
+        .await;
+    let client = DrataClient::new("test-key".to_string(), "us", true)
+        .expect("client builds")
+        .with_base_url(server.uri());
+    let value = drata_cli::resources::search::fetch(&client, drata_cli::query::QueryPath::new("/vendors-search"), &[])
+        .await
+        .expect("search succeeds");
+    assert_eq!(value, json!({"data": [{"id": 1}, {"id": 2}]}));
+}
+
+#[tokio::test]
+async fn vendor_search_encodes_filters() {
+    let req = sent(
+        &[
+            "vendor",
+            "search",
+            "--q",
+            "okta",
+            "--status",
+            "active",
+            "on_hold",
+            "--risk",
+            "high",
+            "--sub-processor",
+            "true",
+            "--expand",
+            "documents",
+            "vendorUser",
+        ],
+        Response::Page,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/vendors-search");
+    let q = req.url.query().unwrap_or_default().to_string();
+    for want in [
+        "q=okta",
+        "status%5B%5D=ACTIVE",
+        "status%5B%5D=ON_HOLD",
+        "risk=HIGH",
+        "isSubProcessor=true",
+        "expand%5B%5D=documents",
+        "expand%5B%5D=vendorUser",
+    ] {
+        assert!(q.contains(want), "{want} missing from {q}");
+    }
+}
+
+#[tokio::test]
+async fn note_create_sends_text_source_and_assessment() {
+    let req = sent(
+        &[
+            "vendor",
+            "security-review",
+            "note",
+            "create",
+            "1",
+            "2",
+            "--note",
+            "hello",
+            "--source",
+            "PROC-1",
+            "--assessment-id",
+            "9",
+        ],
+        Response::Object,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/vendors/1/security-reviews/2/notes");
+    assert_eq!(
+        body(&req),
+        json!({"note": "hello", "source": "PROC-1", "vendorAssessmentId": 9})
+    );
+}
+
+#[tokio::test]
+async fn observation_update_clear_source_sends_null() {
+    let req = sent(
+        &[
+            "vendor",
+            "security-review",
+            "observation",
+            "update",
+            "1",
+            "2",
+            "3",
+            "--clear-source",
+        ],
+        Response::Object,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/vendors/1/security-reviews/2/observations/3");
+    assert_eq!(body(&req), json!({"source": null}));
+}
+
+#[tokio::test]
+async fn assessment_list_encodes_filters() {
+    let req = sent(
+        &[
+            "vendor",
+            "security-review",
+            "assessment",
+            "list",
+            "1",
+            "2",
+            "--criteria-name",
+            "mfa",
+            "--status",
+            "not_met",
+            "n_a",
+            "--severity",
+            "high",
+        ],
+        Response::Page,
+    )
+    .await;
+    let q = req.url.query().unwrap_or_default().to_string();
+    for want in [
+        "criteriaName=mfa",
+        "statuses%5B%5D=NOT_MET",
+        "statuses%5B%5D=N_A",
+        "severities%5B%5D=HIGH",
+    ] {
+        assert!(q.contains(want), "{want} missing from {q}");
+    }
+}
+
+#[test]
+fn example_runs_without_ids_for_every_finding_body() {
+    for argv in [
+        ["vendor", "security-review", "note", "create", "--example"],
+        ["vendor", "security-review", "note", "update", "--example"],
+        ["vendor", "security-review", "observation", "create", "--example"],
+        ["vendor", "security-review", "observation", "update", "--example"],
+    ] {
+        let cli = Cli::try_parse_from(std::iter::once("drata").chain(argv)).expect("argv parses");
+        let example = drata_cli::example_if_requested(&cli)
+            .expect("example requested")
+            .expect("skeleton generated");
+        assert!(example.trim_start().starts_with('{'), "{argv:?}: {example}");
+    }
+}
+
+#[test]
+fn finding_create_without_ids_or_example_is_a_usage_error() {
+    let err = Cli::try_parse_from(["drata", "vendor", "security-review", "note", "create", "--note", "x"])
+        .expect_err("ids are required without --example");
+    assert_eq!(err.exit_code(), 2);
+}

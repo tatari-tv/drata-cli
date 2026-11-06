@@ -17,7 +17,8 @@
 //! are built incrementally with `json!`.
 
 use crate::cli::{
-    ReviewDeadlineStatus, VendorAction, VendorCategory, VendorQuestionnaireAction, VendorStatus, VendorType,
+    ReviewDeadlineStatus, VendorAction, VendorCategory, VendorQuestionnaireAction, VendorSearchArgs, VendorStatus,
+    VendorType,
 };
 use crate::client::{DrataClient, Multipart};
 use crate::config::Config;
@@ -26,6 +27,7 @@ use crate::expand::append_expand;
 use crate::filter;
 use crate::output::print_value;
 use crate::query::{QueryPath, wire_name};
+use crate::resources::search;
 use eyre::{Result, bail};
 use serde_json::{Value, json};
 use std::io;
@@ -45,9 +47,9 @@ const VENDOR_CREATE_EXAMPLE: &str = r#"{
 
 /// Returns the skeleton to print if this is a `--example` request, else `None`.
 /// Checked before config/auth load so `--example` needs no key.
-pub fn example_if_requested(action: &VendorAction) -> Option<&'static str> {
+pub fn example_if_requested(action: &VendorAction) -> Option<Result<String>> {
     match action {
-        VendorAction::Create { example: true, .. } => Some(VENDOR_CREATE_EXAMPLE),
+        VendorAction::Create { example: true, .. } => Some(Ok(VENDOR_CREATE_EXAMPLE.to_string())),
         VendorAction::SecurityReview { action: sub } => security::example_if_requested(sub),
         _ => None,
     }
@@ -147,6 +149,15 @@ pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config
             )
             .await
         }
+        VendorAction::Search(args) => {
+            let (query, facets) = build_search(args);
+            search::run(client, config, query, &facets).await
+        }
+        VendorAction::TrustOverview { vendor_id } => {
+            let resp = client.get(&build_trust_overview_path(vendor_id)).await?;
+            print_value(&resp, &config.output_format);
+            Ok(())
+        }
         VendorAction::Questionnaire { action } => questionnaire(client, config, confirm, action).await,
         VendorAction::SecurityReview { action } => security::handle(action, client, config, confirm).await,
     }
@@ -184,6 +195,48 @@ fn build_list_path(
             review_deadline_status.iter().map(wire_name),
         );
     append_expand(&q.finish(), expand)
+}
+
+/// The `GET /vendors-search` query and the facet wire names. Array filters
+/// repeat their bracketed key once per value; scalars are plain keys. Pure.
+fn build_search(args: &VendorSearchArgs) -> (QueryPath, Vec<String>) {
+    let mut q = QueryPath::new("/vendors-search");
+    q.push_opt("q", args.q.as_deref())
+        .push_each("status[]", args.status.iter().map(wire_name))
+        .push_each("category[]", args.category.iter().map(wire_name))
+        .push_each("vendorTypeIds[]", &args.vendor_type_id)
+        .push_each("vendorUserIds[]", &args.vendor_user_id)
+        .push_opt("risk", args.risk.as_ref().map(wire_name))
+        .push_opt("impactLevel", args.impact_level.as_ref().map(wire_name))
+        .push_opt("isSubProcessor", args.sub_processor)
+        .push_opt("actionRequired", args.action_required)
+        .push_opt("renewalDateGte", args.renewal_from.as_deref())
+        .push_opt("renewalDateLte", args.renewal_to.as_deref())
+        .push_each(
+            "nextReviewDeadlineStatus[]",
+            args.review_deadline_status.iter().map(wire_name),
+        )
+        .push_each(
+            "securityReviewStatus[]",
+            args.security_review_status.iter().map(wire_name),
+        )
+        .push_each(
+            "securityReviewDecision[]",
+            args.security_review_decision.iter().map(wire_name),
+        )
+        .push_each("expand[]", args.expand.iter().map(wire_name));
+    let facets = args.facet.iter().map(wire_name).collect();
+    (q, facets)
+}
+
+/// `GET /vendors/{vendorId}/trust-overview` path. Pure.
+fn build_trust_overview_path(vendor_id: &str) -> String {
+    format!("/vendors/{}/trust-overview", vendor_id)
+}
+
+/// `GET /vendors/{vendorId}/questionnaires/{questionnaireId}/questions` path. Pure.
+fn build_questions_path(vendor_id: &str, questionnaire_id: &str) -> String {
+    format!("/vendors/{}/questionnaires/{}/questions", vendor_id, questionnaire_id)
 }
 
 #[instrument(skip(client, config))]
@@ -352,6 +405,17 @@ async fn questionnaire(
             print_value(&resp, &config.output_format);
             Ok(())
         }
+        VendorQuestionnaireAction::Questions {
+            vendor_id,
+            questionnaire_id,
+        } => {
+            debug!(vendor_id, questionnaire_id, "questionnaire questions");
+            let items = client
+                .get_all(&build_questions_path(vendor_id, questionnaire_id))
+                .await?;
+            print_value(&json!({ "data": items }), &config.output_format);
+            Ok(())
+        }
         VendorQuestionnaireAction::Send {
             vendor_id,
             email,
@@ -401,4 +465,5 @@ fn vendor_name(value: &Value) -> &str {
 #[cfg(test)]
 mod tests;
 
+pub mod reference;
 pub mod security;

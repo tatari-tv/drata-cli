@@ -117,3 +117,69 @@ fn vendor_list_status_flag_is_space_separated_and_case_insensitive() {
     };
     assert_eq!(status.len(), 2);
 }
+
+#[test]
+fn search_query_encodes_filters_and_collects_facets() {
+    use crate::cli::{Cli, Commands};
+    use clap::Parser;
+    let cli = Cli::try_parse_from([
+        "drata",
+        "vendor",
+        "search",
+        "--q",
+        "okta",
+        "--status",
+        "active",
+        "--category",
+        "security",
+        "--vendor-type-id",
+        "4",
+        "5",
+        "--risk",
+        "high",
+        "--impact-level",
+        "major",
+        "--sub-processor",
+        "false",
+        "--action-required",
+        "true",
+        "--renewal-from",
+        "2026-01-01",
+        "--renewal-to",
+        "2026-12-31",
+        "--review-deadline-status",
+        "overdue",
+        "--security-review-status",
+        "completed",
+        "--security-review-decision",
+        "rejected",
+        "--expand",
+        "documents",
+        "--facet",
+        "status",
+        "vendorTypeId",
+    ])
+    .unwrap();
+    let Commands::Vendor {
+        action: VendorAction::Search(args),
+    } = cli.command
+    else {
+        panic!("expected vendor search");
+    };
+    let (query, facets) = build_search(&args);
+    assert_eq!(
+        query.finish(),
+        "/vendors-search?q=okta&status%5B%5D=ACTIVE&category%5B%5D=SECURITY\
+         &vendorTypeIds%5B%5D=4&vendorTypeIds%5B%5D=5&risk=HIGH&impactLevel=MAJOR\
+         &isSubProcessor=false&actionRequired=true&renewalDateGte=2026-01-01&renewalDateLte=2026-12-31\
+         &nextReviewDeadlineStatus%5B%5D=OVERDUE&securityReviewStatus%5B%5D=COMPLETED\
+         &securityReviewDecision%5B%5D=REJECTED&expand%5B%5D=documents"
+    );
+    assert_eq!(facets, vec!["status", "vendorTypeId"]);
+}
+
+#[test]
+fn trust_overview_and_questions_paths() {
+    assert_eq!(build_trust_overview_path("3"), "/vendors/3/trust-overview");
+    assert_eq!(build_questions_path("3", "4"), "/vendors/3/questionnaires/4/questions");
+}

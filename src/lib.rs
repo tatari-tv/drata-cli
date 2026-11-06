@@ -31,7 +31,7 @@ use tracing::instrument;
 /// method/path, or an operation with no JSON body), hence the inner `Result`.
 pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
     match &cli.command {
-        Commands::Vendor { action } => resources::vendor::example_if_requested(action).map(|s| Ok(s.to_string())),
+        Commands::Vendor { action } => resources::vendor::example_if_requested(action),
         Commands::Risk { action } => resources::risk::example_if_requested(action),
         Commands::Control { action } => resources::control::example_if_requested(action),
         Commands::Policy { action } => resources::policy::example_if_requested(action),
@@ -93,6 +93,21 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
     match &cli.command {
         Commands::Vendor { action } => {
             resources::vendor::handle(action, client, config, confirm).await?;
+        }
+        Commands::VendorCriteria { action } => {
+            resources::vendor::reference::criteria(action, client, config).await?;
+        }
+        Commands::VendorCriteriaCreation { action } => {
+            resources::vendor::reference::criteria_creation(action, client, config).await?;
+        }
+        Commands::VendorQuestionnaireTemplate { action } => {
+            resources::vendor::reference::template(action, client, config).await?;
+        }
+        Commands::VendorRiskLevel { action } => {
+            resources::vendor::reference::risk_level(action, client, config).await?;
+        }
+        Commands::VendorSecurityReview { action } => {
+            resources::vendor::reference::security_reviews(action, client, config).await?;
         }
         Commands::Risk { action } => {
             resources::risk::handle(action, client, config, confirm).await?;

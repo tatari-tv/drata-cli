@@ -92,3 +92,31 @@
 
 ### Open questions
 - None.
+
+## Phase 4: Vendor-adjacent reads, VSR notes, observations, assessments
+### Design decisions
+- Clap types in `src/cli/vendor/{search,reference,finding}.rs`, re-exported from `src/cli/vendor.rs` | `vendor.rs` was 463 lines and the new types would have nearly doubled it; the submodule dir follows the no-`mod.rs` rule.
+- Five new top-level nouns `vendor-criteria`, `vendor-criteria-creation`, `vendor-questionnaire-template`, `vendor-risk-level`, `vendor-security-review` (the cross-vendor list), implemented together in `src/resources/vendor/reference.rs` | the spec's resource names slugged per the Overview naming rule; each is a handful of `get_all` lists, so one file with one pure path builder per op.
+- Notes and observations share one implementation, `src/resources/vendor/security/finding.rs`, parameterized by `Kind` (`notes|observations`, body field `note|observation`); `note_target` / `observation_target` fold each clap enum into a common `Target` | the two collections differ only by path segment and field name. Two clap enums stay separate so help and flags say `--note` / `--observation`. Assessments are `security/assessment.rs`.
+- Security-review, note, observation and assessment ids are `u64` positionals, vendor id stays `String` | matches `vendor security-review get`, and a non-numeric id is a clap exit 2 instead of a path-injected request.
+- `create`/`update` ids are `required_unless_present = "example"` and `Option` in the enum, so `--example` runs with no ids (the existing `security-review create --example` needs dummy ids). The handler path errors if they are missing; unreachable through clap.
+- `--example` skeletons for note/observation create and update come from `spec::example_for_operation`; `vendor::example_if_requested` and `security::example_if_requested` now return `Option<Result<String>>` to carry that (the static ones are wrapped) and `lib.rs` lost its `.map(Ok)`.
+- `update` has `--clear-source` (sends `source: null`, the spec's documented clear) conflicting with `--source`; an update with no field is an error before the confirm prompt.
+- `search::fetch` split out of `search::run`: it returns the value to print (`{data: rows}` for the all-pages path, the whole envelope with facets) and `run` only prints | `vendor_search_facet_returns_envelope` can assert on the printed value, not just the request. Behavior unchanged.
+- `vendor search` flags: `--q`, `--status`, `--category`, `--vendor-type-id`, `--vendor-user-id`, `--risk`, `--impact-level`, `--sub-processor`, `--action-required`, `--renewal-from`, `--renewal-to`, `--review-deadline-status`, `--security-review-status`, `--security-review-decision`, `--expand`, `--facet`. Reuses `VendorStatus`, `VendorCategory`, `ReviewDeadlineStatus`, `SecurityReviewStatus`, `SecurityReviewDecision`. New enums: `VendorRisk`, `ImpactLevel`, `Severity`, `CriterionType`, `CriteriaExpand`, `CriteriaCreationStatus`, `TemplateStatus`, `AssessmentStatus` (`N_A` pinned with `#[value(name)]`), `VendorSearchExpand`, `VendorSearchFacet`.
+- Renderers (`src/output/table.rs`), all placed above the `recipientEmail` and vendor sniffs: `render_findings` (`securityReviewId` + `note|observation`), `render_assessments` (`criteriaName` + `currentStatus`), `render_assessment_stats` (`notMet` + `partiallyMet`), `render_criteria` (`isDraft` + `severity`), `render_templates` (`isDefault` + `title`), `render_questions` (`question` + `allowMultipleSelection`, so a control's `code` + `question` row is untouched), `render_risk_levels` (`position` + `isSystem`), `render_criteria_creations` (exactly the four keys `id, workspaceId, status, createdAt`, the only unique signal that shape has). `vendor search` rows are vendor-shaped and use `render_vendors`; the cross-vendor review list uses the existing `render_security_reviews`.
+- Renderer test feeds each op's spec response `example` values (read from the embedded spec, not hand-copied) through `pick_renderer`, plus a guard that a control, vendor and security review still pick their old renderers.
+- 22 rows added to `tests/commands/table.rs`; floor raised 99 -> 121.
+
+### Deviations
+- None from the doc's command names or ops. Same effect, different seam: the facet test asserts on `search::fetch`'s returned value (what `run` prints) because stdout is not capturable in the in-process command table.
+
+### Tradeoffs
+- No `--sort`/`--sort-dir`, `--size`, `--include-total-count` on any new list; no `renewalScheduleType`, `scheduledQuestionnaireStatus`, `customFields`, `customRangeFields` on `vendor search` | the doc names no flag list and the structured custom-field filters have no obvious flag shape; reachable through `drata raw`.
+- `vendor-security-review list` has no `--all` NDJSON stream (the per-vendor list does) | the doc names none; `get_all` rows serve the cross-vendor read.
+- Reused `VendorStatus` (includes `CURRENT`, which `/vendors-search` `status[]` omits) and `VendorCategory` (includes `NONE`, which the template `categories[]` omits) | a value the server does not accept comes back as its 400 instead of adding two near-duplicate enums.
+- No renderer for `vendor trust-overview` (`{"overview": "..."}`) | a one-key sniff would be the loosest in the file; the JSON fallback prints it whole.
+- `render_criteria_creations` sniffs on an exact key set | a new server field makes it fall back to JSON, which is harmless; a looser sniff could steal other rows.
+
+### Open questions
+- None.

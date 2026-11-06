@@ -50,6 +50,44 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("externalTicketId") {
         return Some(render_tickets);
     }
+    // Security-review note and observation rows carry `securityReviewId` next to
+    // their free-text field. Above the vendor and questionnaire sniffs.
+    if obj.contains_key("securityReviewId") && (obj.contains_key("note") || obj.contains_key("observation")) {
+        return Some(render_findings);
+    }
+    // Assessment rows carry `criteriaName` + `currentStatus`.
+    if obj.contains_key("criteriaName") && obj.contains_key("currentStatus") {
+        return Some(render_assessments);
+    }
+    // Assessment stats are one object of counts keyed `notMet`.
+    if obj.contains_key("notMet") && obj.contains_key("partiallyMet") {
+        return Some(render_assessment_stats);
+    }
+    // Vendor criteria rows carry `isDraft` + `severity`.
+    if obj.contains_key("isDraft") && obj.contains_key("severity") {
+        return Some(render_criteria);
+    }
+    // Questionnaire template rows carry `isDefault` + `title`.
+    if obj.contains_key("isDefault") && obj.contains_key("title") {
+        return Some(render_templates);
+    }
+    // Questionnaire question rows (template or vendor) carry `question` +
+    // `allowMultipleSelection`; controls carry `question` with `code`.
+    if obj.contains_key("question") && obj.contains_key("allowMultipleSelection") {
+        return Some(render_questions);
+    }
+    // Vendor risk level rows carry `position` + `isSystem`.
+    if obj.contains_key("position") && obj.contains_key("isSystem") {
+        return Some(render_risk_levels);
+    }
+    // Criteria creation job rows are exactly `{id, workspaceId, status, createdAt}`.
+    if obj.len() == 4
+        && ["id", "workspaceId", "status", "createdAt"]
+            .iter()
+            .all(|k| obj.contains_key(*k))
+    {
+        return Some(render_criteria_creations);
+    }
     // Questionnaire rows carry `recipientEmail` + `isCompleted`.
     if obj.contains_key("recipientEmail") || obj.contains_key("isCompleted") {
         return Some(render_questionnaires);
@@ -171,6 +209,130 @@ fn render_tickets(rows: &[Value], width: usize) -> String {
             |r| scalar_field(r, "connectionId"),
             |r| str_field(r, "createdAt"),
             |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_findings(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "TEXT", "SOURCE", "ASSESSMENT", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| {
+                let text = str_field(r, "note");
+                if text.is_empty() { str_field(r, "observation") } else { text }
+            },
+            |r| str_field(r, "source"),
+            |r| scalar_field(r, "vendorAssessmentId"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_assessments(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "CRITERIA", "STATUS", "SEVERITY", "SUMMARY"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "criteriaName"),
+            |r| str_field(r, "currentStatus"),
+            |r| str_field(r, "severity"),
+            |r| str_field(r, "analysisSummary"),
+        ],
+        width,
+    )
+}
+
+fn render_assessment_stats(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["MET", "NOT_MET", "PARTIALLY_MET", "INCONCLUSIVE", "N_A", "TOTAL"],
+        rows,
+        &[
+            |r| scalar_field(r, "met"),
+            |r| scalar_field(r, "notMet"),
+            |r| scalar_field(r, "partiallyMet"),
+            |r| scalar_field(r, "inconclusive"),
+            |r| scalar_field(r, "notApplicable"),
+            |r| scalar_field(r, "total"),
+        ],
+        width,
+    )
+}
+
+fn render_criteria(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "TYPE", "SEVERITY", "DRAFT", "SOURCE"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "type"),
+            |r| str_field(r, "severity"),
+            |r| bool_field(r, "isDraft"),
+            |r| str_field(r, "source"),
+        ],
+        width,
+    )
+}
+
+fn render_templates(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "TITLE", "STATUS", "TYPE", "DEFAULT", "RISK_LEVELS"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "title"),
+            |r| str_field(r, "status"),
+            |r| str_field(r, "type"),
+            |r| bool_field(r, "isDefault"),
+            |r| joined_strings(r, "riskLevels"),
+        ],
+        width,
+    )
+}
+
+fn render_questions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "QUESTION", "TYPE", "REQUIRED", "ANSWER"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "question"),
+            |r| str_field(r, "type"),
+            |r| bool_field(r, "required"),
+            |r| str_field(r, "answer"),
+        ],
+        width,
+    )
+}
+
+fn render_risk_levels(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "POSITION", "SYSTEM"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| scalar_field(r, "position"),
+            |r| bool_field(r, "isSystem"),
+        ],
+        width,
+    )
+}
+
+fn render_criteria_creations(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "WORKSPACE", "STATUS", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| scalar_field(r, "workspaceId"),
+            |r| str_field(r, "status"),
+            |r| str_field(r, "createdAt"),
         ],
         width,
     )
@@ -495,6 +657,14 @@ fn str_field(row: &Value, key: &str) -> String {
     row.get(key)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+        .unwrap_or_default()
+}
+
+/// An array of strings joined with commas; empty when absent.
+fn joined_strings(row: &Value, key: &str) -> String {
+    row.get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(","))
         .unwrap_or_default()
 }
 

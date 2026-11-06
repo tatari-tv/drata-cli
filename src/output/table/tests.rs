@@ -172,3 +172,117 @@ fn render_ticket_rows_by_external_ticket_id() {
     assert!(out.contains("EXTERNAL_ID"));
     assert!(out.contains("SEC-101"));
 }
+
+/// One row built from the `example` of every property in the op's 200
+/// response (the item schema for a `data[]` list, the schema itself for a
+/// single object), straight from the committed spec.
+fn spec_response_row(path: &str) -> Value {
+    let spec: Value = serde_json::from_str(include_str!("../../../spec/drata-openapi-v2.json")).unwrap();
+    let schemas = &spec["components"]["schemas"];
+    fn resolve<'a>(schemas: &'a Value, mut node: &'a Value) -> Value {
+        while let Some(r) = node.get("$ref").and_then(|r| r.as_str()) {
+            node = &schemas[r.rsplit('/').next().unwrap()];
+        }
+        node.clone()
+    }
+    let mut schema = resolve(
+        schemas,
+        &spec["paths"][path]["get"]["responses"]["200"]["content"]["application/json"]["schema"],
+    );
+    if let Some(items) = schema["properties"].get("data").and_then(|d| d.get("items")) {
+        schema = resolve(schemas, items);
+    }
+    let mut row = serde_json::Map::new();
+    for (key, prop) in schema["properties"].as_object().unwrap() {
+        if let Some(example) = resolve(schemas, prop).get("example") {
+            row.insert(key.clone(), example.clone());
+        }
+    }
+    Value::Object(row)
+}
+
+const REVIEW: &str = "/vendors/{vendorId}/security-reviews/{securityReviewId}";
+
+#[test]
+fn spec_example_rows_pick_their_own_renderer() {
+    let cases: [(String, RowRenderer, &str); 10] = [
+        (format!("{REVIEW}/notes"), render_findings, "Procurement approved"),
+        (
+            format!("{REVIEW}/observations"),
+            render_findings,
+            "SOC 2 Type II report",
+        ),
+        (format!("{REVIEW}/assessments"), render_assessments, "My Criteria"),
+        (
+            format!("{REVIEW}/assessments/{{assessmentId}}"),
+            render_assessments,
+            "My Criteria",
+        ),
+        (format!("{REVIEW}/assessments-stats"), render_assessment_stats, "44"),
+        (
+            "/vendor-criteria".to_string(),
+            render_criteria,
+            "Data Security Criteria",
+        ),
+        (
+            "/vendor-questionnaire-templates".to_string(),
+            render_templates,
+            "Security Assessment",
+        ),
+        (
+            "/vendor-questionnaire-templates/{questionnaireId}/questions".to_string(),
+            render_questions,
+            "Privacy Policy",
+        ),
+        ("/vendor-risk-levels".to_string(), render_risk_levels, "Critical"),
+        (
+            "/workspaces/{workspaceId}/vendor-criteria-creations".to_string(),
+            render_criteria_creations,
+            "IN_PROGRESS",
+        ),
+    ];
+    for (path, want, cell) in cases {
+        let row = spec_response_row(&path);
+        let got = pick_renderer(&row).unwrap_or_else(|| panic!("{path}: no renderer for {row}"));
+        assert!(std::ptr::fn_addr_eq(got, want), "{path}: wrong renderer for {row}");
+        let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
+        assert!(out.contains(cell), "{path}: `{cell}` missing from\n{out}");
+    }
+}
+
+#[test]
+fn vendor_question_rows_with_answers_render_the_answer() {
+    let row = spec_response_row("/vendors/{vendorId}/questionnaires/{questionnaireId}/questions");
+    assert!(std::ptr::fn_addr_eq(
+        pick_renderer(&row).unwrap(),
+        render_questions as RowRenderer
+    ));
+    let out = render(&row, DEFAULT_WIDTH).unwrap();
+    assert!(out.contains("Yes, you can get to this right here!"), "{out}");
+}
+
+#[test]
+fn new_sniffs_do_not_steal_the_rows_that_came_first() {
+    // A control (`code` + `question`), a vendor and a security review keep their renderers.
+    let control = json!({"id": 1, "code": "DCF-1", "question": "q", "activity": "a"});
+    assert!(std::ptr::fn_addr_eq(
+        pick_renderer(&control).unwrap(),
+        render_controls as RowRenderer
+    ));
+    let vendor = json!({"id": 1, "name": "x", "category": "SECURITY", "risk": "LOW"});
+    assert!(std::ptr::fn_addr_eq(
+        pick_renderer(&vendor).unwrap(),
+        render_vendors as RowRenderer
+    ));
+    let review = json!({"id": 1, "reviewDeadlineAt": "2027-01-01", "vendorId": 3});
+    assert!(std::ptr::fn_addr_eq(
+        pick_renderer(&review).unwrap(),
+        render_security_reviews as RowRenderer
+    ));
+}
+
+#[test]
+fn criteria_creation_sniff_needs_exactly_its_four_keys() {
+    let extra = json!({"id": 1, "workspaceId": 1, "status": "X", "createdAt": "t", "name": "n"});
+    assert!(pick_renderer(&extra).is_none_or(|r| !std::ptr::fn_addr_eq(r, render_criteria_creations as RowRenderer)));
+}

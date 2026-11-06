@@ -54,6 +54,9 @@ use std::io;
 use std::path::Path;
 use tracing::debug;
 
+pub mod assessment;
+pub mod finding;
+
 // ---------------------------------------------------------------------------
 // Serialization helpers
 // ---------------------------------------------------------------------------
@@ -130,10 +133,16 @@ const SECURITY_REVIEW_UPDATE_EXAMPLE: &str = r#"{
 
 /// Returns the example skeleton if the action is a `--example` request.
 /// Called from `vendor::example_if_requested` before config/auth load.
-pub fn example_if_requested(action: &VendorSecurityReviewAction) -> Option<&'static str> {
+pub fn example_if_requested(action: &VendorSecurityReviewAction) -> Option<Result<String>> {
     match action {
-        VendorSecurityReviewAction::Create { example: true, .. } => Some(SECURITY_REVIEW_CREATE_EXAMPLE),
-        VendorSecurityReviewAction::Update { example: true, .. } => Some(SECURITY_REVIEW_UPDATE_EXAMPLE),
+        VendorSecurityReviewAction::Create { example: true, .. } => {
+            Some(Ok(SECURITY_REVIEW_CREATE_EXAMPLE.to_string()))
+        }
+        VendorSecurityReviewAction::Update { example: true, .. } => {
+            Some(Ok(SECURITY_REVIEW_UPDATE_EXAMPLE.to_string()))
+        }
+        VendorSecurityReviewAction::Note { action } => finding::example_if_requested(Some(action), None),
+        VendorSecurityReviewAction::Observation { action } => finding::example_if_requested(None, Some(action)),
         _ => None,
     }
 }
@@ -278,6 +287,13 @@ pub async fn handle(
             )
             .await
         }
+        VendorSecurityReviewAction::Note { action } => {
+            finding::handle(client, config, confirm, finding::note_target(action)?).await
+        }
+        VendorSecurityReviewAction::Observation { action } => {
+            finding::handle(client, config, confirm, finding::observation_target(action)?).await
+        }
+        VendorSecurityReviewAction::Assessment { action } => assessment::handle(action, client, config).await,
         VendorSecurityReviewAction::UploadQuestionnaire { vendor_id, file } => {
             upload_questionnaire(client, config, confirm, vendor_id, file).await
         }

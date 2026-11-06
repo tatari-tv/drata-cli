@@ -3,6 +3,13 @@
 
 use clap::{Subcommand, ValueEnum};
 
+mod finding;
+mod reference;
+mod search;
+pub use finding::*;
+pub use reference::*;
+pub use search::*;
+
 // ---------------------------------------------------------------------------
 // Vendors
 // ---------------------------------------------------------------------------
@@ -112,6 +119,13 @@ pub enum VendorAction {
         #[arg(long)]
         security_review_id: Option<u64>,
     },
+    /// Search vendors (all pages as rows; --facet counts facets on one page)
+    Search(VendorSearchArgs),
+    /// Get a vendor's Trust Center overview
+    TrustOverview {
+        /// Vendor ID
+        vendor_id: String,
+    },
     /// Manage a vendor's questionnaires
     Questionnaire {
         #[command(subcommand)]
@@ -190,6 +204,13 @@ pub enum VendorQuestionnaireAction {
     },
     /// Get a single questionnaire by ID
     Get {
+        /// Vendor ID
+        vendor_id: String,
+        /// Questionnaire ID
+        questionnaire_id: String,
+    },
+    /// List the questions of a vendor's questionnaire, with the vendor's answers
+    Questions {
         /// Vendor ID
         vendor_id: String,
         /// Questionnaire ID
@@ -449,6 +470,21 @@ pub enum VendorSecurityReviewAction {
         /// Path(s) to questionnaire file(s) (space-separated, repeatable)
         #[arg(long, num_args = 1.., required = true)]
         file: Vec<std::path::PathBuf>,
+    },
+    /// Manage a security review's internal notes (beta)
+    Note {
+        #[command(subcommand)]
+        action: SecurityReviewNoteAction,
+    },
+    /// Manage a security review's observations (beta)
+    Observation {
+        #[command(subcommand)]
+        action: SecurityReviewObservationAction,
+    },
+    /// Read a security review's criteria assessments (beta)
+    Assessment {
+        #[command(subcommand)]
+        action: SecurityReviewAssessmentAction,
     },
     /// Upload one or more completed questionnaire files to a security review (multipart)
     UploadQuestionnaireToReview {

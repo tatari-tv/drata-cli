@@ -120,6 +120,31 @@ pub enum Commands {
         #[command(subcommand)]
         action: VendorAction,
     },
+    /// List vendor assessment criteria
+    VendorCriteria {
+        #[command(subcommand)]
+        action: VendorCriteriaAction,
+    },
+    /// List vendor criteria creation jobs
+    VendorCriteriaCreation {
+        #[command(subcommand)]
+        action: VendorCriteriaCreationAction,
+    },
+    /// List vendor questionnaire templates and their questions
+    VendorQuestionnaireTemplate {
+        #[command(subcommand)]
+        action: VendorQuestionnaireTemplateAction,
+    },
+    /// List vendor risk levels
+    VendorRiskLevel {
+        #[command(subcommand)]
+        action: VendorRiskLevelAction,
+    },
+    /// List security reviews across every vendor
+    VendorSecurityReview {
+        #[command(subcommand)]
+        action: VendorSecurityReviewsAction,
+    },
     /// Manage risks in a risk register
     Risk {
         #[command(subcommand)]
