@@ -411,3 +411,50 @@ Supersedes the Phase 11 entries for `--user` and `--application`. The house CLI 
 
 ### Open questions
 - None.
+
+## Phase 12: Standard connections
+Written after the fact, during the implementation audit (`/home/saidler/.cache/review-panel/runs/rNcsu5Zs/synthesis.md`, F3): the Phase 12 commit 798d4bd did not touch these notes. The content is the Phase 12 worker's report, recorded as given.
+
+### Design decisions
+- One `Provider`-parameterized implementation for AWS, Azure, GCP and GitLab (`src/resources/connection.rs`), not four copies.
+- `create` and `update` read the body through `DataSource::FileOrStdinOnly` and require a JSON object. Inline `--data` is refused before any request, so a credential never sits in shell history.
+- `list` uses `client.get_all`: all four list ops take a `cursor`.
+- One renderer, `render_connections` (`src/output/table.rs`), sniffed on `clientAlias` + `state`.
+- `--expand workspaces` is checked against `StandardConnectionExpandEnum`.
+- Spec check: no response schema carries a credential. `applicationSecret`, `serviceAccountKey` and `personalAccessToken` are documented "Never returned in any response". AWS `externalId` (the trust-policy value) prints as returned. GitLab returns `tokenExpiresAt` only.
+
+### Deviations
+- None.
+
+### Tradeoffs
+- No `--sort` or `--sort-dir` on the list ops vs exposing them now: they stay reachable through `raw`.
+- The shared client's existing `debug!` of non-2xx response bodies is left unchanged vs redacting it: the body is the server's text, and a validation message could quote a submitted value. Recorded so the choice is visible, not settled.
+
+### Open questions
+- None.
+
+## Implementation audit fixes
+Fixes for the round 1 implementation audit, `/home/saidler/.cache/review-panel/runs/rNcsu5Zs/synthesis.md` (probes in `probes.md` beside it). F3 is the Phase 12 section above.
+
+### Design decisions
+- F1, renderer regressions: the parity test `src/output/table/parity.rs` (`every_v015_curated_op_keeps_its_v015_renderer`) takes the 83 ops the v0.1.5 tree curated (command table rows minus Appendix A), builds each op's 2xx row from the spec, and asserts `pick_renderer` renders it exactly as `v015_pick_renderer` does. `v015_pick_renderer` is a verbatim copy of the v0.1.5 sniff order (`git show 165c6cf:src/output/table.rs`), so the expectation comes from v0.1.5's logic, not today's output. Each row is checked twice: every property present (null where the spec has no example) and only the example-bearing properties, since a server can send a null field or omit it. 79 ops have a JSON 2xx body (the 4 DELETEs answer 204), so 158 rows.
+- F1, sniff changes in `pick_renderer` (`src/output/table.rs`):
+  - Groups: `externalId` + `name` -> `externalId` + `source` + `name`. An asset (`AssetResponsePublicV2Dto`) and a control requirement (`ControlRequirementResponsePublicV2Dto`) carry `externalId` + `name` but no `source`. `asset list|get|create|update` print `TYPE PROVIDER CREATED` again; `control requirements` prints JSON again.
+  - Codebase exclusions: `findingId` + `repositoryName` -> `findingId` + `exclusionDesignatorId`. A codebase monitor failure (`MonitorTestFailureResponsePublicV2Dto`) carries `findingId` + `repositoryName`; `exclusionDesignatorId` is required on the exclusion and absent from the failure. `monitor failures` prints JSON again.
+  - Identity actions: sniff removed. `UserIdentityActionItemResponsePublicV2Dto` and `PolicyActionItemResponsePublicV2Dto` have the same four keys (`identity_and_policy_action_rows_share_their_keys` pins this), so no key sniff can separate them. The identity `actions` verb names its table instead: `output::print_value_as(value, format, Table::IdentityActions)`, backed by `table::render_as`. `policy actions` prints JSON again; identity actions keep their table.
+- F2, secrets in the debug log: `run` and `dispatch` (`src/lib.rs`) record `command = %command_path(&cli.command)` instead of `?cli.command`. `command_path` walks the parsed command's `Debug` text for variant identifiers and keeps only those that name a child of the clap command reached so far, so the field is built from clap subcommand names and nothing else. Re-running the audit's probe (`drata -l debug connection aws create --data '{"secretAccessKey":"PROBESECRET-AWS"}' --yes`) now logs `run{command=connection aws create}` and 0 hits for the secret.
+- F2, the other value-recording fields found: `ticket::handle` recorded `?op` in its span and a `debug!` (a `TicketOp::Create` carries `--data`); `finding::handle` recorded `target` in its span and `?op` in a `debug!` (a note or observation create/update carries the text and `--data`). Both now log `verb = op.verb()`, and the finding span records `kind` and `collection` only. `vendor questionnaire`, the five `vendor/reference.rs` handlers and `vendor security-review assessment` recorded their whole action struct; they now `skip_all`.
+- F2 tests: `tests/logging.rs` runs `drata_cli::run` under a DEBUG fmt layer writing to a buffer (`tracing::subscriber::set_default`, no process env) for an inline `--data` on `connection aws create` and `provide-trust-center-access-link`, and asserts the secret is absent while `command=<path>` is present. `command_path_matches_the_argv_of_every_command_table_row` checks `command_path` against the subcommand tokens of all 227 command table argvs, read off the clap tree.
+- F4: `tests/enums.rs` gains `vendor_list_and_control_list_enums_match_the_spec` (`VendorStatus` vs `GET /vendors statuses[]`, `VendorType` vs `types[]`, `RequiredApprovals` vs `GET .../controls requiredApprovals`), `risk_search_enums_match_the_spec` (`RiskSearchExpand` on both search ops, `RiskSearchFacet` on `/risks-search`, and the one-register op takes every facet but `riskRegisterId`) and `upload_purpose_matches_the_spec` (`UploadPurpose` vs the `POST /upload-urls` body). No mismatch found.
+- Bite proofs: with the three v0.1.5-era sniffs restored, the parity test fails on 7 ops x 2 key sets (`asset` x4, `control requirements`, `policy actions`, `monitor failures`). With `?cli.command` restored on the spans, `a_rejected_inline_credential_never_reaches_the_log` fails on the secret assertion. Files restored and touched after each.
+
+### Deviations
+- The audit's fix shape said "tighten or reorder" `render_identity_actions`. Neither can work: the identity and policy action rows have identical keys. The identity table moved from a sniff to a table the command names (`Table::IdentityActions`). Same effect for identity actions, v0.1.5 output for `policy actions`.
+
+### Tradeoffs
+- `command_path` reads the `Debug` text vs threading clap's `ArgMatches` from `main` into `run`: `ArgMatches` would change the `run` and `dispatch` signatures used by the command-table and connection tests. The `Debug` walk can only emit names that exist in the clap tree, so a mis-walk gives a short path, never a value; the command-table test pins every curated path.
+- The typed handlers that record named arguments (`vendor create --name`, `risk create --title`, ids) still record them at DEBUG vs skipping every argument: those are explicit, non-credential fields that predate this branch and help diagnose a failed call. Only whole structs that can carry a `--data` body or free text were dropped.
+- A named table (`Table`, one variant) vs a per-command renderer argument on every `print_value` call: only one shape collides today, and `Table` takes the next one without touching other call sites.
+
+### Open questions
+- None.
