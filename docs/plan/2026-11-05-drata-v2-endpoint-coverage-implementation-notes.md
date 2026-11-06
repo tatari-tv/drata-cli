@@ -242,3 +242,17 @@
 ### Open questions
 - Should a `SKIPPED_OUT_OF_SCOPE` target (the id is outside the workspace's personnel scope, so nothing was excluded) also exit 1? The spec treats it as a non-failure, so I did not; a caller who needs it can read the printed rows.
 - `custom-field create` is a write the doc's shakedown list names (`custom-field create | remove`), but there is no `custom-field remove` command and the spec has no DELETE for a definition, so a shakedown create would leave a permanent field. Confirm that is acceptable, or drop `custom-field create` from the shakedown.
+
+## Orchestrator: after Phase 7
+
+### Design decisions
+- Per-item failure rule follows each op's own spec (`src/resources/bulk.rs` `Rule`): monitoring-test exclusions count a 4xx `statusCode` row as failed, because that spec answers 409/422 when nothing is excluded; compliance-check exclusions fail only on `FAILED_*`, because that spec says `SKIPPED_*` does not fail the batch.
+
+### Deviations
+- Rollout shakedown: `custom-field create | remove` moved from the write list to the excluded list. The spec has no DELETE op for a custom field definition, so a create contradicts the list's own rule ("only where the object is deletable by the CLI").
+
+### Tradeoffs
+None.
+
+### Open questions
+None.

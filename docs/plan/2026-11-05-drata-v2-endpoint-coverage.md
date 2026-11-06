@@ -312,8 +312,8 @@ Observed on branch `drata-v2-endpoint-coverage` (HEAD 371c13f), 2026-11-05, `tar
 - PR stacked on `refresh-drata-spec-and-safebase-docs`; `bump release`; install
 - Shakedown on Tatari's tenant:
   - every read verb
-  - writes only where the object is deletable by the CLI and nothing leaves Drata: `evidence-item create | remove`, `upload-url create --file`, `custom-field create | remove`, `vendor security-review note | observation create | remove` on a `zzz-clitest-` vendor, `risk ticket link | unlink` with a dummy URL
-  - excluded: `control create` (no DELETE), ticket `create` (reaches the connected ticketing system), VSR `access-requests`, `follow-up-questionnaire-sends` and agent runs (email or contact vendors), `connection` writes (live integrations), `access-review period` create (one active period per account), `monitor retest` on anything but a `zzz-clitest` test
+  - writes only where the object is deletable by the CLI and nothing leaves Drata: `evidence-item create | remove`, `upload-url create --file`, `vendor security-review note | observation create | remove` on a `zzz-clitest-` vendor, `risk ticket link | unlink` with a dummy URL
+  - excluded: `control create` and `custom-field create` (no DELETE op for either), ticket `create` (reaches the connected ticketing system), VSR `access-requests`, `follow-up-questionnaire-sends` and agent runs (email or contact vendors), `connection` writes (live integrations), `access-review period` create (one active period per account), `monitor retest` on anything but a `zzz-clitest` test
 
 ## Risks and Mitigations
 
