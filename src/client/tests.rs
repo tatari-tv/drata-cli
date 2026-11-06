@@ -259,3 +259,56 @@ fn multipart_builder_collects_files_and_fields() {
     assert!(form.fields.iter().any(|(k, v)| k == "description" && v == "d"));
     assert!(!form.is_empty());
 }
+
+fn cooldown_429() -> ResponseTemplate {
+    // Retry-After: 0 keeps a retrying client fast; the count is what matters.
+    ResponseTemplate::new(429)
+        .insert_header("Retry-After", "0")
+        .set_body_json(serde_json::json!({"message": "test is cooling down"}))
+}
+
+#[tokio::test]
+async fn retry_never_sends_once() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/retest"))
+        .respond_with(cooldown_429())
+        .mount(&server)
+        .await;
+
+    let client = rw_client(&server).await;
+    let err = client
+        .send_inner(Method::POST, "/retest", Some(serde_json::json!({})), Retry429::Never)
+        .await
+        .unwrap_err();
+
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    let api = err.downcast_ref::<ApiError>().expect("429 surfaces as ApiError");
+    assert_eq!(api.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(err.to_string().contains("test is cooling down"), "{err}");
+}
+
+#[tokio::test]
+async fn retry_default_retries_429() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/vendors"))
+        .respond_with(cooldown_429())
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/vendors"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": 1})))
+        .mount(&server)
+        .await;
+
+    let client = rw_client(&server).await;
+    let v = client
+        .send_inner(Method::GET, "/vendors", None, Retry429::Default)
+        .await
+        .unwrap();
+
+    assert_eq!(v["id"], 1);
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}

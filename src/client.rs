@@ -188,6 +188,18 @@ pub fn base_url_for_region(region: &str) -> Result<&'static str> {
     }
 }
 
+/// Whether `send_inner` retries an HTTP 429.
+///
+/// `Default` retries up to `MAX_RETRY_ATTEMPTS` times, honoring `Retry-After`.
+/// `Never` sends once and returns the 429 as an `ApiError` carrying the
+/// server's body: for ops where 429 means "not now" (a post-run cooldown), not
+/// "slow down".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retry429 {
+    Default,
+    Never,
+}
+
 pub struct DrataClient {
     http: Client,
     base_url: String,
@@ -230,11 +242,12 @@ impl DrataClient {
     }
 
     /// Shared request machinery: builds the request, sends it, retries 429
-    /// with `Retry-After` (bounded), maps 204 to `Value::Null`, and parses
-    /// error bodies through `format_api_error`. The write guardrail is enforced
-    /// here so every mutating path is covered, including `raw`.
-    #[instrument(skip(self, body), fields(%method, %path))]
-    async fn send_inner(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value> {
+    /// with `Retry-After` (bounded) unless `retry` is `Retry429::Never`, maps
+    /// 204 to `Value::Null`, and parses error bodies through
+    /// `format_api_error`. The write guardrail is enforced here so every
+    /// mutating path is covered, including `raw`.
+    #[instrument(skip(self, body), fields(%method, %path, ?retry))]
+    async fn send_inner(&self, method: Method, path: &str, body: Option<Value>, retry: Retry429) -> Result<Value> {
         if method != Method::GET && !self.allow_writes {
             warn!(%method, %path, "write blocked: credential not write-enabled");
             return Err(WriteGuardError {
@@ -264,7 +277,7 @@ impl DrataClient {
             let resp = req.send().await.context("HTTP request failed")?;
             let status = resp.status();
 
-            if status == StatusCode::TOO_MANY_REQUESTS {
+            if status == StatusCode::TOO_MANY_REQUESTS && retry == Retry429::Default {
                 if attempts > MAX_RETRY_ATTEMPTS {
                     bail!("Rate limited after {} attempts", MAX_RETRY_ATTEMPTS);
                 }
@@ -439,7 +452,7 @@ impl DrataClient {
 
     #[instrument(skip(self))]
     pub async fn get(&self, path: &str) -> Result<Value> {
-        self.send_inner(Method::GET, path, None).await
+        self.send_inner(Method::GET, path, None, Retry429::Default).await
     }
 
     /// GET a resource, returning `Ok(None)` on HTTP 404. All other errors
@@ -447,7 +460,7 @@ impl DrataClient {
     /// legitimate signal.
     #[instrument(skip(self))]
     pub async fn try_get(&self, path: &str) -> Result<Option<Value>> {
-        match self.send_inner(Method::GET, path, None).await {
+        match self.send_inner(Method::GET, path, None, Retry429::Default).await {
             Ok(v) => Ok(Some(v)),
             Err(e) => match e.downcast_ref::<ApiError>() {
                 Some(api_err) if api_err.status == StatusCode::NOT_FOUND => Ok(None),
@@ -458,17 +471,17 @@ impl DrataClient {
 
     #[instrument(skip(self, body))]
     pub async fn post(&self, path: &str, body: Value) -> Result<Value> {
-        self.send_inner(Method::POST, path, Some(body)).await
+        self.send_inner(Method::POST, path, Some(body), Retry429::Default).await
     }
 
     #[instrument(skip(self, body))]
     pub async fn put(&self, path: &str, body: Value) -> Result<Value> {
-        self.send_inner(Method::PUT, path, Some(body)).await
+        self.send_inner(Method::PUT, path, Some(body), Retry429::Default).await
     }
 
     #[instrument(skip(self))]
     pub async fn delete(&self, path: &str) -> Result<Value> {
-        self.send_inner(Method::DELETE, path, None).await
+        self.send_inner(Method::DELETE, path, None, Retry429::Default).await
     }
 
     /// Generic passthrough for the `raw` namespace. Non-GET is subject to the
@@ -476,7 +489,7 @@ impl DrataClient {
     #[instrument(skip(self, body))]
     pub async fn raw(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value> {
         let m = Method::from_str(&method.to_uppercase()).map_err(|_| eyre::eyre!("Invalid HTTP method: {}", method))?;
-        self.send_inner(m, path, body).await
+        self.send_inner(m, path, body, Retry429::Default).await
     }
 
     /// Paginate through all results for a Drata v2 cursor-paginated list
@@ -670,6 +683,8 @@ fn format_api_error(method: &Method, url: &str, status: StatusCode, body: &str) 
 
     format!("API error {} on {}: {}", status, target, body)
 }
+
+pub mod presigned;
 
 #[cfg(test)]
 mod tests;

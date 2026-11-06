@@ -25,10 +25,10 @@ const EXPECTED_OPERATIONS: usize = 308;
 #[path = "commands/table.rs"]
 mod table;
 
-/// Curated ops floor: the 83 ops the curated commands reached when the command
-/// table replaced the hand-written list. A floor, not an equality: later
-/// phases raise it.
-const CURATED_FLOOR: usize = 83;
+/// Curated ops floor: the ops the curated commands reach as of the latest
+/// phase of `docs/plan/2026-11-05-drata-v2-endpoint-coverage.md`. A floor, not
+/// an equality: each phase raises it.
+const CURATED_FLOOR: usize = 84;
 
 /// The curated set, derived from the command table: every `(method, path)`
 /// here is reached by a command that `tests/commands.rs` dispatches and

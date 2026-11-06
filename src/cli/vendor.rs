@@ -337,7 +337,7 @@ pub enum VendorSecurityReviewAction {
         /// Requester user ID
         #[arg(long)]
         requester_user_id: Option<u64>,
-        /// Full request body as JSON (overrides individual flags)
+        /// Full request body: inline JSON, @file, or - for stdin (overrides individual flags)
         #[arg(long)]
         data: Option<String>,
         /// Print a JSON skeleton and exit (no API call)
@@ -370,7 +370,7 @@ pub enum VendorSecurityReviewAction {
         /// field the spec allows on a completed review
         #[arg(long)]
         updated_at: Option<String>,
-        /// Full request body as JSON (overrides individual flags)
+        /// Full request body: inline JSON, @file, or - for stdin (overrides individual flags)
         #[arg(long)]
         data: Option<String>,
         /// Print a JSON skeleton and exit (no API call)

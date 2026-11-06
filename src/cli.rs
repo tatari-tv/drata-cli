@@ -7,7 +7,9 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+mod upload;
 mod vendor;
+pub use upload::*;
 pub use vendor::*;
 
 #[derive(Parser, Debug)]
@@ -188,6 +190,11 @@ pub enum Commands {
     Event {
         #[command(subcommand)]
         action: EventAction,
+    },
+    /// Request presigned upload URLs and upload files through them
+    UploadUrl {
+        #[command(subcommand)]
+        action: UploadUrlAction,
     },
     /// Generic passthrough to any operation: `raw <METHOD> <path> ...`
     Raw(RawArgs),

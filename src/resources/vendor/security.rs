@@ -43,6 +43,7 @@ use crate::cli::{
 use crate::client::{ApiError, DrataClient, Multipart};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
+use crate::data::{DataSource, read_data};
 use crate::expand::append_expand;
 use crate::output::print_value;
 use crate::query::{QueryPath, wire_name};
@@ -344,7 +345,7 @@ async fn create(
     }
 
     let body: Value = if let Some(raw) = data {
-        serde_json::from_str(raw).map_err(|e| eyre::eyre!("--data is not valid JSON: {}", e))?
+        read_data(raw, DataSource::Any)?
     } else {
         // The trio is required unless --data (or --example) supplies the body.
         let review_deadline_at = review_deadline_at.ok_or_else(|| {
@@ -425,7 +426,7 @@ async fn update(
     }
 
     let body: Value = if let Some(raw) = data {
-        serde_json::from_str(raw).map_err(|e| eyre::eyre!("--data is not valid JSON: {}", e))?
+        read_data(raw, DataSource::Any)?
     } else {
         build_update_body(title, soc_form, updated_at)?
     };

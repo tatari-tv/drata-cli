@@ -6,7 +6,8 @@
 //! `raw POST` on a non-write-enabled credential fails closed exactly like a
 //! curated create.
 //!
-//! `--data` accepts inline JSON, `@file` (read a file), or `-` (read stdin).
+//! `--data` accepts inline JSON, `@file` (read a file), or `-` (read stdin),
+//! through the shared reader in `crate::data`.
 //! `--file <path>` sends a multipart/form-data request (for the spec's upload ops).
 //! `--query k=v` (repeated or space-separated) appends percent-encoded query
 //! parameters. `--example` prints the operation's request-body skeleton from
@@ -18,11 +19,10 @@ use crate::cli::RawArgs;
 use crate::client::{DrataClient, Multipart, encode_query};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
+use crate::data::{DataSource, read_data};
 use crate::output::print_value;
 use crate::spec;
 use eyre::{Context, Result, bail, eyre};
-use serde_json::Value;
-use std::io::Read;
 use tracing::{debug, instrument, warn};
 
 /// Returns the spec-derived `--example` skeleton if this is a `raw --example`
@@ -116,7 +116,7 @@ pub async fn handle(args: &RawArgs, client: &DrataClient, config: &Config, confi
     }
 
     let body = match &args.data {
-        Some(spec_data) => Some(read_data(spec_data).context("Failed to read --data")?),
+        Some(spec_data) => Some(read_data(spec_data, DataSource::Any).context("Failed to read --data")?),
         None => None,
     };
 
@@ -145,30 +145,6 @@ fn build_path(path: &str, query: &[String]) -> Result<String> {
     }
     debug!(query_count = query.len(), "built query string");
     Ok(out)
-}
-
-/// Resolve a `--data` argument into a JSON value. Accepts:
-/// - `@path`  -> read the file at `path`,
-/// - `-`      -> read stdin,
-/// - anything else -> treat as inline JSON.
-fn read_data(data: &str) -> Result<Value> {
-    let raw = if data == "-" {
-        debug!("reading --data from stdin");
-        let mut buf = String::new();
-        std::io::stdin()
-            .read_to_string(&mut buf)
-            .context("Failed to read JSON from stdin")?;
-        buf
-    } else if let Some(file) = data.strip_prefix('@') {
-        debug!(file, "reading --data from file");
-        std::fs::read_to_string(file).with_context(|| format!("Failed to read --data file `{}`", file))?
-    } else {
-        // Inline JSON. Preview length only, never the full body.
-        debug!(bytes = data.len(), "parsing inline --data JSON");
-        data.to_string()
-    };
-
-    serde_json::from_str(&raw).context("--data is not valid JSON")
 }
 
 #[cfg(test)]

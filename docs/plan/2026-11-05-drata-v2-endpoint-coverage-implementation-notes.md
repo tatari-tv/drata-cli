@@ -43,3 +43,28 @@
 
 ### Open questions
 - `vendor security-review create-with-file` is still sent as multipart; the refreshed spec lists only `application/json` (with a binary `file` field) for it. The existing 415 fallback message still applies. Worth a live check during the shakedown?
+
+## Phase 2: Transport and upload URLs
+### Design decisions
+- `put_presigned` is a free function in `src/client/presigned.rs` that builds its own `reqwest::Client` per call (`redirect::Policy::none()`, 300s timeout) | it shares nothing with `DrataClient`, so no code path can attach the Bearer token or base URL. A per-call client costs nothing at one upload per invocation.
+- Signature `put_presigned(method: Method, url: &str, headers: &[(String, String)], bytes: Vec<u8>) -> Result<()>` | the caller supplies every header; SafeBase's Phase 6 will convert its response headers into the same slice.
+- Redaction is `redact_url` (split at `?`/`#`), applied to the error (`PresignedError`), the `instrument` span and every `debug!`. Transport errors go through `reqwest::Error::without_url` | reqwest's own error Display embeds the full URL, signature included; `transport_error_hides_the_query` pins it.
+- No retry and no redirect on the presigned path; a 3xx is an error | a redirect would replay a signed request to a host the caller never named.
+- `Retry429` lives in `src/client.rs` beside `send_inner`. Under `Never` a 429 falls through to the normal non-2xx branch, so it surfaces as an `ApiError` with the server's body | Phase 6 can match on `ApiError.status` for 409 vs 429 without a new error type. No public `Never` verb yet: Phase 6 adds the call site.
+- `src/data.rs`: `read_data(data, DataSource)`; `raw` and both curated `--data` flags (`vendor security-review create | update`) use `DataSource::Any`. The inline rejection message never echoes the rejected body | `FileOrStdinOnly` exists for Standard Connections' credential bodies.
+- `upload-url` resource lives in `src/resources/upload.rs` and its clap types in `src/cli/upload.rs` | `upload_url.rs` would be a compound filename; the noun's single word is `upload`.
+- `--purpose` is a `ValueEnum` `UploadPurpose` (spec `UploadPurposeEnum`, one value `evidence`) with `workspace_scoped()`; `build_request_body` fails before confirm when a workspace-scoped purpose has no `--workspace` | the spec says `workspaceId` is required for `evidence`; fail closed client-side.
+- With `--file`, the file is read before the `POST /upload-urls` (an unreadable file fails before the mutation); the response's `presignedUrl` and `objectKey` must both be strings before the PUT; on success only the bare `objectKey` is printed with `println!` | the value feeds `--file-key` directly (`$(drata upload-url create ...)`), and the presigned URL is never printed in this mode.
+- `mime_guess` was already a direct dependency (`Cargo.toml`, used by `send_multipart`) | no crate added, consistent with "No new crates".
+- Coverage floor raised to 84 in `tests/coverage.rs`; its comment no longer names a count | the count lives in the constant only.
+
+### Deviations
+- None.
+
+### Tradeoffs
+- No `--data`/`--example` on `upload-url create` vs the Overview's generic "flags plus `--data`" | API Design Phase 2 names exactly `--purpose`, `--workspace`, `--file`; the browser-flow fields (`includeWebUploadUrl`, `existingArtifactId`, `multiArtifact`, ...) stay reachable through `drata raw POST /upload-urls`.
+- No table renderer for the `/upload-urls` response vs adding `render_upload_url` | the no-`--file` response is a single object whose point is the URL; the JSON fallback prints it whole, and no existing sniff matches its keys.
+- Curated `--data` parsing still happens after the confirm prompt (as before) vs moving it ahead | moving it would read stdin (`--data -`) before the prompt reads the TTY; behavior unchanged from Phase 1.
+
+### Open questions
+- None.

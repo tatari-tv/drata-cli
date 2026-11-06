@@ -549,4 +549,11 @@ pub const ROWS: &[Row] = &[
     // events
     row("GET", "/events", &["event", "list"], Page),
     row("GET", "/events/{eventId}", &["event", "get", "1"], Object),
+    // uploads
+    row(
+        "POST",
+        "/upload-urls",
+        &["upload-url", "create", "--purpose", "evidence", "--workspace", "1"],
+        Object,
+    ),
 ];

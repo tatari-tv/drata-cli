@@ -6,6 +6,7 @@ pub mod cli;
 pub mod client;
 pub mod config;
 pub mod confirm;
+pub mod data;
 pub mod expand;
 pub mod filter;
 pub mod output;
@@ -136,6 +137,9 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
         }
         Commands::Event { action } => {
             resources::event::handle(action, client, config).await?;
+        }
+        Commands::UploadUrl { action } => {
+            resources::upload::handle(action, client, config, confirm).await?;
         }
         Commands::Raw(args) => {
             raw::handle(args, client, config, confirm).await?;
