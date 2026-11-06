@@ -31,6 +31,8 @@ fn template(response: Response) -> ResponseTemplate {
         Response::Empty => ResponseTemplate::new(204),
         Response::Accepted => ResponseTemplate::new(202)
             .set_body_json(json!({"securityReviewId": 2, "workflowId": 1, "action": "start_assessment"})),
+        Response::Json(status, body) => ResponseTemplate::new(status)
+            .set_body_json(serde_json::from_str::<serde_json::Value>(body).expect("row body is JSON")),
     }
 }
 
@@ -831,5 +833,231 @@ async fn access_link_file_data_sends_the_access_link_body() {
     assert_eq!(
         body(&requests[0]),
         json!({"accessLink": "https://trust.vendor.test/share?token=fixture"})
+    );
+}
+
+/// Dispatch `monitor <argv> --yes` against a mock answering every request with
+/// `response`; returns the dispatch result and every request the server saw.
+async fn monitor(argv: &[&str], response: ResponseTemplate) -> (eyre::Result<()>, Vec<wiremock::Request>) {
+    let server = MockServer::start().await;
+    Mock::given(any()).respond_with(response).mount(&server).await;
+    let cli = Cli::try_parse_from(
+        ["drata", "monitor"]
+            .into_iter()
+            .chain(argv.iter().copied())
+            .chain(std::iter::once("--yes")),
+    )
+    .expect("argv parses");
+    let config = test_config();
+    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+        .expect("client builds")
+        .with_base_url(server.uri());
+    let result = drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes)).await;
+    (result, server.received_requests().await.unwrap_or_default())
+}
+
+fn exception(status: u16, message: &str) -> ResponseTemplate {
+    // `Retry-After: 0` so a retrying client would retry at once: the count
+    // proves no retry, not a slow test.
+    ResponseTemplate::new(status)
+        .insert_header("Retry-After", "0")
+        .set_body_json(json!({"name": "Exception", "statusCode": status, "code": status, "message": message}))
+}
+
+#[tokio::test]
+async fn retest_409_is_sent_once_fails_and_prints_the_servers_message() {
+    let (result, requests) = monitor(
+        &["retest", "1", "2"],
+        exception(409, "A test run is already in progress for this test."),
+    )
+    .await;
+    let msg = format!(
+        "{:#}",
+        result.expect_err("a 409 fails the command, so main exits non-zero")
+    );
+    assert!(msg.contains("already has a run in flight"), "{msg}");
+    assert!(msg.contains("409"), "{msg}");
+    assert!(
+        msg.contains("A test run is already in progress for this test."),
+        "{msg}"
+    );
+    assert_eq!(requests.len(), 1, "a 409 is not retried");
+    assert_eq!(requests[0].method.as_str(), "POST");
+    assert_eq!(requests[0].url.path(), "/workspaces/1/monitoring-tests/2/action-retest");
+}
+
+#[tokio::test]
+async fn retest_429_is_sent_once_fails_and_prints_the_servers_message() {
+    let (result, requests) = monitor(
+        &["retest", "1", "2"],
+        exception(429, "This test was run recently. Try again in 5 minutes."),
+    )
+    .await;
+    let msg = format!(
+        "{:#}",
+        result.expect_err("a 429 fails the command, so main exits non-zero")
+    );
+    assert!(msg.contains("cooldown"), "{msg}");
+    assert!(msg.contains("429"), "{msg}");
+    assert!(
+        msg.contains("This test was run recently. Try again in 5 minutes."),
+        "{msg}"
+    );
+    assert_eq!(requests.len(), 1, "a 429 is not retried");
+    assert!(requests[0].body.is_empty(), "retest sends no body");
+}
+
+const ONE_FAILED: &str = r#"{"data": [
+    {"statusCode": 201, "outcome": "EXCLUDED", "data": {"id": "sg-1", "connectionId": 1, "exclusionIds": [10]}},
+    {"statusCode": 422, "outcome": "FAILED_INVALID_TARGET", "error": {"message": "not a current failure"},
+     "data": {"id": "sg-2", "connectionId": null, "exclusionIds": []}}
+]}"#;
+
+#[tokio::test]
+async fn exclusion_create_207_with_a_failed_item_fails_and_sends_the_pairs() {
+    let (result, requests) = monitor(
+        &[
+            "exclusion",
+            "create",
+            "1",
+            "2",
+            "--reason",
+            "public site",
+            "--failure",
+            "sg-1",
+            "1",
+            "--failure",
+            "sg-2",
+            "null",
+        ],
+        ResponseTemplate::new(207).set_body_string(ONE_FAILED),
+    )
+    .await;
+    let msg = format!("{:#}", result.expect_err("one failed item exits 1"));
+    assert_eq!(msg, "1 of 2 items failed");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        body(&requests[0]),
+        json!({"reason": "public site", "exclusions": [
+            {"id": "sg-1", "connectionId": 1},
+            {"id": "sg-2", "connectionId": null}
+        ]})
+    );
+}
+
+#[tokio::test]
+async fn exclusion_remove_422_with_every_item_fails_naming_the_status() {
+    let rows = r#"{"data": [{"statusCode": 422, "outcome": "SKIPPED_NO_EXCLUSION",
+        "error": {"message": "no such exclusion"}, "data": {"exclusionId": 9}}]}"#;
+    let (result, requests) = monitor(
+        &["exclusion", "remove", "1", "2", "--exclusion-id", "9"],
+        ResponseTemplate::new(422).set_body_string(rows),
+    )
+    .await;
+    let msg = format!("{:#}", result.expect_err("no item deleted exits 1"));
+    assert_eq!(msg, "HTTP 422: 1 of 1 items failed");
+    assert_eq!(body(&requests[0]), json!({"exclusionIds": [9]}));
+}
+
+#[tokio::test]
+async fn codebase_exclusion_list_encodes_filters() {
+    let (result, requests) = monitor(
+        &[
+            "codebase-exclusion",
+            "list",
+            "1",
+            "2",
+            "--repository-name",
+            "org/repo",
+            "--expand",
+            "exclusiondesignator",
+        ],
+        template(Response::Page),
+    )
+    .await;
+    result.expect("dispatch succeeds");
+    assert_eq!(
+        requests[0].url.query(),
+        Some("repositoryName=org/repo&expand%5B%5D=exclusionDesignator&size=500")
+    );
+}
+
+#[tokio::test]
+async fn validate_recipe_exits_non_zero_when_invalid_and_sends_no_confirm() {
+    let invalid = json!({"isValid": false, "errors": [{"type": "invalidOperator",
+        "message": "Operator equal is not supported for fact department",
+        "location": "/providers/0", "provider": "HR", "resource": "Employees"}]});
+    let server = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_body_json(invalid))
+        .mount(&server)
+        .await;
+    // No --yes: validate-recipe saves nothing, so it never prompts.
+    let cli = Cli::try_parse_from(["drata", "monitor", "validate-recipe", "1", "--recipe", table::RECIPE])
+        .expect("argv parses");
+    let config = test_config();
+    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+        .expect("client builds")
+        .with_base_url(server.uri());
+    let err = drata_cli::dispatch(&cli, &client, &config, &drata_cli::confirm::fail_closed())
+        .await
+        .expect_err("an invalid recipe exits 1");
+    assert_eq!(format!("{err:#}"), "the recipe is invalid: 1 error(s)");
+    let requests = server.received_requests().await.unwrap_or_default();
+    assert_eq!(
+        body(&requests[0]),
+        json!({"recipe": serde_json::from_str::<serde_json::Value>(table::RECIPE).unwrap()})
+    );
+}
+
+#[tokio::test]
+async fn recipe_takes_a_named_draft_and_sends_connection_ids() {
+    let (result, requests) = monitor(
+        &[
+            "recipe",
+            "1",
+            "name:MFA check/v2",
+            "--recipe",
+            table::RECIPE,
+            "--connection-id",
+            "3",
+            "4",
+        ],
+        template(Response::Object),
+    )
+    .await;
+    result.expect("dispatch succeeds");
+    assert_eq!(requests[0].method.as_str(), "PUT");
+    assert_eq!(
+        requests[0].url.path(),
+        "/workspaces/1/monitoring-tests/name:MFA%20check%2Fv2/recipe"
+    );
+    assert_eq!(body(&requests[0])["connectionIds"], json!([3, 4]));
+}
+
+#[tokio::test]
+async fn create_sends_name_description_and_recipe() {
+    let (result, requests) = monitor(
+        &[
+            "create",
+            "1",
+            "--name",
+            "Active employees have a department",
+            "--description",
+            "d",
+            "--recipe",
+            table::RECIPE,
+        ],
+        template(Response::Object),
+    )
+    .await;
+    result.expect("dispatch succeeds");
+    assert_eq!(
+        body(&requests[0]),
+        json!({
+            "name": "Active employees have a department",
+            "description": "d",
+            "recipe": serde_json::from_str::<serde_json::Value>(table::RECIPE).unwrap()
+        })
     );
 }

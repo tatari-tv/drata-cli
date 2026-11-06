@@ -163,6 +163,21 @@ pub fn example_for_operation(method: &str, path: &str) -> Result<Option<String>>
     Ok(Some(format!("{}\n", pretty)))
 }
 
+/// The skeleton of one named component schema (`#/components/schemas/<name>`),
+/// built the same way as an operation's. For bodies nested deeper than
+/// `MAX_DEPTH`, a caller assembles the skeleton from its component parts.
+/// `Err` when the spec has no such schema.
+#[instrument(skip_all, fields(%name))]
+pub fn example_for_schema(name: &str) -> Result<Value> {
+    let spec = spec()?;
+    let schema = spec
+        .get("components")
+        .and_then(|c| c.get("schemas"))
+        .and_then(|s| s.get(name))
+        .ok_or_else(|| eyre!("the spec has no schema `{}`", name))?;
+    Ok(build_skeleton(spec, schema, 0))
+}
+
 /// Resolve the `application/json` request-body schema for an operation, if any.
 fn request_schema<'a>(spec: &'a Value, method: &str, path: &str) -> Result<Option<&'a Value>> {
     let want = method.to_lowercase();

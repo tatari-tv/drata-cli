@@ -55,6 +55,13 @@ fn test_encode_query_escapes_reserved() {
 }
 
 #[test]
+fn encode_path_segment_keeps_one_segment() {
+    assert_eq!(encode_path_segment("name:MFA check"), "name:MFA%20check");
+    assert_eq!(encode_path_segment("a/b?c#d%"), "a%2Fb%3Fc%23d%25");
+    assert_eq!(encode_path_segment("42"), "42");
+}
+
+#[test]
 fn test_format_api_error_structured() {
     let body = r#"{"message":"Invalid Input","errors":["name is required"]}"#;
     let url = "https://public-api.drata.com/public/v2/vendors";
@@ -286,6 +293,34 @@ async fn retry_never_sends_once() {
     let api = err.downcast_ref::<ApiError>().expect("429 surfaces as ApiError");
     assert_eq!(api.status, StatusCode::TOO_MANY_REQUESTS);
     assert!(err.to_string().contains("test is cooling down"), "{err}");
+}
+
+#[tokio::test]
+async fn post_once_sends_one_bodiless_post_on_429() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/retest"))
+        .respond_with(cooldown_429())
+        .mount(&server)
+        .await;
+
+    let client = rw_client(&server).await;
+    let err = client.post_once("/retest").await.unwrap_err();
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1, "a 429 is not retried");
+    assert!(requests[0].body.is_empty(), "no body is sent");
+    let api = err.downcast_ref::<ApiError>().expect("429 surfaces as ApiError");
+    assert_eq!(api.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn post_once_is_write_guarded() {
+    let server = MockServer::start().await;
+    let client = ro_client_for_stream(&server).await;
+    let err = client.post_once("/retest").await.unwrap_err();
+    assert!(err.downcast_ref::<WriteGuardError>().is_some(), "{err}");
+    assert!(server.received_requests().await.unwrap().is_empty());
 }
 
 #[tokio::test]

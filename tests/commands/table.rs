@@ -25,7 +25,19 @@ pub enum Response {
     /// `202 Accepted` with the agent review's acceptance body:
     /// `{"securityReviewId": 2, "workflowId": 1, "action": "start_assessment"}`.
     Accepted,
+    /// Any status with a literal JSON body, for ops whose exit rule reads the
+    /// response (per-item results, recipe validation).
+    Json(u16, &'static str),
 }
+
+/// One excluded item: the per-item results body the exclusion ops answer.
+pub const ITEM_RESULTS: &str = r#"{"data": [{"statusCode": 201, "outcome": "EXCLUDED", "data": {"id": "sg-1", "connectionId": 1, "exclusionIds": [10]}}]}"#;
+
+/// A valid recipe: the validation body `validate-recipe` exits 0 on.
+pub const RECIPE_VALID: &str = r#"{"isValid": true, "errors": []}"#;
+
+/// A recipe for the `--recipe` rows.
+pub const RECIPE: &str = r#"{"assertion": "nofail", "allConnections": true, "providers": []}"#;
 
 #[derive(Debug)]
 pub struct Row {
@@ -51,7 +63,7 @@ const fn row(method: &'static str, path: &'static str, argv: &'static [&'static 
     }
 }
 
-use Response::{Accepted, Empty, Object, Page};
+use Response::{Accepted, Empty, Json, Object, Page};
 
 pub const ROWS: &[Row] = &[
     // vendors
@@ -544,6 +556,89 @@ pub const ROWS: &[Row] = &[
         "/workspaces/{workspaceId}/monitoring-tests/{testId}/passes",
         &["monitor", "passes", "1", "2"],
         Page,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/monitoring-tests",
+        &["monitor", "create", "1", "--name", "n", "--recipe", RECIPE],
+        Object,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/monitoring-tests/action-validate-recipe",
+        &["monitor", "validate-recipe", "1", "--recipe", RECIPE],
+        Json(200, RECIPE_VALID),
+    ),
+    row(
+        "PUT",
+        "/workspaces/{workspaceId}/monitoring-tests/{testId}/recipe",
+        &["monitor", "recipe", "1", "2", "--recipe", RECIPE],
+        Object,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/monitoring-tests/{testId}/action-retest",
+        &["monitor", "retest", "1", "2"],
+        Object,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/monitoring-tests/{testId}/exclusions",
+        &[
+            "monitor",
+            "exclusion",
+            "create",
+            "1",
+            "2",
+            "--reason",
+            "r",
+            "--failure",
+            "sg-1",
+            "1",
+        ],
+        Json(201, ITEM_RESULTS),
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/monitoring-tests/{testId}/exclusions/action-delete",
+        &["monitor", "exclusion", "remove", "1", "2", "--exclusion-id", "10"],
+        Json(200, ITEM_RESULTS),
+    ),
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/monitoring-tests/{testId}/codebase-exclusions",
+        &["monitor", "codebase-exclusion", "list", "1", "2"],
+        Page,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/monitoring-tests/{testId}/codebase-exclusions",
+        &[
+            "monitor",
+            "codebase-exclusion",
+            "create",
+            "1",
+            "2",
+            "--reason",
+            "r",
+            "--finding-id",
+            "f",
+        ],
+        Json(201, ITEM_RESULTS),
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/monitoring-tests/{testId}/codebase-exclusions/action-delete",
+        &[
+            "monitor",
+            "codebase-exclusion",
+            "remove",
+            "1",
+            "2",
+            "--exclusion-id",
+            "10",
+        ],
+        Json(200, ITEM_RESULTS),
     ),
     // audits
     row("GET", "/workspaces/{workspaceId}/audits", &["audit", "list", "1"], Page),

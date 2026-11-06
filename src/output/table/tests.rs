@@ -338,3 +338,85 @@ fn agent_workflow_responses_print_whole_as_json() {
         assert!(render(&body, DEFAULT_WIDTH).is_none(), "{method} {path}");
     }
 }
+
+const MONITOR: &str = "/workspaces/{workspaceId}/monitoring-tests/{testId}";
+
+#[test]
+fn monitor_phase_six_spec_rows_pick_their_own_renderer() {
+    let cases: [(Value, RowRenderer, &str); 5] = [
+        (
+            spec_response_object("post", &format!("{MONITOR}/exclusions"), "201", false),
+            render_item_results,
+            "EXCLUDED",
+        ),
+        (
+            spec_response_object("post", &format!("{MONITOR}/exclusions/action-delete"), "200", false),
+            render_item_results,
+            "DELETED",
+        ),
+        (
+            spec_response_object("post", &format!("{MONITOR}/codebase-exclusions"), "201", false),
+            render_item_results,
+            "EXCLUDED",
+        ),
+        (
+            spec_response_row(&format!("{MONITOR}/codebase-exclusions")),
+            render_codebase_exclusions,
+            "example-org/example-repo",
+        ),
+        (
+            spec_response_object("post", &format!("{MONITOR}/action-retest"), "200", false),
+            render_retests,
+            "TESTING",
+        ),
+    ];
+    for (row, want, cell) in cases {
+        let got = pick_renderer(&row).unwrap_or_else(|| panic!("no renderer for {row}"));
+        assert!(std::ptr::fn_addr_eq(got, want), "wrong renderer for {row}");
+        let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
+        assert!(out.contains(cell), "`{cell}` missing from\n{out}");
+    }
+}
+
+#[test]
+fn item_results_show_the_target_and_the_error() {
+    let v = json!({"data": [
+        {"statusCode": 201, "outcome": "EXCLUDED", "data": {"id": "sg-1", "connectionId": 1, "exclusionIds": [10, 11]}},
+        {"statusCode": 422, "outcome": "FAILED_INVALID_TARGET", "error": {"message": "not a current failure"},
+         "data": {"id": "sg-2", "connectionId": null, "exclusionIds": []}},
+        {"statusCode": 200, "outcome": "DELETED", "data": {"exclusionId": 7}}
+    ]});
+    let out = render(&v, DEFAULT_WIDTH).unwrap();
+    for cell in [
+        "sg-1",
+        "10,11",
+        "sg-2",
+        "not a current failure",
+        "FAILED_INVALID_TARGET",
+        "7",
+    ] {
+        assert!(out.contains(cell), "`{cell}` missing from\n{out}");
+    }
+}
+
+#[test]
+fn a_monitoring_test_keeps_the_monitor_renderer() {
+    // Create and recipe answer a whole monitoring test, which carries `testId`
+    // and `checkStatus` among its keys; the retest sniff must not take it.
+    let test = spec_response_object("post", "/workspaces/{workspaceId}/monitoring-tests", "201", true);
+    assert!(std::ptr::fn_addr_eq(
+        pick_renderer(&test).unwrap(),
+        render_monitors as RowRenderer
+    ));
+}
+
+#[test]
+fn recipe_validation_prints_whole_as_json() {
+    let body = spec_response_object(
+        "post",
+        "/workspaces/{workspaceId}/monitoring-tests/action-validate-recipe",
+        "200",
+        true,
+    );
+    assert!(pick_renderer(&body).is_none(), "a renderer claimed {body}");
+}

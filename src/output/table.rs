@@ -50,6 +50,19 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("externalTicketId") {
         return Some(render_tickets);
     }
+    // Per-item bulk results carry a per-item `statusCode` + `outcome`.
+    if obj.contains_key("statusCode") && obj.contains_key("outcome") {
+        return Some(render_item_results);
+    }
+    // Codebase exclusion rows carry `findingId` + `repositoryName`.
+    if obj.contains_key("findingId") && obj.contains_key("repositoryName") {
+        return Some(render_codebase_exclusions);
+    }
+    // A retest acceptance is exactly `{testId, checkStatus}`; a monitoring test
+    // carries both among many more keys and keeps the monitor renderer below.
+    if obj.len() == 2 && obj.contains_key("testId") && obj.contains_key("checkStatus") {
+        return Some(render_retests);
+    }
     // Security-review note and observation rows carry `securityReviewId` next to
     // their free-text field. Above the vendor and questionnaire sniffs.
     if obj.contains_key("securityReviewId") && (obj.contains_key("note") || obj.contains_key("observation")) {
@@ -210,6 +223,60 @@ fn render_tickets(rows: &[Value], width: usize) -> String {
             |r| str_field(r, "createdAt"),
             |r| str_field(r, "updatedAt"),
         ],
+        width,
+    )
+}
+
+/// One row per requested item of a bulk op, in request order. `ITEM` is the
+/// requested target: a failure `id`, a `findingId` or an `exclusionId`.
+fn render_item_results(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["STATUS", "OUTCOME", "ITEM", "EXCLUSION_IDS", "ERROR"],
+        rows,
+        &[
+            |r| scalar_field(r, "statusCode"),
+            |r| str_field(r, "outcome"),
+            |r| {
+                let data = r.get("data").cloned().unwrap_or(Value::Null);
+                ["id", "findingId", "exclusionId"]
+                    .iter()
+                    .map(|k| scalar_field(&data, k))
+                    .find(|v| !v.is_empty())
+                    .unwrap_or_default()
+            },
+            |r| {
+                r.get("data")
+                    .and_then(|d| d.get("exclusionIds"))
+                    .and_then(Value::as_array)
+                    .map(|ids| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+                    .unwrap_or_default()
+            },
+            |r| r.get("error").map(|e| str_field(e, "message")).unwrap_or_default(),
+        ],
+        width,
+    )
+}
+
+fn render_codebase_exclusions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "REPOSITORY", "FINDING_ID", "REASON", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "repositoryName"),
+            |r| str_field(r, "findingId"),
+            |r| str_field(r, "reason"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_retests(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["TEST_ID", "CHECK_STATUS"],
+        rows,
+        &[|r| scalar_field(r, "testId"), |r| str_field(r, "checkStatus")],
         width,
     )
 }

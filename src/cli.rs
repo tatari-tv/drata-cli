@@ -7,10 +7,12 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+mod monitor;
 mod risk;
 mod ticket;
 mod upload;
 mod vendor;
+pub use monitor::*;
 pub use risk::*;
 pub use ticket::*;
 pub use upload::*;
@@ -1079,77 +1081,6 @@ pub enum UserAction {
         /// Stream all pages as NDJSON instead of buffering
         #[arg(long)]
         all: bool,
-    },
-}
-
-// ---------------------------------------------------------------------------
-// Monitoring Tests
-// ---------------------------------------------------------------------------
-
-#[derive(Subcommand, Debug)]
-pub enum MonitorAction {
-    /// List monitoring tests in a workspace
-    List {
-        /// Workspace ID
-        workspace_id: String,
-        /// Stream all pages as NDJSON instead of buffering
-        #[arg(long)]
-        all: bool,
-        /// Filter on draft state (true or false)
-        #[arg(long)]
-        draft: Option<bool>,
-        /// Filter by test name
-        #[arg(long)]
-        name: Option<String>,
-    },
-    /// Get a monitoring test by ID
-    Get {
-        /// Workspace ID
-        workspace_id: String,
-        /// Test ID
-        test_id: String,
-    },
-    /// Update a monitoring test
-    Update {
-        /// Workspace ID
-        workspace_id: String,
-        /// Test ID
-        test_id: String,
-        /// Display name for the test
-        #[arg(long)]
-        name: Option<String>,
-        /// Enable or disable the test
-        #[arg(long)]
-        enabled: Option<bool>,
-        /// Description
-        #[arg(long)]
-        description: Option<String>,
-    },
-    /// List exclusions for a monitoring test
-    Exclusions {
-        /// Workspace ID
-        workspace_id: String,
-        /// Test ID
-        test_id: String,
-    },
-    /// List recent failures for a monitoring test
-    Failures {
-        /// Workspace ID
-        workspace_id: String,
-        /// Test ID
-        test_id: String,
-    },
-    /// List recent passes for a monitoring test
-    Passes {
-        /// Workspace ID
-        workspace_id: String,
-        /// Test ID
-        test_id: String,
-    },
-    /// Tickets linked to a monitoring test
-    Ticket {
-        #[command(subcommand)]
-        action: MonitorTicketAction,
     },
 }
 

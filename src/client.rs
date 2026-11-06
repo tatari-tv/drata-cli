@@ -150,6 +150,17 @@ pub fn encode_query(value: &str) -> String {
     utf8_percent_encode(value, QUERY_ENCODE_SET).to_string()
 }
 
+/// Characters that must be percent-encoded in one path segment: the query set
+/// plus the separators `/` and `?` and the escape `%`. `:` stays literal, so a
+/// `name:<draft name>` test id reads as the spec writes it.
+const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &QUERY_ENCODE_SET.add(b'/').add(b'?').add(b'%');
+
+/// Percent-encode a string for use as one URL path segment, so a free-text id
+/// cannot add segments or start the query string.
+pub fn encode_path_segment(value: &str) -> String {
+    utf8_percent_encode(value, PATH_SEGMENT_ENCODE_SET).to_string()
+}
+
 /// Region base URLs from the spec `servers` block. Selected by credential
 /// region; default is US.
 const US_BASE_URL: &str = "https://public-api.drata.com/public/v2";
@@ -472,6 +483,14 @@ impl DrataClient {
     #[instrument(skip(self, body))]
     pub async fn post(&self, path: &str, body: Value) -> Result<Value> {
         self.send_inner(Method::POST, path, Some(body), Retry429::Default).await
+    }
+
+    /// POST with no body, sent exactly once: a 429 comes back as an `ApiError`
+    /// carrying the server's body instead of being retried. For ops where 429
+    /// means "not now" (a post-run cooldown), not "slow down".
+    #[instrument(skip(self))]
+    pub async fn post_once(&self, path: &str) -> Result<Value> {
+        self.send_inner(Method::POST, path, None, Retry429::Never).await
     }
 
     #[instrument(skip(self, body))]

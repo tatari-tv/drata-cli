@@ -97,3 +97,16 @@ fn example_for_unknown_operation_is_none() {
     let example = example_for_operation("post", "/no/such/path").unwrap();
     assert!(example.is_none());
 }
+
+#[test]
+fn example_for_schema_builds_a_named_component() {
+    let resource = example_for_schema("CustomTestRecipeResourcePublicV2Dto").unwrap();
+    assert_eq!(resource["resource"], json!("Employees"));
+    assert!(resource["evaluator"]["all"].is_array(), "{resource}");
+}
+
+#[test]
+fn example_for_unknown_schema_is_an_error() {
+    let err = example_for_schema("NoSuchSchemaDto").unwrap_err();
+    assert!(err.to_string().contains("NoSuchSchemaDto"), "{err}");
+}

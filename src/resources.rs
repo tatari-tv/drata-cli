@@ -4,6 +4,7 @@
 pub mod asset;
 pub mod audit;
 pub mod auth;
+pub mod bulk;
 pub mod company;
 pub mod control;
 pub mod device;

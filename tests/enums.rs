@@ -186,3 +186,19 @@ fn finalize_requires_a_spec_decision() {
         "MAYBE"
     ]));
 }
+
+#[test]
+fn monitor_enums_match_the_spec() {
+    same::<CodebaseExclusionExpand>(
+        "/workspaces/{workspaceId}/monitoring-tests/{testId}/codebase-exclusions",
+        "expand[]",
+    );
+}
+
+#[test]
+fn codebase_exclusion_expand_takes_spec_values_only() {
+    let list = ["monitor", "codebase-exclusion", "list", "1", "2", "--expand"];
+    assert!(parses(&[&list[..], &["exclusionDesignator"]].concat()));
+    assert!(parses(&[&list[..], &["EXCLUSIONDESIGNATOR"]].concat()));
+    assert!(!parses(&[&list[..], &["connection"]].concat()));
+}
