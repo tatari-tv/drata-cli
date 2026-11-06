@@ -2,7 +2,7 @@
 
 **Author:** Scott Idler
 **Date:** 2026-11-05
-**Status:** In Review
+**Status:** Implemented
 **Review Passes Completed:** 5/5
 
 ## Summary
@@ -251,14 +251,18 @@ Coverage numbers below are `curated/308` from `cargo test --test coverage -- --n
 
 Observed on branch `drata-v2-endpoint-coverage` (HEAD 371c13f), 2026-11-05, `target/debug/drata`.
 
-- [ ] `cargo test --test coverage -- --nocapture` prints `curated coverage: 227/308`, counted from the command table
+- [x] `cargo test --test coverage -- --nocapture` prints `curated coverage: 227/308`, counted from the command table
   - Observed: `curated coverage: 70/308 operations (22.7%); raw covers all 308` (hand list, no command table)
-- [ ] `rg -n -i 'control-library|control library' src tests README.md` exits 1
+  - Observed on dec7857: `curated coverage: 227/308 operations (73.7%); raw covers all 308`
+- [x] `rg -n -i 'control-library|control library' src tests README.md` exits 1
   - Observed: exit 1 (no matches; d788b46 already removed the README mention)
-- [ ] `drata evidence-item --help` and `drata access-review --help` each exit 0
+  - Observed on dec7857: exit 1
+- [x] `drata evidence-item --help` and `drata access-review --help` each exit 0
   - Observed: both exit 2 (unrecognized subcommand)
-- [ ] `otto ci` exits 0
+  - Observed on dec7857: both exit 0
+- [x] `otto ci` exits 0
   - Observed: exit 0 on d788b46
+  - Observed on dec7857: exit 0
 - [ ] After `bump release`, `drata --version` prints the released version and the Rollout shakedown has run with its results recorded in this doc
   - Observed: cannot run until the work ships
 
