@@ -58,6 +58,10 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("targetId") && obj.contains_key("targetType") {
         return Some(render_compliance_exclusions);
     }
+    // Standard connection rows (AWS, Azure, GCP, GitLab) carry `clientAlias` + `state`.
+    if obj.contains_key("clientAlias") && obj.contains_key("state") {
+        return Some(render_connections);
+    }
     // Custom field definition rows carry `customFieldId`.
     if obj.contains_key("customFieldId") {
         return Some(render_custom_fields);
@@ -336,6 +340,31 @@ fn render_compliance_exclusions(rows: &[Value], width: usize) -> String {
             |r| str_field(r, "reason"),
             |r| str_field(r, "startDate"),
             |r| str_field(r, "endDate"),
+        ],
+        width,
+    )
+}
+
+/// One renderer for the four providers: the target column is the first of the
+/// provider's identifying fields the row carries (AWS role ARN, Azure
+/// subscription, GCP project). GitLab rows have none, only an expiry.
+fn render_connections(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "ALIAS", "STATE", "TARGET", "TOKEN_EXPIRES", "UPDATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "clientAlias"),
+            |r| str_field(r, "state"),
+            |r| {
+                ["roleArn", "subscriptionId", "projectId"]
+                    .iter()
+                    .map(|k| str_field(r, k))
+                    .find(|v| !v.is_empty())
+                    .unwrap_or_default()
+            },
+            |r| str_field(r, "tokenExpiresAt"),
+            |r| str_field(r, "updatedAt"),
         ],
         width,
     )

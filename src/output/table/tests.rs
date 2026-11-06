@@ -630,3 +630,42 @@ fn access_review_spec_rows_pick_their_own_renderer() {
     let package = every_key("get", "/access-review-periods/{periodId}/evidence-package");
     assert!(pick_renderer(&package).is_none(), "{package}");
 }
+
+#[test]
+fn connection_spec_rows_pick_the_connection_renderer() {
+    let cases: [(&str, &str, &str); 4] = [
+        (
+            "/aws-connections",
+            "arn:aws:iam::123456789012:role/DrataAuditRole",
+            "ACTIVE",
+        ),
+        (
+            "/azure-connections",
+            "28ffcc9b-be6d-4bbf-b53a-057049debc38",
+            "My Azure Connection",
+        ),
+        ("/gcp-connections", "my-project", "My GCP Connection"),
+        (
+            "/gitlab-connections",
+            "2025-07-01T16:45:55.246Z",
+            "My GitLab Connection",
+        ),
+    ];
+    for (path, target, other) in cases {
+        for (method, p, status) in [
+            ("get", path.to_string(), "200"),
+            ("get", format!("{path}/{{connectionId}}"), "200"),
+            ("post", path.to_string(), "201"),
+        ] {
+            let row = spec_response_object(method, &p, status, true);
+            let got = pick_renderer(&row).unwrap_or_else(|| panic!("no renderer for {row}"));
+            assert!(
+                std::ptr::fn_addr_eq(got, render_connections as RowRenderer),
+                "{method} {p}"
+            );
+            let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
+            assert!(out.contains(target), "`{target}` missing from\n{out}");
+            assert!(out.contains(other), "`{other}` missing from\n{out}");
+        }
+    }
+}

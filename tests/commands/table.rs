@@ -64,6 +64,10 @@ pub const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/LICENSE");
 /// file or stdin only.
 pub const ACCESS_LINK_DATA: &str = concat!("@", env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/access-link.json");
 
+/// `--data` for the Standard Connections `create` and `update` rows, which take
+/// their body from a file or stdin only. Fake values, never a real credential.
+pub const CONNECTION_DATA: &str = concat!("@", env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/connection.json");
+
 const fn row(method: &'static str, path: &'static str, argv: &'static [&'static str], response: Response) -> Row {
     Row {
         method,
@@ -1071,5 +1075,106 @@ const NON_VENDOR_ROWS: &[Row] = &[
         "/access-review-periods/{periodId}/evidence-package",
         &["access-review", "period", "evidence-package", "1"],
         Object,
+    ),
+    // standard connections (one implementation, four providers)
+    row("GET", "/aws-connections", &["connection", "aws", "list"], Page),
+    row(
+        "POST",
+        "/aws-connections",
+        &["connection", "aws", "create", "--data", CONNECTION_DATA],
+        Object,
+    ),
+    row(
+        "GET",
+        "/aws-connections/{connectionId}",
+        &["connection", "aws", "get", "1"],
+        Object,
+    ),
+    row(
+        "PUT",
+        "/aws-connections/{connectionId}",
+        &["connection", "aws", "update", "1", "--data", CONNECTION_DATA],
+        Object,
+    ),
+    row(
+        "DELETE",
+        "/aws-connections/{connectionId}",
+        &["connection", "aws", "remove", "1"],
+        Empty,
+    ),
+    row("GET", "/azure-connections", &["connection", "azure", "list"], Page),
+    row(
+        "POST",
+        "/azure-connections",
+        &["connection", "azure", "create", "--data", CONNECTION_DATA],
+        Object,
+    ),
+    row(
+        "GET",
+        "/azure-connections/{connectionId}",
+        &["connection", "azure", "get", "1"],
+        Object,
+    ),
+    row(
+        "PUT",
+        "/azure-connections/{connectionId}",
+        &["connection", "azure", "update", "1", "--data", CONNECTION_DATA],
+        Object,
+    ),
+    row(
+        "DELETE",
+        "/azure-connections/{connectionId}",
+        &["connection", "azure", "remove", "1"],
+        Empty,
+    ),
+    row("GET", "/gcp-connections", &["connection", "gcp", "list"], Page),
+    row(
+        "POST",
+        "/gcp-connections",
+        &["connection", "gcp", "create", "--data", CONNECTION_DATA],
+        Object,
+    ),
+    row(
+        "GET",
+        "/gcp-connections/{connectionId}",
+        &["connection", "gcp", "get", "1"],
+        Object,
+    ),
+    row(
+        "PUT",
+        "/gcp-connections/{connectionId}",
+        &["connection", "gcp", "update", "1", "--data", CONNECTION_DATA],
+        Object,
+    ),
+    row(
+        "DELETE",
+        "/gcp-connections/{connectionId}",
+        &["connection", "gcp", "remove", "1"],
+        Empty,
+    ),
+    row("GET", "/gitlab-connections", &["connection", "gitlab", "list"], Page),
+    row(
+        "POST",
+        "/gitlab-connections",
+        &["connection", "gitlab", "create", "--data", CONNECTION_DATA],
+        Object,
+    ),
+    row(
+        "GET",
+        "/gitlab-connections/{connectionId}",
+        &["connection", "gitlab", "get", "1"],
+        Object,
+    ),
+    row(
+        "PUT",
+        "/gitlab-connections/{connectionId}",
+        &["connection", "gitlab", "update", "1", "--data", CONNECTION_DATA],
+        Object,
+    ),
+    row(
+        "DELETE",
+        "/gitlab-connections/{connectionId}",
+        &["connection", "gitlab", "remove", "1"],
+        Empty,
     ),
 ];

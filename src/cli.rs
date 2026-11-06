@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 mod access;
+mod connection;
 mod custom;
 mod evidence;
 mod exclusion;
@@ -20,6 +21,7 @@ mod ticket;
 mod upload;
 mod vendor;
 pub use access::*;
+pub use connection::*;
 pub use custom::*;
 pub use evidence::*;
 pub use exclusion::*;
@@ -205,6 +207,11 @@ pub enum Commands {
     VersionControlIdentity {
         #[command(subcommand)]
         action: VersionControlIdentityAction,
+    },
+    /// Manage Standard Connections: AWS, Azure, GCP and GitLab
+    Connection {
+        #[command(subcommand)]
+        action: ConnectionAction,
     },
     /// Inspect Custom Connections
     CustomConnection {

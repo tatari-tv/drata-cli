@@ -8,6 +8,7 @@ pub mod auth;
 pub mod bulk;
 pub mod company;
 pub mod compliance;
+pub mod connection;
 pub mod control;
 pub mod custom;
 pub mod device;

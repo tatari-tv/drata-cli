@@ -589,3 +589,12 @@ fn access_review_flags_take_spec_values_case_insensitively_and_numeric_ids() {
     ]));
     assert!(parses(&["access-review", "period", "create", "--example"]));
 }
+
+#[test]
+fn connection_expand_matches_the_spec_for_every_provider() {
+    for provider in ["aws", "azure", "gcp", "gitlab"] {
+        let list = format!("/{provider}-connections");
+        same::<ConnectionExpand>(&list, "expand[]");
+        same::<ConnectionExpand>(&format!("{list}/{{connectionId}}"), "expand[]");
+    }
+}

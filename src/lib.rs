@@ -48,6 +48,7 @@ pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
         Commands::VersionControlIdentity { action } => {
             resources::identity::example_if_requested_version_control(action)
         }
+        Commands::Connection { action } => resources::connection::example_if_requested(action),
         Commands::Raw(args) => raw::example_if_requested(args),
         _ => None,
     }
@@ -143,6 +144,9 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
         }
         Commands::VersionControlIdentity { action } => {
             resources::identity::handle_version_control(action, client, config, confirm).await?;
+        }
+        Commands::Connection { action } => {
+            resources::connection::handle(action, client, config, confirm).await?;
         }
         Commands::CustomConnection { action } => {
             resources::custom::handle_connection(action, client, config).await?;
