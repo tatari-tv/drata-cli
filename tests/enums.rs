@@ -598,3 +598,70 @@ fn connection_expand_matches_the_spec_for_every_provider() {
         same::<ConnectionExpand>(&format!("{list}/{{connectionId}}"), "expand[]");
     }
 }
+
+#[test]
+fn dcf_suggestion_enums_match_the_spec() {
+    let list = "/workspaces/{workspaceId}/audits/{auditId}/requests/{requestId}/dcf-suggestions";
+    same::<DcfSuggestionStatus>(list, "status[]");
+    same::<DcfConfidenceLevel>(list, "confidenceLevel[]");
+    same::<DcfSuggestionSort>(list, "sort");
+    same::<DcfSortDirection>(list, "sortDir");
+    assert_eq!(
+        flag_values::<DcfSuggestionDecision>(),
+        body_values(
+            "/workspaces/{workspaceId}/audits/{auditId}/requests/{requestId}/dcf-suggestions/{suggestionId}/actions",
+            "application/json",
+            "action"
+        ),
+        "decide --action"
+    );
+    // `accept --confidence-level` is the body's `confidenceLevels` array of the same enum.
+    let spec = spec();
+    let accept = "/workspaces/{workspaceId}/audits/{auditId}/requests/action-accept-dcf-suggestions";
+    let schema = resolve(
+        &spec,
+        &spec["paths"][accept]["post"]["requestBody"]["content"]["application/json"]["schema"],
+    );
+    let items = resolve(&spec, &schema["properties"]["confidenceLevels"]["items"]);
+    let want: BTreeSet<String> = items["enum"]
+        .as_array()
+        .expect("enum")
+        .iter()
+        .map(|v| v.as_str().expect("string").to_string())
+        .collect();
+    assert_eq!(flag_values::<DcfConfidenceLevel>(), want, "accept --confidence-level");
+}
+
+#[test]
+fn dcf_suggestion_flags_take_spec_values_case_insensitively_and_never_split_commas() {
+    let base = ["audit", "request", "dcf-suggestion"];
+    let with = |rest: &[&str]| -> Vec<String> { base.iter().chain(rest.iter()).map(|s| s.to_string()).collect() };
+    let ok = |rest: &[&str]| {
+        let argv = with(rest);
+        parses(&argv.iter().map(String::as_str).collect::<Vec<_>>())
+    };
+    assert!(ok(&["list", "1", "2", "3", "--status", "pending", "Accepted"]));
+    assert!(!ok(&["list", "1", "2", "3", "--status", "rejected"]));
+    assert!(!ok(&["list", "1", "2", "3", "--status", "pending,accepted"]));
+    assert!(ok(&[
+        "accept",
+        "1",
+        "2",
+        "--all-requests",
+        "--confidence-level",
+        "high",
+        "low"
+    ]));
+    assert!(!ok(&[
+        "accept",
+        "1",
+        "2",
+        "--all-requests",
+        "--confidence-level",
+        "certain"
+    ]));
+    assert!(!ok(&["accept", "1", "2", "--request-id", "1", "--all-requests"]));
+    assert!(!ok(&["generate", "1", "2", "--request-id", "1,2"]));
+    assert!(!ok(&["run-action", "1", "2", "3", "4", "--action", "defer"]));
+    assert!(ok(&["run-action", "1", "2", "3", "4", "--action", "Reject"]));
+}

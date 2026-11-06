@@ -387,3 +387,27 @@ Supersedes the Phase 11 entries for `--user` and `--application`. The house CLI 
 
 ### Open questions
 - None.
+
+## Phase 13: Audit DCF suggestions
+### Design decisions
+- `audit request dcf-suggestion generate | accept | list | get | run-action` extends the existing `audit` noun; `AuditAction` moved from `src/cli.rs` to `src/cli/audit.rs` with a new `Request` variant, nothing renamed. Every help text for the 5 verbs ends `(beta)` (`DcfSuggestionAction` in `src/cli/audit.rs`).
+- Handler in `src/resources/audit/dcf.rs`, routed from `src/resources/audit.rs`; `audit::handle` gained the `confirm` argument and `audit::example_if_requested` is wired in `src/lib.rs`. Mutating verbs confirm; the client's write guard applies as for every non-GET.
+- `generate` and `accept` go through `resources::bulk::post` with two new rules in `src/resources/bulk.rs`: `GENERATE_STATUS` (a row fails when `status` is `FAILED` or missing; `SKIPPED` is not a failure) and `ACCEPT_ERROR` (a row fails when `error` is non-null or missing). Every row prints, then the command exits 1 on any failure. The 202 is not polled.
+- Body builders are pure and fail before any request: `build_generate_body` (1..=100 unique ids), `build_accept_body` (`requestIds` xor `allRequests`, 1..=500 unique ids, `confidenceLevels` only when given and de-duplicated), `build_action_body`. `accept_prompt` adds "accepts pending suggestions on EVERY matching request" to the confirm text when the body sent has `allRequests: true`, so `--data` gets it too.
+- `list` uses `client.get_all` (the op has a `cursor` param) with repeated `status[]` and `confidenceLevel[]` plus `--sort` / `--sort-dir`; `get` uses `client.get`. Enums `DcfConfidenceLevel`, `DcfSuggestionStatus`, `DcfSuggestionSort`, `DcfSortDirection`, `DcfSuggestionDecision` are case-insensitive and are pinned to the spec's values in `tests/enums.rs` (`dcf_suggestion_enums_match_the_spec`).
+- `src/output/table.rs`: `render_dcf_suggestions`, picked on `dcfCode` + `confidenceLevel`; renderer test feeds the op's spec response row through `pick_renderer`.
+- Command table: 5 rows in `tests/commands/table.rs`; `CURATED_FLOOR` in `tests/coverage.rs` raised to 227. Wiremock tests are in the new `tests/audit.rs`.
+- README: rewrote the command reference for every noun and verb in Phases 1-13 and the raw-only list. Enumerated from the clap tree (`--help` walked recursively), not from the doc.
+- Tests, each reverted once and failing: `GENERATE_STATUS` matcher (`generate_failed_...` unit and `generate_with_one_failed_row_exits_1_after_printing_every_row` wire), `ACCEPT_ERROR` matcher, `status[]` key, `allRequests` body value, `run-action` body, `accept_prompt`, renderer sniff, the max-ids guard. Files restored and touched after each.
+
+### Deviations
+- The design doc's API Design names `evidence-item ... evidence-files upload`; the shipped verb (Phase 10) is `evidence-item upload`. README documents the verb that exists.
+- The doc's Phase 13 text says "`audit request dcf-suggestion` verbs" without names; `/actions` is `run-action` per the Overview naming rule, and `/actions` takes `--action accept|reject` (spec `AuditRequestDcfSuggestionActionEnum`).
+- README keeps `Audit Requests` in the raw-only list, reworded: only the DCF suggestion ops are curated, the other audit request ops stay raw. `Custom Connections` is reworded the same way (only `resource-attribute` is curated).
+
+### Tradeoffs
+- `accept` row failure = non-null `error` vs also counting `unresolvedCount > 0`: the spec says unresolved suggestions are left PENDING on purpose and returned by later calls, which is not a failed request, so only `error` fails.
+- README examples use `--example` for body-heavy verbs vs spelling every body flag: the flags change per phase and `--example` is derived from the spec, so it cannot drift.
+
+### Open questions
+- None.

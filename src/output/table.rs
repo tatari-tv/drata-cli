@@ -58,6 +58,10 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("targetId") && obj.contains_key("targetType") {
         return Some(render_compliance_exclusions);
     }
+    // DCF suggestion rows carry `dcfCode` + `confidenceLevel`.
+    if obj.contains_key("dcfCode") && obj.contains_key("confidenceLevel") {
+        return Some(render_dcf_suggestions);
+    }
     // Standard connection rows (AWS, Azure, GCP, GitLab) carry `clientAlias` + `state`.
     if obj.contains_key("clientAlias") && obj.contains_key("state") {
         return Some(render_connections);
@@ -1015,6 +1019,22 @@ fn render_monitors(rows: &[Value], width: usize) -> String {
             |r| str_field(r, "checkStatus"),
             |r| str_field(r, "checkResultStatus"),
             |r| str_field(r, "lastPassedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_dcf_suggestions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "REQUEST", "DCF", "CONTROL", "CONFIDENCE", "STATUS"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| scalar_field(r, "requestId"),
+            |r| str_field(r, "dcfCode"),
+            |r| str_field(r, "controlName"),
+            |r| str_field(r, "confidenceLevel"),
+            |r| str_field(r, "status"),
         ],
         width,
     )

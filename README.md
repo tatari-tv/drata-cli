@@ -89,6 +89,63 @@ drata-cli vendor remove 123
 drata-cli vendor upload 123 --file ./contract.pdf
 drata-cli vendor questionnaire list 123
 drata-cli vendor questionnaire send 123 --email sec@vendor.com --questionnaire-id 5 --security-review-id 7 --email-content "Please complete"
+drata-cli vendor questionnaire get 123 5
+drata-cli vendor questionnaire questions 123 5
+drata-cli vendor search                  # all pages as rows
+drata-cli vendor search --facet <name>   # one page, whole {data, pagination, facets} envelope
+drata-cli vendor trust-overview 123
+```
+
+#### Vendor security reviews
+
+```
+drata-cli vendor security-review list 123
+drata-cli vendor security-review create 123 --example
+drata-cli vendor security-review get 123 <review_id>
+drata-cli vendor security-review update 123 <review_id> --example
+drata-cli vendor security-review actions 123 <review_id>
+drata-cli vendor security-review run-action 123 <review_id> --action <action>
+drata-cli vendor security-review create-with-file 123 --file ./soc2.pdf --title "SOC 2" --review-deadline-at 2027-01-01 --status IN_PROGRESS --type SOC_REPORT --document-type SOC_DOCUMENT
+drata-cli vendor security-review upload-questionnaire 123 --file ./answers.xlsx
+drata-cli vendor security-review questionnaires 123 <review_id>
+drata-cli vendor security-review note list 123 <review_id>              # also get | create | update | remove
+drata-cli vendor security-review observation list 123 <review_id>       # also get | create | update | remove
+drata-cli vendor security-review assessment list 123 <review_id>        # also get | stats
+```
+
+The agent workflow verbs start background jobs and print the 202 body; nothing
+polls. Read progress with `workflow` and `summary`:
+
+```
+drata-cli vendor security-review start-agent 123 <review_id>
+drata-cli vendor security-review confirm-criteria 123 <review_id> --example
+drata-cli vendor security-review start-assessment 123 <review_id>
+drata-cli vendor security-review stop-assessment 123 <review_id>
+drata-cli vendor security-review collect-public-documents 123 <review_id>
+drata-cli vendor security-review access-request-requirements 123 <review_id>
+drata-cli vendor security-review request-trust-center-access 123 <review_id> --example
+drata-cli vendor security-review provide-trust-center-access-link 123 <review_id> --data @link.json
+drata-cli vendor security-review skip-trust-center-access-request 123 <review_id>
+drata-cli vendor security-review add-documents 123 <review_id> --file ./a.pdf ./b.pdf
+drata-cli vendor security-review upload-questionnaire-to-review 123 <review_id> --file ./answers.xlsx
+drata-cli vendor security-review generate-follow-up-questionnaire 123 <review_id>
+drata-cli vendor security-review follow-up-questionnaire 123 <review_id>
+drata-cli vendor security-review send-follow-up-questionnaire 123 <review_id> --example
+drata-cli vendor security-review residual-risk 123 <review_id>
+drata-cli vendor security-review finalize 123 <review_id> --example
+drata-cli vendor security-review summary 123 <review_id>
+drata-cli vendor security-review workflow 123 <review_id>
+```
+
+#### Vendor criteria, templates and risk levels
+
+```
+drata-cli vendor-criteria list
+drata-cli vendor-criteria-creation list <workspace_id>
+drata-cli vendor-questionnaire-template list
+drata-cli vendor-questionnaire-template questions <questionnaire_id>
+drata-cli vendor-risk-level list
+drata-cli vendor-security-review list      # security reviews across all vendors
 ```
 
 ### Risk Registers
@@ -115,6 +172,12 @@ drata-cli risk update <register_id> <risk_id> --status CLOSED
 drata-cli risk insights <register_id>
 drata-cli risk upload <register_id> <risk_id> --file ./evidence.pdf            # one or more --file
 drata-cli risk upload <register_id> <risk_id> --file ./a.pdf ./b.pdf
+drata-cli risk remove <register_id> <risk_id>
+drata-cli risk search                                  # all pages as rows; --facet <name> for facet counts
+drata-cli risk ticket list <register_id> <risk_id>
+drata-cli risk ticket link <register_id> <risk_id> --ticket-url https://example.atlassian.net/browse/SEC-1
+drata-cli risk ticket unlink <register_id> <risk_id> <ticket_id>
+drata-cli risk ticket create <register_id> <risk_id> --example
 ```
 
 ### Controls
@@ -127,7 +190,12 @@ drata-cli control create <workspace_id> --name "Access Control" --description ".
 drata-cli control update <workspace_id> <control_id> --name "Updated"
 drata-cli control requirements <workspace_id> <control_id>
 drata-cli control compare <workspace_id> --control-ids 1 2 3
+drata-cli control ticket list <workspace_id> <control_id>
+drata-cli control ticket link <workspace_id> <control_id> --ticket-url https://example.atlassian.net/browse/SEC-1
+drata-cli control ticket unlink <workspace_id> <control_id> <ticket_id>
 ```
+
+Controls have no `ticket create`: the API has no `action-create` op for them.
 
 ### Devices
 
@@ -145,6 +213,13 @@ drata-cli device upload <device_id> --file ./cert.pdf --type ANTIVIRUS_EVIDENCE
 drata-cli personnel list
 drata-cli personnel get <personnel_id>
 drata-cli personnel update <personnel_id> --employment-status CURRENT_EMPLOYEE
+drata-cli personnel search                          # all pages as rows; --facet <name> for facet counts
+drata-cli personnel group list <workspace_id>       # scoped personnel groups
+drata-cli personnel group counts <workspace_id>
+drata-cli personnel group add <workspace_id> <group_id>
+drata-cli personnel group replace <workspace_id> --group-id 1 2
+drata-cli personnel group remove <workspace_id> <group_id>
+drata-cli group list
 ```
 
 ### Policies
@@ -179,6 +254,101 @@ drata-cli evidence remove <workspace_id> <evidence_id>
 drata-cli evidence get-version <workspace_id> <evidence_id> <version_id>
 ```
 
+### Evidence Items
+
+The spec's Evidence tag manages Evidence Items, a different resource from the
+Evidence Library above. `evidence-item remove` deletes the item and all its artifacts.
+
+```
+drata-cli evidence-item list <workspace_id>
+drata-cli evidence-item get <workspace_id> <evidence_id>
+drata-cli evidence-item create <workspace_id> --example
+drata-cli evidence-item update <workspace_id> <evidence_id> --example
+drata-cli evidence-item remove <workspace_id> <evidence_id>
+drata-cli evidence-item upload <workspace_id> --file ./report.pdf      # prints the fileKey to pass to --file-key
+drata-cli evidence-item artifact list <workspace_id> <evidence_id>
+drata-cli evidence-item artifact update <workspace_id> <evidence_id> <artifact_id> --example
+drata-cli evidence-item artifact remove <workspace_id> <evidence_id> <artifact_id>
+drata-cli evidence-item artifact run-action <workspace_id> <evidence_id> <artifact_id> --example
+```
+
+### Upload URLs
+
+```
+drata-cli upload-url create --purpose <purpose> [--workspace <id>]
+drata-cli upload-url create --purpose <purpose> --file ./report.pdf    # also PUTs the file; prints the objectKey
+```
+
+### Access Reviews
+
+Only one review period may be active on the account at a time. `app users set`
+replaces the application's full user list: users omitted from it are removed.
+
+```
+drata-cli access-review app list
+drata-cli access-review app get <application_id>
+drata-cli access-review app create --name "Okta" --reviewer-id 42
+drata-cli access-review app update <application_id> --reviewer-id 42 43
+drata-cli access-review app remove <application_id>
+drata-cli access-review app users list <application_id>
+drata-cli access-review app users set <application_id> --user IDENTITY:USERNAME:EMAIL --role IDENTITY:ROLE
+drata-cli access-review period list --status active
+drata-cli access-review period get <period_id>
+drata-cli access-review period create --starting-date 2026-11-01T00:00:00Z --ending-date 2026-12-01T00:00:00Z --application APP_ID:REVIEWER_ID
+drata-cli access-review period run-action <period_id> --action complete
+drata-cli access-review period app get <period_id> <review_app_id>
+drata-cli access-review period app update <period_id> <review_app_id> --reviewer-id 42
+drata-cli access-review period app run-action <period_id> <review_app_id> --action complete
+drata-cli access-review period app users <period_id> <review_app_id>
+drata-cli access-review period evidence-package <period_id>            # prints the signed URL, never downloads
+```
+
+### Standard Connections
+
+`connection aws | azure | gcp | gitlab` share one verb set. Bodies carry cloud
+credentials, so `create` and `update` take `--data @file` or `--data -` only and
+reject inline JSON before any request. `--example` prints the provider's body skeleton.
+
+```
+drata-cli connection aws list
+drata-cli connection aws get <connection_id>
+drata-cli connection aws create --example
+drata-cli connection aws create --data @aws-connection.json
+drata-cli connection aws update <connection_id> --data @aws-connection.json
+drata-cli connection aws remove <connection_id>
+```
+
+### Custom Connections
+
+```
+drata-cli custom-connection resource-attribute <workspace_id> <connection_id> <resource_id>
+drata-cli custom-field list
+drata-cli custom-field get <custom_field_id>
+drata-cli custom-field create --example
+```
+
+### Identities
+
+`infrastructure-identity` and `version-control-identity` share one verb set.
+
+```
+drata-cli infrastructure-identity list <workspace_id>
+drata-cli infrastructure-identity get <workspace_id> <identity_id>
+drata-cli infrastructure-identity actions <workspace_id> <identity_id>
+drata-cli infrastructure-identity run-action <workspace_id> <identity_id> --example
+drata-cli version-control-identity list <workspace_id>      # same verbs: get | actions | run-action
+```
+
+### Compliance Check Exclusions
+
+Per-item results print every row; the command exits 1 if any row failed.
+
+```
+drata-cli compliance-check-exclusion list <workspace_id>
+drata-cli compliance-check-exclusion create <workspace_id> --example
+drata-cli compliance-check-exclusion remove <workspace_id> --target-id 1 2 --compliance-check <check>
+```
+
 ### Frameworks
 
 ```
@@ -187,6 +357,7 @@ drata-cli framework create <workspace_id> --example
 drata-cli framework create <workspace_id> --name "SOC 2" --short-name "SOC2" --description "..."
 drata-cli framework update <workspace_id> <framework_id> --name "Updated"
 drata-cli framework requirements <workspace_id> <framework_id>
+drata-cli framework requirement controls <workspace_id> <framework_id> <requirement_id>
 ```
 
 ### Assets
@@ -231,13 +402,44 @@ drata-cli monitor update <workspace_id> <test_id> --enabled false
 drata-cli monitor exclusions <workspace_id> <test_id>
 drata-cli monitor failures <workspace_id> <test_id>
 drata-cli monitor passes <workspace_id> <test_id>
+drata-cli monitor create <workspace_id> --example
+drata-cli monitor validate-recipe <workspace_id> --example     # exits 1 when the recipe is invalid
+drata-cli monitor recipe <workspace_id> <test_id> --example
+drata-cli monitor retest <workspace_id> <test_id>              # 409 and 429 print the server's message, never retried
+drata-cli monitor exclusion create <workspace_id> <test_id> --example
+drata-cli monitor exclusion remove <workspace_id> <test_id> --exclusion-id 10 11
+drata-cli monitor codebase-exclusion list <workspace_id> <test_id>
+drata-cli monitor codebase-exclusion create <workspace_id> <test_id> --example
+drata-cli monitor codebase-exclusion remove <workspace_id> <test_id> --exclusion-id 10
+drata-cli monitor ticket list <workspace_id> <test_id>
+drata-cli monitor ticket link <workspace_id> <test_id> --ticket-url https://example.atlassian.net/browse/SEC-1
+drata-cli monitor ticket unlink <workspace_id> <test_id> <ticket_id>
+drata-cli monitor ticket create <workspace_id> <test_id> --example
 ```
+
+Exclusion `create` and `remove` print every per-item result row and exit 1 if any row failed.
 
 ### Audits
 
 ```
 drata-cli audit list <workspace_id>
 drata-cli audit get <workspace_id> <audit_id>
+drata-cli audit get <workspace_id> <audit_id> --expand dcfSuggestionsSummary
+```
+
+#### Audit request DCF suggestions (beta)
+
+AI-suggested controls (DCFs) for audit requests. `generate` answers 202 and is not
+polled: read progress with `audit get --expand dcfSuggestionsSummary`. `generate`
+and `accept` print every per-request row and exit 1 if any row failed.
+
+```
+drata-cli audit request dcf-suggestion generate <workspace_id> <audit_id> --request-id 1 2 3
+drata-cli audit request dcf-suggestion accept <workspace_id> <audit_id> --request-id 1 2 --confidence-level high
+drata-cli audit request dcf-suggestion accept <workspace_id> <audit_id> --all-requests
+drata-cli audit request dcf-suggestion list <workspace_id> <audit_id> <request_id> --status pending
+drata-cli audit request dcf-suggestion get <workspace_id> <audit_id> <request_id> <suggestion_id>
+drata-cli audit request dcf-suggestion run-action <workspace_id> <audit_id> <request_id> <suggestion_id> --action accept
 ```
 
 ### Events
@@ -339,7 +541,7 @@ as curated commands.
 
 The following tags are intentionally left as raw-only (reachable via `drata raw`):
 
-- **Audit Requests** - requires knowing both workspaceId and auditId in advance
+- **Audit Requests** - only the beta DCF suggestion ops are curated (`audit request dcf-suggestion`); the other audit request ops stay raw
 - **Procurement Connection Mappings** - narrow vendor-procurement integration
 - **Custom Data Records** - complex session-based upload workflow
 - **Tasks** - workspace-scoped task management; sufficient via raw for scripting
@@ -350,7 +552,7 @@ The following tags are intentionally left as raw-only (reachable via `drata raw`
 - **Background Checks** - single POST endpoint
 - **Vendor Types** - vendor sub-resources via raw
 - **User Documents / Assigned Policies** - user sub-resources via raw
-- **Custom Connections** - connection management via raw
+- **Custom Connections** - connection management via raw; only `custom-connection resource-attribute` is curated
 - **Framework requirement create/update** - plus legacy requirement endpoints
 
 Every operation is reachable (curated + raw); coverage is verified by the CI

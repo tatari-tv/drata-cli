@@ -36,6 +36,34 @@ pub const OUTCOME: Rule = Rule {
     failed: outcome_failed,
 };
 
+/// DCF suggestion generation: rows under `data`, each with a `status` of
+/// `STARTED`, `SKIPPED` or `FAILED`.
+pub const GENERATE_STATUS: Rule = Rule {
+    rows_key: "data",
+    failed: generate_failed,
+};
+
+/// DCF suggestion acceptance: rows under `data`, each with an `error` that is
+/// null when the request was processed.
+pub const ACCEPT_ERROR: Rule = Rule {
+    rows_key: "data",
+    failed: error_failed,
+};
+
+/// A row whose `status` is `FAILED` failed; one without a `status` failed too.
+/// `SKIPPED` (a run is already going) is not a failure. Pure.
+pub fn generate_failed(row: &Value) -> bool {
+    row.get("status")
+        .and_then(Value::as_str)
+        .is_none_or(|status| status == "FAILED")
+}
+
+/// A row with a non-null `error` failed; a row with no `error` key failed too,
+/// since the spec requires the key. Pure.
+pub fn error_failed(row: &Value) -> bool {
+    row.get("error").is_none_or(|error| !error.is_null())
+}
+
 /// A row whose `outcome` is `FAILED_*` failed; one without an `outcome` failed
 /// too. `SKIPPED_*` is not a failure: the server reports an item it left
 /// unchanged (already excluded, no such exclusion, outside the scope) next to

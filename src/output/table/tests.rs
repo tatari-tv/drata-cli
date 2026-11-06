@@ -669,3 +669,16 @@ fn connection_spec_rows_pick_the_connection_renderer() {
         }
     }
 }
+
+#[test]
+fn dcf_suggestion_rows_pick_the_suggestion_table() {
+    let row = spec_response_row("/workspaces/{workspaceId}/audits/{auditId}/requests/{requestId}/dcf-suggestions");
+    let got = pick_renderer(&row).unwrap_or_else(|| panic!("no renderer for {row}"));
+    assert!(
+        std::ptr::fn_addr_eq(got, render_dcf_suggestions as RowRenderer),
+        "wrong renderer for {row}"
+    );
+    let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
+    assert!(out.contains("DCF-1"), "`DCF-1` missing from\n{out}");
+    assert!(out.contains("HIGH"), "`HIGH` missing from\n{out}");
+}

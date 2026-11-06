@@ -40,6 +40,13 @@ pub const EXCLUDE_RESULTS: &str = r#"{"results": [{"targetId": "1", "outcome": "
 /// One personnel's exclusions deleted: the body the delete op answers.
 pub const DELETE_RESULTS: &str = r#"{"results": [{"targetId": "1", "outcome": "DELETED", "exclusionIds": [10]}], "successCount": 1, "skippedCount": 0}"#;
 
+/// One request generating: the 202 body `dcf-suggestion generate` answers.
+pub const DCF_GENERATE_RESULTS: &str = r#"{"data": [{"requestId": 1, "status": "STARTED", "error": null}]}"#;
+
+/// One request accepted: the body `dcf-suggestion accept` answers.
+pub const DCF_ACCEPT_RESULTS: &str =
+    r#"{"data": [{"requestId": 1, "acceptedCount": 1, "mappedCount": 1, "unresolvedCount": 0, "error": null}]}"#;
+
 /// A valid recipe: the validation body `validate-recipe` exits 0 on.
 pub const RECIPE_VALID: &str = r#"{"isValid": true, "errors": []}"#;
 
@@ -660,6 +667,64 @@ const NON_VENDOR_ROWS: &[Row] = &[
         "GET",
         "/workspaces/{workspaceId}/audits/{auditId}",
         &["audit", "get", "1", "2"],
+        Object,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/audits/{auditId}/requests/action-generate-dcf-suggestions",
+        &[
+            "audit",
+            "request",
+            "dcf-suggestion",
+            "generate",
+            "1",
+            "2",
+            "--request-id",
+            "1",
+        ],
+        Json(202, DCF_GENERATE_RESULTS),
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/audits/{auditId}/requests/action-accept-dcf-suggestions",
+        &[
+            "audit",
+            "request",
+            "dcf-suggestion",
+            "accept",
+            "1",
+            "2",
+            "--all-requests",
+        ],
+        Json(200, DCF_ACCEPT_RESULTS),
+    ),
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/audits/{auditId}/requests/{requestId}/dcf-suggestions",
+        &["audit", "request", "dcf-suggestion", "list", "1", "2", "3"],
+        Page,
+    ),
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/audits/{auditId}/requests/{requestId}/dcf-suggestions/{suggestionId}",
+        &["audit", "request", "dcf-suggestion", "get", "1", "2", "3", "4"],
+        Object,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/audits/{auditId}/requests/{requestId}/dcf-suggestions/{suggestionId}/actions",
+        &[
+            "audit",
+            "request",
+            "dcf-suggestion",
+            "run-action",
+            "1",
+            "2",
+            "3",
+            "4",
+            "--action",
+            "accept",
+        ],
         Object,
     ),
     // events

@@ -96,3 +96,26 @@ fn a_rule_reads_only_its_own_rows_key() {
     let err = check(&rows_of(&[201]), &OUTCOME, None).unwrap_err();
     assert!(err.to_string().contains("under `results`"), "{err}");
 }
+
+#[test]
+fn generate_failed_is_the_failed_status_and_a_missing_status() {
+    assert!(!generate_failed(
+        &json!({"requestId": 1, "status": "STARTED", "error": null})
+    ));
+    assert!(!generate_failed(
+        &json!({"requestId": 1, "status": "SKIPPED", "error": null})
+    ));
+    assert!(generate_failed(
+        &json!({"requestId": 1, "status": "FAILED", "error": "x"})
+    ));
+    assert!(generate_failed(&json!({"requestId": 1})));
+}
+
+#[test]
+fn error_failed_is_a_non_null_error_and_a_missing_error() {
+    assert!(!error_failed(
+        &json!({"requestId": 1, "acceptedCount": 1, "error": null})
+    ));
+    assert!(error_failed(&json!({"requestId": 1, "error": "could not process"})));
+    assert!(error_failed(&json!({"requestId": 1, "acceptedCount": 1})));
+}

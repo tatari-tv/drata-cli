@@ -1,23 +1,26 @@
-//! `drata audit ...` - audits and their requests (read-only).
+//! `drata audit ...` - audits (read-only) and, under `audit request
+//! dcf-suggestion`, the beta DCF suggestion ops (`audit/dcf.rs`).
 //!
 //! Paths: GET /workspaces/{workspaceId}/audits and
 //! GET /workspaces/{workspaceId}/audits/{auditId}.
 //! Confirmed camelCase fields from spec: `frameworkType`, `auditType`,
 //! `isInternalAudit`, `startDate`, `endDate`, `completedAt`.
 //!
-//! Sub-commands: list/get. Audit requests are deferred to `raw` (require knowing
-//! both workspaceId and auditId; complexity exceeds the curation threshold).
+//! Sub-commands: list/get/request. Other audit request ops stay on `raw`.
 
-use crate::cli::AuditAction;
+pub mod dcf;
+
+use crate::cli::{AuditAction, AuditRequestAction};
 use crate::client::DrataClient;
 use crate::config::Config;
+use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
 use crate::output::print_value;
 use eyre::Result;
 use serde_json::json;
 use tracing::{debug, instrument};
 
-pub async fn handle(action: &AuditAction, client: &DrataClient, config: &Config) -> Result<()> {
+pub async fn handle(action: &AuditAction, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     match action {
         AuditAction::List { workspace_id, all } => list(client, config, workspace_id, *all).await,
         AuditAction::Get {
@@ -25,6 +28,18 @@ pub async fn handle(action: &AuditAction, client: &DrataClient, config: &Config)
             audit_id,
             expand,
         } => get(client, config, workspace_id, audit_id, expand).await,
+        AuditAction::Request {
+            action: AuditRequestAction::DcfSuggestion { action },
+        } => dcf::handle(action, client, config, confirm).await,
+    }
+}
+
+pub fn example_if_requested(action: &AuditAction) -> Option<Result<String>> {
+    match action {
+        AuditAction::Request {
+            action: AuditRequestAction::DcfSuggestion { action },
+        } => dcf::example_if_requested(action),
+        _ => None,
     }
 }
 

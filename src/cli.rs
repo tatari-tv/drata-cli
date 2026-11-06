@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 mod access;
+mod audit;
 mod connection;
 mod custom;
 mod evidence;
@@ -21,6 +22,7 @@ mod ticket;
 mod upload;
 mod vendor;
 pub use access::*;
+pub use audit::*;
 pub use connection::*;
 pub use custom::*;
 pub use evidence::*;
@@ -278,7 +280,7 @@ pub enum Commands {
         #[command(subcommand)]
         action: MonitorAction,
     },
-    /// List and inspect audits in a workspace (read-only)
+    /// List and inspect audits in a workspace, and decide an audit's DCF suggestions
     Audit {
         #[command(subcommand)]
         action: AuditAction,
@@ -1095,32 +1097,6 @@ pub enum UserAction {
         /// Stream all pages as NDJSON instead of buffering
         #[arg(long)]
         all: bool,
-    },
-}
-
-// ---------------------------------------------------------------------------
-// Audits
-// ---------------------------------------------------------------------------
-
-#[derive(Subcommand, Debug)]
-pub enum AuditAction {
-    /// List audits in a workspace
-    List {
-        /// Workspace ID
-        workspace_id: String,
-        /// Stream all pages as NDJSON instead of buffering
-        #[arg(long)]
-        all: bool,
-    },
-    /// Get an audit by ID
-    Get {
-        /// Workspace ID
-        workspace_id: String,
-        /// Audit ID
-        audit_id: String,
-        /// Sub-collections to expand (space-separated, e.g. dcfSuggestionsSummary)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
     },
 }
 
