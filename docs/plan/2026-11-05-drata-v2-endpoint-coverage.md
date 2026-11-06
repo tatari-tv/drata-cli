@@ -134,6 +134,25 @@ Coverage numbers below are `curated/308` from `cargo test --test coverage -- --n
 - **Success criteria:**
   - `Observed` records the retest responses (or the skip), the presigned PUT status and `objectKey`, and a status per gated area
 
+**Observed** (2026-11-06, Tatari tenant, US region, `curl` with the read-only key for reads and the write key for the two writes; no key printed or stored in this doc):
+
+- Retest cooldown: SKIPPED. I paged all 192 monitoring tests in workspace 1 (`GET /workspaces/1/monitoring-tests?limit=50`, followed the cursor) and none has a name containing `zzz`. `?name=zzz-clitest` also returned an empty `data[]` with 200. No `action-retest` was sent to any monitor. Phase 6 builds from the spec's documented 409/429
+- Presigned upload:
+  - `POST /upload-urls` body `{"purpose":"evidence","workspaceId":1,"fileName":"zzz-clitest.txt","contentType":"text/plain"}` -> 201
+  - response keys: `presignedUrl`, `objectKey`, `expiresAt`, `webUploadUrl`. `webUploadUrl` is `null` when `includeWebUploadUrl` is not sent. `expiresAt` was 15 minutes after the request
+  - `presignedUrl`: `https://dt-prod-app-us-west-2.s3.us-west-2.amazonaws.com/<objectKey>?<redacted>`. Query params present: `X-Amz-Algorithm`, `X-Amz-Content-Sha256`, `X-Amz-Credential`, `X-Amz-Date`, `X-Amz-Expires`, `X-Amz-Security-Token`, `X-Amz-Signature`, `X-Amz-SignedHeaders`, `x-id`
+  - `objectKey`: `<account-uuid>/evidence-library/1/21b1f655-28b5-4eb9-bd88-c50de9d0522d/zzz-clitest.txt` (first segment is the account UUID, elided here)
+  - `curl -X PUT -H 'Content-Type: text/plain' --data-binary @zzz-clitest.txt '<presignedUrl>'` -> 200, empty body, `Server: AmazonS3`, `x-amz-server-side-encryption: AES256`. No header beyond `Content-Type` was needed and no Drata credential went to S3
+  - the uploaded object is attached to no Drata record; nothing was created through the API
+- Entitlements (`GET <path>?limit=1`, read-only key):
+
+  | Path | Status | Meaning |
+  |---|---|---|
+  | `/access-review-periods` | 200 | available (empty `data[]`) |
+  | `/vendor-security-reviews` | 200 | available (has rows) |
+  | `/custom-field-definitions` | 200 | available (empty `data[]`) |
+  | `/risks-search` | 200 | available (has rows) |
+
 #### Phase 1: Command table, truth-up, conform the existing curated surface
 **Model:** opus
 - `tests/commands.rs` command table with rows for all 83 ops the code reaches today; `CURATED` derived from it; floor raised to 83
