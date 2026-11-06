@@ -2,7 +2,7 @@
 
 Drata compliance management CLI. Hand-typed, typed-safe Rust port of the upstream
 TypeScript CLI, with curated commands for the common surface and a generic `raw`
-namespace for full coverage of all 167 API operations.
+namespace for full coverage of every API operation.
 
 ## Installation
 
@@ -312,7 +312,7 @@ drata-cli event list --all | grep '"type":"USER_LOGIN"'
 
 ## The raw namespace
 
-`raw` provides generic access to all 167 API operations not yet curated, or for
+`raw` provides generic access to every API operation not yet curated, or for
 advanced use cases:
 
 ```
@@ -337,7 +337,7 @@ The following tags are intentionally left as raw-only (reachable via `drata raw`
 - **Custom Data Records** - complex session-based upload workflow
 - **Tasks** - workspace-scoped task management; sufficient via raw for scripting
 - **HRIS User Identities** - connections-based, specialized use case
-- **Control Notes / Owners / Library** - sub-resource management, raw covers these
+- **Control Notes / Owners** - sub-resource management, raw covers these
 - **Risk Documents / Notes / Library** - sub-resource management, raw covers these
 - **Device Documents** - document sub-resources, raw covers get/list/delete
 - **Background Checks** - single POST endpoint
@@ -346,7 +346,7 @@ The following tags are intentionally left as raw-only (reachable via `drata raw`
 - **Custom Connections** - connection management via raw
 - **Framework requirement create/update** - plus legacy requirement endpoints
 
-All 167 operations are reachable (curated + raw); coverage is verified by the CI
+Every operation is reachable (curated + raw); coverage is verified by the CI
 test suite in `tests/coverage.rs`.
 
 ## Live verification
@@ -358,9 +358,9 @@ and must NOT be run in CI.
 
 ## Spec coverage
 
-The committed spec at `spec/drata-openapi-v2.json` (110 paths, 167 operations,
-35 operation-level tags) anchors `--example` skeletons and the coverage test.
-Current curated coverage: ~42% (70/167 operations); all 167 reachable via raw.
+The committed spec at `spec/drata-openapi-v2.json` anchors `--example` skeletons
+and the coverage test. Every operation is reachable via raw; `cargo test --test coverage -- --nocapture`
+prints the current curated coverage.
 
 ## Development
 
@@ -372,4 +372,4 @@ otto build    # release binary
 ```
 
 CI requires a green `otto ci` before any commit. The `tests/coverage.rs` integration
-test asserts all 167 operations are reachable and enforces a curated-coverage floor.
+test asserts every operation is reachable and enforces a curated-coverage floor.

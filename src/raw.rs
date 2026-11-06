@@ -1,13 +1,13 @@
 //! `drata raw <METHOD> <path> ...` - the gated generic passthrough namespace.
 //!
-//! Reaches any of the 167 operations by HTTP method + path template, for the
+//! Reaches any spec operation by HTTP method + path template, for the
 //! long tail and power users. Non-GET requests flow through the same write
 //! guardrail as the curated verbs (enforced in `client::send_inner`), so a
 //! `raw POST` on a non-write-enabled credential fails closed exactly like a
 //! curated create.
 //!
 //! `--data` accepts inline JSON, `@file` (read a file), or `-` (read stdin).
-//! `--file <path>` sends a multipart/form-data request (for the 10 upload ops).
+//! `--file <path>` sends a multipart/form-data request (for the spec's upload ops).
 //! `--query k=v` (repeated or space-separated) appends percent-encoded query
 //! parameters. `--example` prints the operation's request-body skeleton from
 //! the spec and exits before any API/auth setup.

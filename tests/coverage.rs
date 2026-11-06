@@ -7,12 +7,16 @@
 //! Because `raw` routes by method+path, an operation is reachable as long as it
 //! is routable (has a non-empty, upper-cased HTTP method and an absolute path).
 //! This test enumerates all operations from the spec, asserts each is routable
-//! (so the curated/raw split genuinely covers all 167 ops), and reports the
+//! (so the curated/raw split genuinely covers every op), and reports the
 //! curated-coverage percentage. It FAILS if a future op becomes unroutable or if
 //! a curated entry stops matching a real operation - the early-warning the
 //! design doc asks for.
 
 use drata_cli::spec::{self, Operation};
+
+/// Operation count of the committed spec: a tripwire that fails on every spec refresh,
+/// so a refresh is a deliberate, reviewed change.
+const EXPECTED_OPERATIONS: usize = 308;
 
 /// The operations covered by curated typed commands as of Phase 3. Each entry is
 /// `(METHOD, path-template)` and MUST correspond to a real operation in the spec
@@ -126,7 +130,11 @@ fn raw_reachable(op: &Operation) -> bool {
 #[test]
 fn every_operation_is_reachable() {
     let ops = spec::operations().expect("spec operations parse");
-    assert_eq!(ops.len(), 167, "expected 167 operations");
+    assert_eq!(
+        ops.len(),
+        EXPECTED_OPERATIONS,
+        "expected {EXPECTED_OPERATIONS} operations"
+    );
 
     let unreachable: Vec<&Operation> = ops.iter().filter(|op| !is_curated(op) && !raw_reachable(op)).collect();
 
@@ -167,7 +175,7 @@ fn reports_curated_coverage_percentage() {
         "curated coverage dropped below the Phase 5 baseline of 70 ops (got {})",
         curated
     );
-    assert_eq!(total, 167);
+    assert_eq!(total, EXPECTED_OPERATIONS);
 
     println!(
         "curated coverage: {}/{} operations ({:.1}%); raw covers all {}",
@@ -176,9 +184,9 @@ fn reports_curated_coverage_percentage() {
 }
 
 #[test]
-fn operation_level_tags_number_thirty_five() {
+fn operation_level_tags_match_the_committed_spec() {
     let tags = spec::operation_tags().expect("operation tags parse");
-    assert_eq!(tags.len(), 35);
+    assert_eq!(tags.len(), 51);
     assert!(tags.contains(&"Audit Requests".to_string()));
     assert!(tags.contains(&"Procurement Connection Mappings".to_string()));
 }

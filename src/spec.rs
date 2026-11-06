@@ -6,11 +6,11 @@
 //!
 //! - **`--example` skeletons** generated from an operation's request schema
 //!   (`example_for_operation`). This generalizes the hand-written vendors
-//!   skeleton from Phase 1 to any of the 167 operations.
+//!   skeleton from Phase 1 to any spec operation.
 //! - **Coverage**: `operations()` enumerates every operation (method + path +
 //!   operationId + tags), sourcing tags from the *operation-level* `tags`
-//!   array, NOT the 33-entry top-level `tags` list (which omits
-//!   `Audit Requests` and `Procurement Connection Mappings`).
+//!   array, NOT the top-level `tags` list (which has omitted operation tags
+//!   before: `Audit Requests` and `Procurement Connection Mappings`).
 //!
 //! `serde_json::Value` is the wire currency here too: the spec is parsed once
 //! into a `Value` and walked, rather than modeled as 434 typed structs.
@@ -74,8 +74,8 @@ const HTTP_METHODS: &[&str] = &["get", "post", "put", "patch", "delete", "head",
 
 /// Enumerate every operation in the spec: method + path + operationId + tags.
 ///
-/// Tags come from each operation's own `tags` array (35 distinct values), not
-/// the top-level `tags` list (33). This is the authoritative set the coverage
+/// Tags come from each operation's own `tags` array, not the top-level `tags`
+/// list, which has drifted from it before. This is the authoritative set the coverage
 /// test asserts against.
 #[instrument(skip_all)]
 pub fn operations() -> Result<Vec<Operation>> {
