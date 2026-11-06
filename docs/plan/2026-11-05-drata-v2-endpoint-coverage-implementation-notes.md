@@ -256,3 +256,26 @@ None.
 
 ### Open questions
 None.
+
+## Phase 8: Infrastructure and Version Control identities
+### Design decisions
+- Verb map (8 ops, 8 rows added to the command table, floor 162 -> 170): `infrastructure-identity` and `version-control-identity`, each `list <ws> | get <ws> <id> | actions <ws> <id> | run-action <ws> <id>`. `actions` and `run-action` are the existing verb names from `vendor security-review`.
+- One implementation: `src/resources/identity.rs` holds `Kind { Infrastructure, VersionControl }` (path segment, noun for errors, spec template for `--example`), the pure path and body builders, and one `handle`. `handle_infrastructure` and `handle_version_control` only map their clap enum onto a kind-independent `Verb`. Test `identity_paths_for_each_kind` drives both kinds through the same builders.
+- Clap types (`src/cli/identity.rs`): the argument structs (`IdentityListArgs`, `IdentityGetArgs`, `IdentityRef`, `ExampleIdentityRef`, `IdentityBodyArgs`) are shared; the two subcommand enums differ only in the `--action` enum (4 values for Infrastructure, 8 for Version Control, each exactly its spec enum).
+- `run-action` body: `--action`, `--user-id` (linkUser), `--reason` (markServiceAccount, max 30000), plus `--data` and `--example`. `--user-id` and `--reason` are rejected with any other action and required with their own, before the confirm and the request. The other 6 actions take no payload. Confirm and the write guard apply as for every POST.
+- `--client-type` is parsed against the spec's `ClientTypeEnum` (case-insensitive, normalized to the spec value) through `spec::enum_values`, not a clap `ValueEnum`: the enum has hundreds of values and grows each release, so a hand copy would drift. `tests/enums.rs` asserts every spec value parses and a bogus one is rejected.
+- `spec::enum_values(name)` added: the values of a string enum component schema.
+- Renderers (`src/output/table.rs`): `render_identities` (sniff `identityId`) and `render_identity_actions` (`action` + `label` + `description`), above the codebase-exclusion sniff. `identity_phase_eight_spec_rows_pick_their_own_renderer` feeds both kinds' spec list and actions rows through `pick_renderer`.
+- `tests/enums.rs`: `identity_enums_match_the_spec_for_both_kinds` (expand on list and get for both kinds, both action enums) and `identity_action_is_per_kind_and_client_type_is_the_spec_enum`.
+
+### Deviations
+- Same effect, correct seam: the doc says "both backed by one shared implementation parameterized by kind". The two clap subcommand enums stay separate because the specs' `--action` value sets differ and a flag must take exactly its op's values; they converge on one `Verb` at the first line of dispatch.
+- `--client-type` is not a `ValueEnum`, so it is not in `same::<>` form in `tests/enums.rs`; it has its own spec-driven assertion.
+
+### Tradeoffs
+- Spec-driven `--client-type` parser vs a 330-variant clap enum | no drift and no 330-line enum; the cost is that clap's error does not list the possible values (it names the enum and three examples).
+- No `--sort`, `--sort-dir`, `--include-total-count`, `--size` on `list` | same as Phases 3, 4, 6 and 7; reachable through `drata raw`.
+- `render_identities` sniffs `identityId` alone vs also `connectionId` | the spec marks neither required, and `identityId` is unique to these rows; requiring both would drop the table on a row without a connection.
+
+### Open questions
+None.

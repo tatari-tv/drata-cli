@@ -178,6 +178,27 @@ pub fn example_for_schema(name: &str) -> Result<Value> {
     Ok(build_skeleton(spec, schema, 0))
 }
 
+/// The values of a string enum component schema (`#/components/schemas/<name>`).
+/// `Err` when the spec has no such schema or it is not a string enum.
+pub fn enum_values(name: &str) -> Result<Vec<String>> {
+    let schema = spec()?
+        .get("components")
+        .and_then(|c| c.get("schemas"))
+        .and_then(|s| s.get(name))
+        .ok_or_else(|| eyre!("the spec has no schema `{}`", name))?;
+    schema
+        .get("enum")
+        .and_then(Value::as_array)
+        .ok_or_else(|| eyre!("schema `{}` is not an enum", name))?
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| eyre!("schema `{}` has a non-string value", name))
+        })
+        .collect()
+}
+
 /// Resolve the `application/json` request-body schema for an operation, if any.
 fn request_schema<'a>(spec: &'a Value, method: &str, path: &str) -> Result<Option<&'a Value>> {
     let want = method.to_lowercase();

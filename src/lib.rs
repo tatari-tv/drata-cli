@@ -42,6 +42,10 @@ pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
         Commands::Monitor { action } => resources::monitor::example_if_requested(action),
         Commands::ComplianceCheckExclusion { action } => resources::compliance::example_if_requested(action),
         Commands::CustomField { action } => resources::custom::example_if_requested(action),
+        Commands::InfrastructureIdentity { action } => resources::identity::example_if_requested_infrastructure(action),
+        Commands::VersionControlIdentity { action } => {
+            resources::identity::example_if_requested_version_control(action)
+        }
         Commands::Raw(args) => raw::example_if_requested(args),
         _ => None,
     }
@@ -131,6 +135,12 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
         }
         Commands::CustomField { action } => {
             resources::custom::handle_field(action, client, config, confirm).await?;
+        }
+        Commands::InfrastructureIdentity { action } => {
+            resources::identity::handle_infrastructure(action, client, config, confirm).await?;
+        }
+        Commands::VersionControlIdentity { action } => {
+            resources::identity::handle_version_control(action, client, config, confirm).await?;
         }
         Commands::CustomConnection { action } => {
             resources::custom::handle_connection(action, client, config).await?;

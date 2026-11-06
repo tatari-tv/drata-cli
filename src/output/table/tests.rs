@@ -491,3 +491,24 @@ fn custom_field_and_group_rows_show_their_columns() {
         assert!(out.contains(cell), "`{cell}` missing from\n{out}");
     }
 }
+
+#[test]
+fn identity_phase_eight_spec_rows_pick_their_own_renderer() {
+    for segment in ["infrastructure-user-identities", "version-control-user-identities"] {
+        let base = format!("/workspaces/{{workspaceId}}/{segment}");
+        let cases: [(Value, RowRenderer, &str); 2] = [
+            (spec_response_row(&base), render_identities, "jdoe@example.com"),
+            (
+                spec_response_row(&format!("{base}/{{identityId}}/actions")),
+                render_identity_actions,
+                "Link User",
+            ),
+        ];
+        for (row, want, cell) in cases {
+            let got = pick_renderer(&row).unwrap_or_else(|| panic!("no renderer for {row}"));
+            assert!(std::ptr::fn_addr_eq(got, want), "wrong renderer for {row}");
+            let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
+            assert!(out.contains(cell), "`{cell}` missing from\n{out}");
+        }
+    }
+}

@@ -70,6 +70,14 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("externalId") && obj.contains_key("name") {
         return Some(render_groups);
     }
+    // User identity rows (infrastructure and version control) carry `identityId`.
+    if obj.contains_key("identityId") {
+        return Some(render_identities);
+    }
+    // Identity action rows carry `action` + `label` + `description`.
+    if obj.contains_key("action") && obj.contains_key("label") && obj.contains_key("description") {
+        return Some(render_identity_actions);
+    }
     // Codebase exclusion rows carry `findingId` + `repositoryName`.
     if obj.contains_key("findingId") && obj.contains_key("repositoryName") {
         return Some(render_codebase_exclusions);
@@ -328,6 +336,44 @@ fn render_groups(rows: &[Value], width: usize) -> String {
             |r| str_field(r, "externalId"),
             |r| scalar_field(r, "connectionId"),
             |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_identities(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "IDENTITY_ID",
+            "USERNAME",
+            "EMAIL",
+            "USER_ID",
+            "CONNECTION",
+            "SERVICE_ACCOUNT",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "identityId"),
+            |r| str_field(r, "username"),
+            |r| str_field(r, "email"),
+            |r| scalar_field(r, "userId"),
+            |r| scalar_field(r, "connectionId"),
+            |r| str_field(r, "serviceAccount"),
+        ],
+        width,
+    )
+}
+
+fn render_identity_actions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ACTION", "LABEL", "DESCRIPTION"],
+        rows,
+        &[
+            |r| str_field(r, "action"),
+            |r| str_field(r, "label"),
+            |r| str_field(r, "description"),
         ],
         width,
     )

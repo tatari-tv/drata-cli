@@ -1329,3 +1329,128 @@ fn phase_seven_examples_come_from_the_spec_without_auth() {
     let skeleton = drata_cli::example_if_requested(&cli).expect("some").expect("ok");
     assert!(skeleton.contains("fieldType"), "{skeleton}");
 }
+
+#[tokio::test]
+async fn identity_run_action_sends_each_kinds_body_to_its_own_path() {
+    let req = sent(
+        &[
+            "infrastructure-identity",
+            "run-action",
+            "1",
+            "7",
+            "--action",
+            "linkUser",
+            "--user-id",
+            "5",
+        ],
+        Response::Object,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/workspaces/1/infrastructure-user-identities/7/actions");
+    assert_eq!(body(&req), json!({"action": "linkUser", "userId": 5}));
+
+    let req = sent(
+        &[
+            "version-control-identity",
+            "run-action",
+            "1",
+            "7",
+            "--action",
+            "MARKSERVICEACCOUNT",
+            "--reason",
+            "deploys",
+        ],
+        Response::Object,
+    )
+    .await;
+    assert_eq!(
+        req.url.path(),
+        "/workspaces/1/version-control-user-identities/7/actions"
+    );
+    assert_eq!(body(&req), json!({"action": "markServiceAccount", "reason": "deploys"}));
+
+    let req = sent(
+        &[
+            "version-control-identity",
+            "run-action",
+            "1",
+            "7",
+            "--data",
+            r#"{"action":"acknowledgeWriteAccess"}"#,
+        ],
+        Response::Object,
+    )
+    .await;
+    assert_eq!(body(&req), json!({"action": "acknowledgeWriteAccess"}));
+}
+
+#[tokio::test]
+async fn identity_run_action_without_its_required_field_sends_nothing() {
+    let server = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(template(Response::Object))
+        .mount(&server)
+        .await;
+    let cli = Cli::try_parse_from([
+        "drata",
+        "infrastructure-identity",
+        "run-action",
+        "1",
+        "7",
+        "--action",
+        "linkUser",
+        "--yes",
+    ])
+    .expect("argv parses");
+    let config = test_config();
+    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+        .expect("client builds")
+        .with_base_url(server.uri());
+    let err = drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes))
+        .await
+        .expect_err("linkUser without --user-id fails");
+    assert!(err.to_string().contains("--user-id"), "{err}");
+    assert!(server.received_requests().await.unwrap_or_default().is_empty());
+}
+
+#[tokio::test]
+async fn identity_list_sends_its_filters() {
+    let req = sent(
+        &[
+            "version-control-identity",
+            "list",
+            "1",
+            "--client-type",
+            "github",
+            "--username",
+            "jdoe",
+            "--connection-id",
+            "3",
+            "--expand",
+            "user",
+            "connection",
+        ],
+        Response::Page,
+    )
+    .await;
+    assert_eq!(req.url.path(), "/workspaces/1/version-control-user-identities");
+    let q = req.url.query().unwrap_or_default().to_string();
+    for want in [
+        "clientType=GITHUB",
+        "username=jdoe",
+        "connectionId=3",
+        "expand%5B%5D=user",
+        "expand%5B%5D=connection",
+    ] {
+        assert!(q.contains(want), "{want} missing from {q}");
+    }
+}
+
+#[test]
+fn identity_examples_come_from_the_spec_without_auth() {
+    for noun in ["infrastructure-identity", "version-control-identity"] {
+        let cli = Cli::try_parse_from(["drata", noun, "run-action", "--example"]).expect("parses");
+        let skeleton = drata_cli::example_if_requested(&cli).expect("some").expect("ok");
+        assert!(skeleton.contains("\"action\""), "{noun}: {skeleton}");
+    }
+}

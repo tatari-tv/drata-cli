@@ -308,3 +308,61 @@ fn personnel_and_exclusion_enum_flags_take_spec_values_only() {
         "FORMULA"
     ]));
 }
+
+#[test]
+fn identity_enums_match_the_spec_for_both_kinds() {
+    for kind in ["infrastructure", "version-control"] {
+        let list = format!("/workspaces/{{workspaceId}}/{kind}-user-identities");
+        same::<IdentityExpand>(&list, "expand[]");
+        same::<IdentityExpand>(&format!("{list}/{{identityId}}"), "expand[]");
+    }
+    let schemas = &spec()["components"]["schemas"];
+    for (schema, values) in [
+        (
+            "InfrastructureUserIdentityActionEnum",
+            flag_values::<InfrastructureIdentityActionKind>(),
+        ),
+        (
+            "VersionControlUserIdentityActionEnum",
+            flag_values::<VersionControlIdentityActionKind>(),
+        ),
+    ] {
+        let want: BTreeSet<String> = schemas[schema]["enum"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{schema} has no enum"))
+            .iter()
+            .map(|v| v.as_str().expect("string enum").to_string())
+            .collect();
+        assert_eq!(values, want, "{schema}");
+    }
+}
+
+#[test]
+fn identity_action_is_per_kind_and_client_type_is_the_spec_enum() {
+    let infra = ["infrastructure-identity", "run-action", "1", "2", "--action"];
+    let vc = ["version-control-identity", "run-action", "1", "2", "--action"];
+    assert!(parses(&[&infra[..], &["unmarkServiceAccount"]].concat()));
+    assert!(parses(&[&infra[..], &["LINKUSER", "--user-id", "1"]].concat()));
+    assert!(!parses(&[&infra[..], &["retractWriteAccess"]].concat()));
+    assert!(parses(&[&vc[..], &["retractWriteAccess"]].concat()));
+    let spec_clients = drata_cli::spec::enum_values("ClientTypeEnum").expect("spec has ClientTypeEnum");
+    for client in spec_clients {
+        assert!(
+            parses(&[
+                "infrastructure-identity",
+                "list",
+                "1",
+                "--client-type",
+                &client.to_lowercase()
+            ]),
+            "{client}"
+        );
+    }
+    assert!(!parses(&[
+        "infrastructure-identity",
+        "list",
+        "1",
+        "--client-type",
+        "nope"
+    ]));
+}

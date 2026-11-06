@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 mod custom;
 mod exclusion;
+mod identity;
 mod monitor;
 mod personnel;
 mod risk;
@@ -17,6 +18,7 @@ mod upload;
 mod vendor;
 pub use custom::*;
 pub use exclusion::*;
+pub use identity::*;
 pub use monitor::*;
 pub use personnel::*;
 pub use risk::*;
@@ -187,6 +189,16 @@ pub enum Commands {
     CustomField {
         #[command(subcommand)]
         action: CustomFieldAction,
+    },
+    /// List, inspect and act on Infrastructure User Identities
+    InfrastructureIdentity {
+        #[command(subcommand)]
+        action: InfrastructureIdentityAction,
+    },
+    /// List, inspect and act on Version Control User Identities
+    VersionControlIdentity {
+        #[command(subcommand)]
+        action: VersionControlIdentityAction,
     },
     /// Inspect Custom Connections
     CustomConnection {

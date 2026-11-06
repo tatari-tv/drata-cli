@@ -13,6 +13,7 @@ pub mod device;
 pub mod event;
 pub mod evidence;
 pub mod framework;
+pub mod identity;
 pub mod monitor;
 pub mod personnel;
 pub mod policy;
