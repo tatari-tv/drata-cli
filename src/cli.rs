@@ -7,6 +7,7 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+mod access;
 mod custom;
 mod evidence;
 mod exclusion;
@@ -18,6 +19,7 @@ mod risk;
 mod ticket;
 mod upload;
 mod vendor;
+pub use access::*;
 pub use custom::*;
 pub use evidence::*;
 pub use exclusion::*;
@@ -228,6 +230,11 @@ pub enum Commands {
     EvidenceItem {
         #[command(subcommand)]
         action: EvidenceItemAction,
+    },
+    /// Manage access review applications, their users, and review periods
+    AccessReview {
+        #[command(subcommand)]
+        action: AccessReviewAction,
     },
     /// Manage frameworks and requirements in a workspace
     Framework {

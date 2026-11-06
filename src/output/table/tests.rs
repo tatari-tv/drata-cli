@@ -571,3 +571,62 @@ fn evidence_item_rows_pick_the_item_table_and_library_rows_keep_the_library_tabl
         render_evidence as RowRenderer
     ));
 }
+
+/// A spec response row with every property present (`null` where the spec has
+/// no example): access review rows carry required arrays with no example.
+fn every_key(method: &str, path: &str) -> Value {
+    spec_response_object(method, path, "200", true)
+}
+
+#[test]
+fn access_review_spec_rows_pick_their_own_renderer() {
+    let app = "/access-review-applications/{applicationId}";
+    let period_app = "/access-review-periods/{periodId}/applications/{reviewAppId}";
+    let cases: [(Value, RowRenderer, &str); 8] = [
+        (
+            every_key("get", "/access-review-applications"),
+            render_access_review_apps,
+            "MANUALLY_ADDED",
+        ),
+        (every_key("get", app), render_access_review_apps, "https://acme.com"),
+        (
+            every_key("get", &format!("{app}/users")),
+            render_access_review_users,
+            "jane.doe@acme.com",
+        ),
+        (
+            every_key("get", "/access-review-periods"),
+            render_access_review_periods,
+            "APPLICATIONS",
+        ),
+        (
+            every_key("get", "/access-review-periods/{periodId}"),
+            render_access_review_periods,
+            "COMPLETED",
+        ),
+        (
+            every_key("get", period_app),
+            render_access_review_period_apps,
+            "IN_PROGRESS",
+        ),
+        (
+            every_key("post", &format!("{period_app}/actions")),
+            render_access_review_period_apps,
+            "NOT_STARTED",
+        ),
+        (
+            every_key("get", &format!("{period_app}/users")),
+            render_access_review_decisions,
+            "APPROVED",
+        ),
+    ];
+    for (row, want, cell) in cases {
+        let got = pick_renderer(&row).unwrap_or_else(|| panic!("no renderer for {row}"));
+        assert!(std::ptr::fn_addr_eq(got, want), "wrong renderer for {row}");
+        let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
+        assert!(out.contains(cell), "`{cell}` missing from\n{out}");
+    }
+    // The evidence package is a signed URL: no table, so it prints whole as JSON.
+    let package = every_key("get", "/access-review-periods/{periodId}/evidence-package");
+    assert!(pick_renderer(&package).is_none(), "{package}");
+}

@@ -37,6 +37,7 @@ pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
         Commands::Policy { action } => resources::policy::example_if_requested(action),
         Commands::Evidence { action } => resources::evidence::example_if_requested(action),
         Commands::EvidenceItem { action } => resources::evidence::item::example_if_requested(action),
+        Commands::AccessReview { action } => resources::access::example_if_requested(action),
         Commands::Framework { action } => resources::framework::example_if_requested(action),
         Commands::Asset { action } => resources::asset::example_if_requested(action),
         Commands::Register { action } => resources::register::example_if_requested(action),
@@ -157,6 +158,9 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
         }
         Commands::EvidenceItem { action } => {
             resources::evidence::item::handle(action, client, config, confirm).await?;
+        }
+        Commands::AccessReview { action } => {
+            resources::access::handle(action, client, config, confirm).await?;
         }
         Commands::Framework { action } => {
             resources::framework::handle(action, client, config, confirm).await?;

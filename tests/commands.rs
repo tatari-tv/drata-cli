@@ -16,7 +16,7 @@ use drata_cli::config::{Config, TokenSource};
 use drata_cli::confirm::default_confirm;
 use serde_json::json;
 use std::collections::BTreeSet;
-use table::{ROWS, Response, Row};
+use table::{Response, Row, rows};
 use wiremock::matchers::any;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -102,7 +102,7 @@ async fn prove(row: &Row) -> Result<(), String> {
 #[tokio::test]
 async fn every_row_reaches_its_operation() {
     let mut failures = Vec::new();
-    for row in ROWS {
+    for row in rows() {
         if let Err(why) = prove(row).await {
             failures.push(format!(
                 "{} {} via `{}`: {why}",
@@ -122,7 +122,7 @@ async fn every_row_reaches_its_operation() {
 #[test]
 fn rows_are_one_per_operation() {
     let mut seen = BTreeSet::new();
-    for row in ROWS {
+    for row in rows() {
         assert!(
             seen.insert((row.method, row.path)),
             "duplicate command-table row for {} {}",
@@ -173,7 +173,7 @@ fn every_curated_leaf_has_a_row() {
         }
         leaves(top, &[top.get_name().to_string()], &mut all);
     }
-    let covered: BTreeSet<String> = ROWS.iter().map(|r| leaf_of(&root, r.argv)).collect();
+    let covered: BTreeSet<String> = rows().map(|r| leaf_of(&root, r.argv)).collect();
     let missing: Vec<&String> = all.difference(&covered).collect();
     assert!(
         missing.is_empty(),

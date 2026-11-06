@@ -511,3 +511,63 @@ fn evidence_item_artifact_flags_need_filed_at_and_ids_are_numeric() {
         "{}"
     ]));
 }
+
+#[test]
+fn access_review_enums_match_the_spec() {
+    same::<AccessReviewPeriodStatus>("/access-review-periods", "status");
+    for path in [
+        "/access-review-periods/{periodId}/actions",
+        "/access-review-periods/{periodId}/applications/{reviewAppId}/actions",
+    ] {
+        assert_eq!(
+            flag_values::<AccessReviewActionKind>(),
+            body_values(path, "application/json", "action"),
+            "POST {path} --action"
+        );
+    }
+}
+
+#[test]
+fn access_review_flags_take_spec_values_case_insensitively_and_numeric_ids() {
+    assert!(parses(&["access-review", "period", "list", "--status", "completed"]));
+    assert!(!parses(&["access-review", "period", "list", "--status", "OPEN"]));
+    assert!(parses(&[
+        "access-review",
+        "period",
+        "run-action",
+        "1",
+        "--action",
+        "Complete"
+    ]));
+    assert!(!parses(&[
+        "access-review",
+        "period",
+        "run-action",
+        "1",
+        "--action",
+        "reopen"
+    ]));
+    assert!(!parses(&["access-review", "app", "get", "abc"]));
+    assert!(!parses(&[
+        "access-review",
+        "app",
+        "users",
+        "set",
+        "1",
+        "--user",
+        "only-an-id"
+    ]));
+    assert!(!parses(&["access-review", "app", "users", "set", "1"]));
+    assert!(!parses(&[
+        "access-review",
+        "period",
+        "create",
+        "--starting-date",
+        "a",
+        "--ending-date",
+        "b",
+        "--application",
+        "1"
+    ]));
+    assert!(parses(&["access-review", "period", "create", "--example"]));
+}

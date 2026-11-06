@@ -1,6 +1,7 @@
 //! Resource command modules. One module per curated tag. This file is a
 //! `pub mod` list only.
 
+pub mod access;
 pub mod asset;
 pub mod audit;
 pub mod auth;

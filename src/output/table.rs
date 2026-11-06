@@ -78,6 +78,28 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.len() == 2 && obj.contains_key("language") && obj.contains_key("default") {
         return Some(render_policy_language_settings);
     }
+    // Access review user rows carry `identityId` too, so they sit above the
+    // identity sniff: an application's loaded users add `hasAdminAccess`, a
+    // period application's users under review add `lastRejectedAt`.
+    if obj.contains_key("identityId") && obj.contains_key("hasAdminAccess") {
+        return Some(render_access_review_users);
+    }
+    if obj.contains_key("identityId") && obj.contains_key("lastRejectedAt") {
+        return Some(render_access_review_decisions);
+    }
+    // An application within a review period carries `applicationId` + `status`
+    // (the detail adds `reviewers` and `userCounts`).
+    if obj.contains_key("applicationId") && obj.contains_key("status") {
+        return Some(render_access_review_period_apps);
+    }
+    // Review period rows carry `startingDate` + `endingDate`.
+    if obj.contains_key("startingDate") && obj.contains_key("endingDate") {
+        return Some(render_access_review_periods);
+    }
+    // Access review application rows carry `source` + `reviewers`.
+    if obj.contains_key("source") && obj.contains_key("reviewers") {
+        return Some(render_access_review_apps);
+    }
     // User identity rows (infrastructure and version control) carry `identityId`.
     if obj.contains_key("identityId") {
         return Some(render_identities);
@@ -395,6 +417,126 @@ fn render_policy_language_settings(rows: &[Value], width: usize) -> String {
         &["LANGUAGE", "DEFAULT"],
         rows,
         &[|r| str_field(r, "language"), |r| bool_field(r, "default")],
+        width,
+    )
+}
+
+fn render_access_review_apps(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "SOURCE", "WEBSITE", "REVIEWERS", "UPDATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "source"),
+            |r| str_field(r, "websiteUrl"),
+            |r| joined_field(r, "reviewers", "email"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_access_review_users(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "IDENTITY_ID", "USERNAME", "EMAIL", "ROLES", "ADMIN"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "identityId"),
+            |r| str_field(r, "username"),
+            |r| str_field(r, "email"),
+            |r| joined_strings(r, "roles"),
+            |r| bool_field(r, "hasAdminAccess"),
+        ],
+        width,
+    )
+}
+
+fn render_access_review_decisions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "IDENTITY_ID",
+            "USERNAME",
+            "EMAIL",
+            "ROLES",
+            "STATUS",
+            "COMPLETED_BY",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "identityId"),
+            |r| str_field(r, "username"),
+            |r| str_field(r, "email"),
+            |r| joined_strings(r, "roles"),
+            |r| str_field(r, "status"),
+            |r| r.get("completedBy").map(|u| str_field(u, "email")).unwrap_or_default(),
+        ],
+        width,
+    )
+}
+
+fn render_access_review_periods(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "STARTING", "ENDING", "COMPLETED", "APPLICATIONS"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "startingDate"),
+            |r| str_field(r, "endingDate"),
+            |r| str_field(r, "completedAt"),
+            |r| {
+                r.get("applications")
+                    .and_then(Value::as_array)
+                    .map(|a| a.len().to_string())
+                    .unwrap_or_default()
+            },
+        ],
+        width,
+    )
+}
+
+fn render_access_review_period_apps(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "APPLICATION_ID",
+            "STATUS",
+            "NOT_REVIEWED",
+            "APPROVED",
+            "REJECTED",
+            "OUT_OF_SCOPE",
+            "REVIEWERS",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| scalar_field(r, "applicationId"),
+            |r| str_field(r, "status"),
+            |r| {
+                r.get("userCounts")
+                    .map(|c| scalar_field(c, "notReviewed"))
+                    .unwrap_or_default()
+            },
+            |r| {
+                r.get("userCounts")
+                    .map(|c| scalar_field(c, "approved"))
+                    .unwrap_or_default()
+            },
+            |r| {
+                r.get("userCounts")
+                    .map(|c| scalar_field(c, "rejected"))
+                    .unwrap_or_default()
+            },
+            |r| {
+                r.get("userCounts")
+                    .map(|c| scalar_field(c, "outOfScope"))
+                    .unwrap_or_default()
+            },
+            |r| joined_field(r, "reviewers", "email"),
+        ],
         width,
     )
 }
@@ -979,6 +1121,19 @@ fn joined_strings(row: &Value, key: &str) -> String {
     row.get(key)
         .and_then(|v| v.as_array())
         .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(","))
+        .unwrap_or_default()
+}
+
+/// One string field of each object in an array, joined with commas; empty when absent.
+fn joined_field(row: &Value, key: &str, field: &str) -> String {
+    row.get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.get(field)?.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
         .unwrap_or_default()
 }
 
