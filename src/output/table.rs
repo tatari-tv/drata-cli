@@ -23,19 +23,42 @@ type RowRenderer = fn(&[Value], usize) -> String;
 /// Dispatch on the detected shape of a Drata response. Returns `Some(table)`
 /// when a renderer matches, `None` otherwise (caller falls back to JSON).
 pub fn render(value: &Value, width: usize) -> Option<String> {
+    render_with(value, width, pick_renderer)
+}
+
+/// A table the command names instead of sniffing, for a row shape another op
+/// shares. Identity action rows and policy action rows carry the same keys
+/// (`action`, `label`, `description`, `payloadSchema`), so no sniff can tell
+/// them apart: a sniff would hand `policy actions` the identity table, where
+/// v0.1.5 printed JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Table {
+    IdentityActions,
+}
+
+/// Render `value` with the named table: the same envelope handling as
+/// `render`, with the renderer fixed rather than sniffed.
+pub fn render_as(value: &Value, width: usize, table: Table) -> Option<String> {
+    let renderer: RowRenderer = match table {
+        Table::IdentityActions => render_identity_actions,
+    };
+    render_with(value, width, |_| Some(renderer))
+}
+
+fn render_with(value: &Value, width: usize, pick: impl Fn(&Value) -> Option<RowRenderer>) -> Option<String> {
     // List envelope: `{ "data": [ {...}, ... ] }`.
     if let Some(arr) = value.get("data").and_then(|v| v.as_array()) {
         if arr.is_empty() {
             // Render an empty table rather than dumping `[]` as JSON.
             return Some("(no results)".to_string());
         }
-        let renderer = pick_renderer(&arr[0])?;
+        let renderer = pick(&arr[0])?;
         return Some(renderer(arr, width));
     }
 
     // Single-object response (e.g. `get`): wrap as a one-row list.
     if value.is_object() {
-        let renderer = pick_renderer(value)?;
+        let renderer = pick(value)?;
         let rows = [value.clone()];
         return Some(renderer(&rows, width));
     }
@@ -74,8 +97,10 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("connectionProvider") && obj.contains_key("name") {
         return Some(render_scoped_groups);
     }
-    // Personnel group rows carry `externalId` + `name` (a vendor has neither).
-    if obj.contains_key("externalId") && obj.contains_key("name") {
+    // Personnel group rows carry `externalId` + `source` + `name`. `source` is
+    // what sets them apart: an asset and a control requirement also carry
+    // `externalId` + `name`, and keep their v0.1.5 output.
+    if obj.contains_key("externalId") && obj.contains_key("source") && obj.contains_key("name") {
         return Some(render_groups);
     }
     // Policy language variant rows carry `hasPdf` + `hasHtml` next to `language`.
@@ -112,12 +137,10 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("identityId") {
         return Some(render_identities);
     }
-    // Identity action rows carry `action` + `label` + `description`.
-    if obj.contains_key("action") && obj.contains_key("label") && obj.contains_key("description") {
-        return Some(render_identity_actions);
-    }
-    // Codebase exclusion rows carry `findingId` + `repositoryName`.
-    if obj.contains_key("findingId") && obj.contains_key("repositoryName") {
+    // Codebase exclusion rows carry `findingId` + `exclusionDesignatorId`. A
+    // monitor failure on a codebase test also carries `findingId` +
+    // `repositoryName`, and keeps its v0.1.5 JSON output.
+    if obj.contains_key("findingId") && obj.contains_key("exclusionDesignatorId") {
         return Some(render_codebase_exclusions);
     }
     // A retest acceptance is exactly `{testId, checkStatus}`; a monitoring test
@@ -1203,5 +1226,7 @@ fn scalar_field(row: &Value, key: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod parity;
 #[cfg(test)]
 mod tests;

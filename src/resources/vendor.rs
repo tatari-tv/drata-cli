@@ -377,7 +377,7 @@ async fn upload(
 // Questionnaire subresource
 // ---------------------------------------------------------------------------
 
-#[instrument(skip(client, config, confirm))]
+#[instrument(skip_all)]
 async fn questionnaire(
     client: &DrataClient,
     config: &Config,

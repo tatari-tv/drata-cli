@@ -1,4 +1,4 @@
-//! Every Phase 4 enum flag accepts exactly the spec's values for its op's
+//! Every enum flag accepts exactly the spec's values for its op's
 //! param: no value the spec omits (which the server would answer with a 400),
 //! none the spec lists left out.
 
@@ -664,4 +664,34 @@ fn dcf_suggestion_flags_take_spec_values_case_insensitively_and_never_split_comm
     assert!(!ok(&["generate", "1", "2", "--request-id", "1,2"]));
     assert!(!ok(&["run-action", "1", "2", "3", "4", "--action", "defer"]));
     assert!(ok(&["run-action", "1", "2", "3", "4", "--action", "Reject"]));
+}
+
+#[test]
+fn vendor_list_and_control_list_enums_match_the_spec() {
+    same::<VendorStatus>("/vendors", "statuses[]");
+    same::<VendorType>("/vendors", "types[]");
+    same::<RequiredApprovals>("/workspaces/{workspaceId}/controls", "requiredApprovals");
+}
+
+#[test]
+fn risk_search_enums_match_the_spec() {
+    let all = "/risks-search";
+    let scoped = "/risk-registers/{riskRegisterId}/risks-search";
+    same::<RiskSearchExpand>(all, "expand[]");
+    same::<RiskSearchExpand>(scoped, "expand[]");
+    same::<RiskSearchFacet>(all, "facets[]");
+    // The one-register search takes every facet but `riskRegisterId`, which
+    // `risk search --register-id` refuses before any request.
+    let mut scoped_facets = flag_values::<RiskSearchFacet>();
+    assert!(scoped_facets.remove(&wire_name(&RiskSearchFacet::RiskRegisterId)));
+    assert_eq!(scoped_facets, spec_values(scoped, "facets[]"), "GET {scoped} facets[]");
+}
+
+#[test]
+fn upload_purpose_matches_the_spec() {
+    assert_eq!(
+        flag_values::<UploadPurpose>(),
+        body_values("/upload-urls", "application/json", "purpose"),
+        "upload-url create --purpose"
+    );
 }

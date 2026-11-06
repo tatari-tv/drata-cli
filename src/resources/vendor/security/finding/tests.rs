@@ -128,3 +128,36 @@ fn no_example_without_the_flag() {
     };
     assert!(example_if_requested(Some(&note), None).is_none());
 }
+
+#[test]
+fn verb_names_the_op_without_its_text() {
+    let create = Op::Create {
+        text: Some("private-text"),
+        source: None,
+        assessment_id: None,
+        data: None,
+    };
+    assert_eq!(create.verb(), "create");
+    assert!(
+        format!("{create:?}").contains("private-text"),
+        "the op itself carries the text"
+    );
+    let update = Op::Update {
+        id: 1,
+        text: None,
+        source: None,
+        clear_source: false,
+        data: Some("{}"),
+    };
+    assert_eq!(update.verb(), "update");
+    assert_eq!(
+        Op::List {
+            assessment_id: None,
+            expand: vec![]
+        }
+        .verb(),
+        "list"
+    );
+    assert_eq!(Op::Get { id: 1, expand: vec![] }.verb(), "get");
+    assert_eq!(Op::Remove { id: 1 }.verb(), "remove");
+}

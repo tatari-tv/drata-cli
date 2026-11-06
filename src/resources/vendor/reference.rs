@@ -113,7 +113,7 @@ async fn print_all(client: &DrataClient, config: &Config, path: &str) -> Result<
     Ok(())
 }
 
-#[instrument(skip(client, config))]
+#[instrument(skip_all)]
 pub async fn criteria(action: &VendorCriteriaAction, client: &DrataClient, config: &Config) -> Result<()> {
     let VendorCriteriaAction::List {
         name,
@@ -140,7 +140,7 @@ pub async fn criteria(action: &VendorCriteriaAction, client: &DrataClient, confi
     print_all(client, config, &path).await
 }
 
-#[instrument(skip(client, config))]
+#[instrument(skip_all)]
 pub async fn criteria_creation(
     action: &VendorCriteriaCreationAction,
     client: &DrataClient,
@@ -150,7 +150,7 @@ pub async fn criteria_creation(
     print_all(client, config, &build_criteria_creation_path(workspace_id, status)).await
 }
 
-#[instrument(skip(client, config))]
+#[instrument(skip_all)]
 pub async fn template(action: &VendorQuestionnaireTemplateAction, client: &DrataClient, config: &Config) -> Result<()> {
     let path = match action {
         VendorQuestionnaireTemplateAction::List {
@@ -166,13 +166,13 @@ pub async fn template(action: &VendorQuestionnaireTemplateAction, client: &Drata
     print_all(client, config, &path).await
 }
 
-#[instrument(skip(client, config))]
+#[instrument(skip_all)]
 pub async fn risk_level(action: &VendorRiskLevelAction, client: &DrataClient, config: &Config) -> Result<()> {
     let VendorRiskLevelAction::List = action;
     print_all(client, config, "/vendor-risk-levels").await
 }
 
-#[instrument(skip(client, config))]
+#[instrument(skip_all)]
 pub async fn security_reviews(
     action: &VendorSecurityReviewsAction,
     client: &DrataClient,

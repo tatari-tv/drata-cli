@@ -55,6 +55,75 @@ pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
     }
 }
 
+/// The subcommand path of a parsed command, e.g. `connection aws create`, the
+/// one field the `run` and `dispatch` spans record. Built only from names in
+/// the clap tree, never from an argument: the span field lands on every DEBUG
+/// line under it, and a `--data` body can carry a credential.
+///
+/// The parsed enum keeps no subcommand names, so this walks its `Debug` text:
+/// each variant identifier, kebab-cased, that names a child of the clap
+/// command reached so far extends the path. Argument values never match (a
+/// string prints quoted, a leaf has no children), and a non-match is dropped.
+pub fn command_path(command: &Commands) -> String {
+    use clap::CommandFactory;
+    let debug = format!("{command:?}");
+    let root = Cli::command();
+    let mut current = &root;
+    let mut path: Vec<&str> = Vec::new();
+    for ident in variant_identifiers(&debug) {
+        if let Some(sub) = current.find_subcommand(kebab(ident)) {
+            path.push(sub.get_name());
+            current = sub;
+        }
+    }
+    path.join(" ")
+}
+
+/// The identifiers in `Debug` text that start with an uppercase letter (enum
+/// variants, `Some`, `None`), skipping everything inside string and char
+/// literals.
+fn variant_identifiers(debug: &str) -> Vec<&str> {
+    let bytes = debug.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            quote @ (b'"' | b'\'') => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            b if b.is_ascii_alphanumeric() || b == b'_' => {
+                let start = i;
+                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                    i += 1;
+                }
+                if bytes[start].is_ascii_uppercase() {
+                    out.push(&debug[start..i]);
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    out
+}
+
+/// `CreateWithFile` -> `create-with-file`, clap's derive naming for a variant.
+fn kebab(ident: &str) -> String {
+    let mut out = String::with_capacity(ident.len() + 4);
+    let mut prev_lower_or_digit = false;
+    for c in ident.chars() {
+        if c.is_ascii_uppercase() && prev_lower_or_digit {
+            out.push('-');
+        }
+        prev_lower_or_digit = c.is_ascii_lowercase() || c.is_ascii_digit();
+        out.push(c.to_ascii_lowercase());
+    }
+    out
+}
+
 /// True if the command is an auth/onboarding command that must run without a
 /// configured key (so we bypass `Config::load`).
 pub fn is_auth_command(cli: &Cli) -> bool {
@@ -89,7 +158,7 @@ pub fn run_auth(cli: &Cli, diag: &AuthDiagnostic) -> Result<()> {
     }
 }
 
-#[instrument(skip_all, fields(command = ?cli.command))]
+#[instrument(skip_all, fields(command = %command_path(&cli.command)))]
 pub async fn run(cli: &Cli, config: &Config, confirm: ConfirmFn) -> Result<()> {
     let client = DrataClient::new(config.api_key.clone(), &config.region, config.allow_writes)?;
     dispatch(cli, &client, config, &confirm).await
@@ -98,7 +167,7 @@ pub async fn run(cli: &Cli, config: &Config, confirm: ConfirmFn) -> Result<()> {
 /// Route a parsed command to its handler over an already-built client. Split
 /// from `run` so the command table (`tests/commands.rs`) can dispatch every
 /// curated command against a wiremock base URL.
-#[instrument(skip_all, fields(command = ?cli.command))]
+#[instrument(skip_all, fields(command = %command_path(&cli.command)))]
 pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     match &cli.command {
         Commands::Vendor { action } => {

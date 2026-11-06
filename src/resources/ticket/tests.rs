@@ -132,3 +132,18 @@ fn monitor_target_resolves_create() {
     assert_eq!(path, "/workspaces/1/monitoring-tests/2/tickets");
     assert!(matches!(op, TicketOp::Create(_)));
 }
+
+#[test]
+fn verb_names_the_op_without_its_body() {
+    let mut create = args();
+    create.data = Some(r#"{"summary": "private-text"}"#.to_string());
+    let op = TicketOp::Create(&create);
+    assert_eq!(op.verb(), "create");
+    assert!(
+        format!("{op:?}").contains("private-text"),
+        "the op itself carries the body"
+    );
+    assert_eq!(TicketOp::List { done: None }.verb(), "list");
+    assert_eq!(TicketOp::Link { ticket_url: "u" }.verb(), "link");
+    assert_eq!(TicketOp::Unlink { ticket_id: "1" }.verb(), "unlink");
+}

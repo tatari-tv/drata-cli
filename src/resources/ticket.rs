@@ -53,6 +53,19 @@ pub enum TicketOp<'a> {
     Create(&'a TicketCreateArgs),
 }
 
+impl TicketOp<'_> {
+    /// The verb name, for logs: `Create` carries the `--data` body, so the op
+    /// itself is never a log field.
+    pub fn verb(&self) -> &'static str {
+        match self {
+            TicketOp::List { .. } => "list",
+            TicketOp::Link { .. } => "link",
+            TicketOp::Unlink { .. } => "unlink",
+            TicketOp::Create(_) => "create",
+        }
+    }
+}
+
 /// `(<parent>/tickets, op)` for a control.
 pub fn control_target(action: &ControlTicketAction) -> (String, TicketOp<'_>) {
     match action {
@@ -229,7 +242,7 @@ fn build_create_body(args: &TicketCreateArgs) -> Result<Value> {
 }
 
 /// Run one ticket verb against the parent's `<parent>/tickets` path.
-#[instrument(skip(client, config, confirm))]
+#[instrument(skip(client, config, confirm, op))]
 pub async fn handle(
     client: &DrataClient,
     config: &Config,
@@ -237,7 +250,7 @@ pub async fn handle(
     tickets: &str,
     op: TicketOp<'_>,
 ) -> Result<()> {
-    debug!(tickets, ?op, "ticket");
+    debug!(tickets, verb = op.verb(), "ticket");
     match op {
         TicketOp::List { done } => {
             let items = client.get_all(&build_list_path(tickets, done)).await?;

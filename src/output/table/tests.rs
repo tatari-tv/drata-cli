@@ -496,21 +496,55 @@ fn custom_field_and_group_rows_show_their_columns() {
 fn identity_phase_eight_spec_rows_pick_their_own_renderer() {
     for segment in ["infrastructure-user-identities", "version-control-user-identities"] {
         let base = format!("/workspaces/{{workspaceId}}/{segment}");
-        let cases: [(Value, RowRenderer, &str); 2] = [
-            (spec_response_row(&base), render_identities, "jdoe@example.com"),
-            (
-                spec_response_row(&format!("{base}/{{identityId}}/actions")),
-                render_identity_actions,
-                "Link User",
-            ),
-        ];
-        for (row, want, cell) in cases {
-            let got = pick_renderer(&row).unwrap_or_else(|| panic!("no renderer for {row}"));
-            assert!(std::ptr::fn_addr_eq(got, want), "wrong renderer for {row}");
-            let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
-            assert!(out.contains(cell), "`{cell}` missing from\n{out}");
-        }
+        let row = spec_response_row(&base);
+        let got = pick_renderer(&row).unwrap_or_else(|| panic!("no renderer for {row}"));
+        assert!(
+            std::ptr::fn_addr_eq(got, render_identities as RowRenderer),
+            "wrong renderer for {row}"
+        );
+        let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
+        assert!(
+            out.contains("jdoe@example.com"),
+            "`jdoe@example.com` missing from\n{out}"
+        );
+
+        // Action rows share their keys with policy action rows, so the command
+        // names its table and no sniff claims the shape.
+        let action = spec_response_row(&format!("{base}/{{identityId}}/actions"));
+        assert!(pick_renderer(&action).is_none(), "a sniff claimed {action}");
+        let out = render_as(&json!({ "data": [action] }), DEFAULT_WIDTH, Table::IdentityActions).unwrap();
+        assert!(out.contains("Link User"), "`Link User` missing from\n{out}");
+        assert!(out.starts_with("ACTION"), "{out}");
     }
+}
+
+#[test]
+fn identity_and_policy_action_rows_share_their_keys() {
+    // Why the identity table is named, not sniffed: the two shapes are the same.
+    let keys = |path: &str| {
+        let mut k: Vec<String> = every_key("get", path).as_object().unwrap().keys().cloned().collect();
+        k.sort();
+        k
+    };
+    assert_eq!(
+        keys("/workspaces/{workspaceId}/infrastructure-user-identities/{identityId}/actions"),
+        keys("/policies/{policyId}/actions")
+    );
+}
+
+#[test]
+fn render_as_keeps_the_envelope_rules() {
+    assert_eq!(
+        render_as(&json!({"data": []}), DEFAULT_WIDTH, Table::IdentityActions).as_deref(),
+        Some("(no results)")
+    );
+    assert!(render_as(&json!("text"), DEFAULT_WIDTH, Table::IdentityActions).is_none());
+    let one = json!({"action": "LINK_USER", "label": "Link User", "description": "d"});
+    assert!(
+        render_as(&one, DEFAULT_WIDTH, Table::IdentityActions)
+            .unwrap()
+            .contains("LINK_USER")
+    );
 }
 
 #[test]

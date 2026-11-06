@@ -17,7 +17,7 @@ use crate::client::{DrataClient, encode_path_segment};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::data::{DataSource, read_data};
-use crate::output::print_value;
+use crate::output::{Table, print_value, print_value_as};
 use crate::query::{QueryPath, wire_name};
 use crate::spec;
 use eyre::{Result, bail};
@@ -207,7 +207,7 @@ async fn handle(kind: Kind, verb: Verb<'_>, client: &DrataClient, config: &Confi
         Verb::Actions(target) => {
             let path = actions_path(kind, target);
             debug!(path, noun = kind.noun(), "identity actions");
-            print_value(&client.get(&path).await?, &config.output_format);
+            print_value_as(&client.get(&path).await?, &config.output_format, Table::IdentityActions);
         }
         Verb::RunAction { target, action, body } => {
             let (Some(workspace_id), Some(identity_id)) = target else {

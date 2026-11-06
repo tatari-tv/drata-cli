@@ -50,7 +50,7 @@ pub fn build_stats_path(vendor_id: &str, security_review_id: u64) -> String {
     )
 }
 
-#[instrument(skip(client, config))]
+#[instrument(skip_all)]
 pub async fn handle(action: &SecurityReviewAssessmentAction, client: &DrataClient, config: &Config) -> Result<()> {
     match action {
         SecurityReviewAssessmentAction::List {

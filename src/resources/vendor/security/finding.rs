@@ -102,6 +102,20 @@ pub enum Op<'a> {
     },
 }
 
+impl Op<'_> {
+    /// The verb name, for logs: a `Create`/`Update` carries the body text, so
+    /// the op itself is never a log field.
+    pub fn verb(&self) -> &'static str {
+        match self {
+            Op::List { .. } => "list",
+            Op::Get { .. } => "get",
+            Op::Create { .. } => "create",
+            Op::Update { .. } => "update",
+            Op::Remove { .. } => "remove",
+        }
+    }
+}
+
 /// `<collection>` path of a review's notes or observations. Pure.
 pub fn collection_path(vendor_id: &str, security_review_id: u64, kind: Kind) -> String {
     format!(
@@ -378,10 +392,10 @@ pub fn build_update_body(kind: Kind, text: Option<&str>, source: Option<&str>, c
 }
 
 /// Run one note or observation verb.
-#[instrument(skip(client, config, confirm))]
+#[instrument(skip_all, fields(kind = ?target.kind, collection = %target.collection))]
 pub async fn handle(client: &DrataClient, config: &Config, confirm: &ConfirmFn, target: Target<'_>) -> Result<()> {
     let Target { kind, collection, op } = target;
-    debug!(?kind, collection, ?op, "security-review finding");
+    debug!(?kind, collection, verb = op.verb(), "security-review finding");
     match op {
         Op::List { assessment_id, expand } => {
             let items = client
