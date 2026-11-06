@@ -7,6 +7,9 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+mod vendor;
+pub use vendor::*;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "drata",
@@ -226,339 +229,6 @@ pub struct RawArgs {
 }
 
 // ---------------------------------------------------------------------------
-// Vendors
-// ---------------------------------------------------------------------------
-
-#[derive(Subcommand, Debug)]
-pub enum VendorAction {
-    /// List vendors (optional name patterns: exact -> starts-with -> contains)
-    List {
-        /// Zero or more name patterns
-        patterns: Vec<String>,
-        /// Stream all pages as NDJSON instead of buffering
-        #[arg(long)]
-        all: bool,
-        /// Sub-collections to expand (space-separated, repeatable)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
-    },
-    /// Get a vendor by ID
-    Get {
-        id: String,
-        /// Sub-collections to expand (space-separated, repeatable)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
-    },
-    /// Create a vendor
-    Create {
-        /// Vendor name (required unless --example)
-        #[arg(long)]
-        name: Option<String>,
-        /// Category (e.g. SECURITY, ENGINEERING)
-        #[arg(long)]
-        category: Option<String>,
-        /// Risk level (NONE, LOW, MODERATE, HIGH)
-        #[arg(long)]
-        risk: Option<String>,
-        /// Status (e.g. ACTIVE, PROSPECTIVE)
-        #[arg(long)]
-        status: Option<String>,
-        /// Vendor homepage URL
-        #[arg(long)]
-        url: Option<String>,
-        /// Free-form notes
-        #[arg(long)]
-        notes: Option<String>,
-        /// Print a JSON skeleton and exit (no API call)
-        #[arg(long)]
-        example: bool,
-    },
-    /// Update an existing vendor
-    Update {
-        /// Vendor ID
-        id: String,
-        #[arg(long)]
-        name: Option<String>,
-        #[arg(long)]
-        category: Option<String>,
-        #[arg(long)]
-        risk: Option<String>,
-        #[arg(long)]
-        status: Option<String>,
-        #[arg(long)]
-        url: Option<String>,
-        #[arg(long)]
-        notes: Option<String>,
-    },
-    /// Remove a vendor by ID
-    Remove { id: String },
-    /// Upload a document for a vendor (multipart)
-    Upload {
-        /// Vendor ID
-        vendor_id: String,
-        /// Path to the file to upload
-        #[arg(long)]
-        file: std::path::PathBuf,
-        /// Vendor document type (optional, e.g. COMPLIANCE_REPORT)
-        #[arg(long = "type")]
-        doc_type: Option<String>,
-        /// Associate with a security review by ID (optional)
-        #[arg(long)]
-        security_review_id: Option<u64>,
-    },
-    /// Manage a vendor's questionnaires
-    Questionnaire {
-        #[command(subcommand)]
-        action: VendorQuestionnaireAction,
-    },
-    /// Manage a vendor's security reviews
-    SecurityReview {
-        #[command(subcommand)]
-        action: VendorSecurityReviewAction,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-pub enum VendorQuestionnaireAction {
-    /// List questionnaires sent to a vendor
-    List {
-        /// Vendor ID
-        vendor_id: String,
-    },
-    /// Get a single questionnaire by ID
-    Get {
-        /// Vendor ID
-        vendor_id: String,
-        /// Questionnaire ID
-        questionnaire_id: String,
-    },
-    /// Send a questionnaire to a vendor
-    Send {
-        /// Vendor ID
-        vendor_id: String,
-        /// Recipient email
-        #[arg(long)]
-        email: String,
-        /// Questionnaire template ID
-        #[arg(long)]
-        questionnaire_id: u64,
-        /// Security review ID this questionnaire belongs to
-        #[arg(long)]
-        security_review_id: u64,
-        /// Email body sent to the recipient
-        #[arg(long)]
-        email_content: String,
-        /// Optional email subject
-        #[arg(long)]
-        email_subject: Option<String>,
-    },
-}
-
-/// Status filter / create field for security reviews.
-/// Serializes to SCREAMING_SNAKE_CASE per the Drata spec
-/// (`VendorSecurityReviewStatusEnum`).
-#[derive(ValueEnum, Clone, Debug)]
-#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum SecurityReviewStatus {
-    NotYetStarted,
-    InProgress,
-    Completed,
-    NotRequired,
-}
-
-/// Type filter / create field for security reviews.
-/// Serializes to SCREAMING_SNAKE_CASE per the Drata spec
-/// (`VendorSecurityReviewTypeEnum`).
-#[derive(ValueEnum, Clone, Debug)]
-#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum SecurityReviewType {
-    Security,
-    SocReport,
-    UploadReport,
-}
-
-/// Action for `vendor security-review run-action`.
-/// Serializes to lowercase per the Drata spec
-/// (`SecurityReviewActionEnum`).
-#[derive(ValueEnum, Clone, Debug)]
-#[clap(rename_all = "lowercase")]
-pub enum SecurityReviewAction {
-    Finalize,
-    Reopen,
-}
-
-/// Decision filter for `vendor security-review list`.
-/// Serializes to SCREAMING_SNAKE_CASE per the Drata spec
-/// (`VendorSecurityReviewDecisionEnum`).
-#[derive(ValueEnum, Clone, Debug)]
-#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum SecurityReviewDecision {
-    Pending,
-    Approved,
-    ApprovedWithConditions,
-    Rejected,
-}
-
-#[derive(Subcommand, Clone, Debug)]
-pub enum VendorSecurityReviewAction {
-    /// List security reviews for a vendor
-    List {
-        /// Vendor ID
-        vendor_id: String,
-        /// Filter by status (space-separated, repeatable; spec param `status[]`)
-        #[arg(long, value_enum, ignore_case = true, num_args = 1..)]
-        status: Vec<SecurityReviewStatus>,
-        /// Filter by type (space-separated, repeatable; spec param `type[]`)
-        #[arg(long = "type", value_enum, ignore_case = true, num_args = 1..)]
-        review_type: Vec<SecurityReviewType>,
-        /// Filter by decision (space-separated, repeatable; spec param `decision[]`)
-        #[arg(long, value_enum, ignore_case = true, num_args = 1..)]
-        decision: Vec<SecurityReviewDecision>,
-        /// Sub-collections to expand (space-separated, repeatable)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
-        /// Stream all pages as NDJSON instead of buffering
-        #[arg(long)]
-        all: bool,
-    },
-    /// Create a security review for a vendor
-    Create {
-        /// Vendor ID
-        vendor_id: String,
-        /// Review deadline (ISO 8601, e.g. 2026-12-31). Required unless --data/--example.
-        #[arg(long)]
-        review_deadline_at: Option<String>,
-        /// Review status. Required unless --data/--example.
-        #[arg(long, value_enum, ignore_case = true)]
-        status: Option<SecurityReviewStatus>,
-        /// Review type. Required unless --data/--example.
-        #[arg(long = "type", value_enum, ignore_case = true)]
-        review_type: Option<SecurityReviewType>,
-        /// Optional title
-        #[arg(long)]
-        title: Option<String>,
-        /// Optional note
-        #[arg(long)]
-        note: Option<String>,
-        /// Requested-at timestamp (ISO 8601)
-        #[arg(long)]
-        requested_at: Option<String>,
-        /// Requester user ID
-        #[arg(long)]
-        requester_user_id: Option<u64>,
-        /// Full request body as JSON (overrides individual flags)
-        #[arg(long)]
-        data: Option<String>,
-        /// Print a JSON skeleton and exit (no API call)
-        #[arg(long)]
-        example: bool,
-    },
-    /// Get a single security review by ID
-    Get {
-        /// Vendor ID
-        vendor_id: String,
-        /// Security review ID
-        security_review_id: u64,
-        /// Sub-collections to expand (space-separated, repeatable)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
-    },
-    /// Update a security review (title and/or soc-form only)
-    Update {
-        /// Vendor ID
-        vendor_id: String,
-        /// Security review ID
-        security_review_id: u64,
-        /// New title
-        #[arg(long)]
-        title: Option<String>,
-        /// SOC form as a JSON object (per spec `SocReviewFormSaveRequestPublicV2Dto`)
-        #[arg(long)]
-        soc_form: Option<String>,
-        /// Full request body as JSON (overrides individual flags)
-        #[arg(long)]
-        data: Option<String>,
-        /// Print a JSON skeleton and exit (no API call)
-        #[arg(long)]
-        example: bool,
-    },
-    /// List available actions for a security review
-    Actions {
-        /// Vendor ID
-        vendor_id: String,
-        /// Security review ID
-        security_review_id: u64,
-    },
-    /// Run a lifecycle action (finalize or reopen) on a security review
-    RunAction {
-        /// Vendor ID
-        vendor_id: String,
-        /// Security review ID
-        security_review_id: u64,
-        /// Action to run
-        #[arg(long, value_enum, ignore_case = true)]
-        action: SecurityReviewAction,
-    },
-    /// List security questionnaires attached to a security review
-    Questionnaires {
-        /// Vendor ID
-        vendor_id: String,
-        /// Security review ID
-        security_review_id: u64,
-    },
-    /// Create a security review with an attached file (multipart upload)
-    CreateWithFile {
-        /// Vendor ID
-        vendor_id: String,
-        /// Path to the file to upload (single `file` part)
-        #[arg(long)]
-        file: std::path::PathBuf,
-        /// Review title (required for create-with-file)
-        #[arg(long)]
-        title: String,
-        /// Review deadline (ISO 8601, e.g. 2026-12-31)
-        #[arg(long)]
-        review_deadline_at: String,
-        /// Review status
-        #[arg(long, value_enum, ignore_case = true)]
-        status: SecurityReviewStatus,
-        /// Review type
-        #[arg(long = "type", value_enum, ignore_case = true)]
-        review_type: SecurityReviewType,
-        /// Document type (optional, e.g. COMPLIANCE_REPORT)
-        #[arg(long)]
-        document_type: Option<String>,
-        /// Optional note
-        #[arg(long)]
-        note: Option<String>,
-        /// Requested-at timestamp (ISO 8601)
-        #[arg(long)]
-        requested_at: Option<String>,
-        /// Requester user ID
-        #[arg(long)]
-        requester_user_id: Option<u64>,
-    },
-    /// Upload one or more completed questionnaire files for a vendor (multipart)
-    UploadQuestionnaire {
-        /// Vendor ID
-        vendor_id: String,
-        /// Path(s) to questionnaire file(s) (space-separated, repeatable)
-        #[arg(long, num_args = 1.., required = true)]
-        file: Vec<std::path::PathBuf>,
-    },
-    /// Upload one or more completed questionnaire files to a security review (multipart)
-    UploadQuestionnaireToReview {
-        /// Vendor ID
-        vendor_id: String,
-        /// Security review ID
-        security_review_id: u64,
-        /// Path(s) to questionnaire file(s) (space-separated, repeatable)
-        #[arg(long, num_args = 1.., required = true)]
-        file: Vec<std::path::PathBuf>,
-    },
-}
-
-// ---------------------------------------------------------------------------
 // Risks
 // ---------------------------------------------------------------------------
 
@@ -626,6 +296,9 @@ pub enum RiskAction {
         /// Status
         #[arg(long, value_enum, ignore_case = true)]
         status: Option<RiskStatus>,
+        /// Vendor this risk relates to (makes it an external risk)
+        #[arg(long)]
+        vendor_id: Option<u64>,
         /// Print a JSON skeleton and exit (no API call)
         #[arg(long)]
         example: bool,
@@ -648,6 +321,9 @@ pub enum RiskAction {
         likelihood: Option<f64>,
         #[arg(long, value_enum, ignore_case = true)]
         status: Option<RiskStatus>,
+        /// Vendor this risk relates to (makes it an external risk)
+        #[arg(long)]
+        vendor_id: Option<u64>,
     },
     /// Get risk insights for a register
     Insights {
@@ -671,6 +347,17 @@ pub enum RiskAction {
 // Controls
 // ---------------------------------------------------------------------------
 
+/// Approval-state filter for `control list` (spec `FilterRequiredApprovalsEnum`).
+#[derive(ValueEnum, Clone, Debug)]
+#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RequiredApprovals {
+    PrepareForApprovers,
+    NeedsApproval,
+    Approved,
+    ChangesRequested,
+    NoReview,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum ControlAction {
     /// List controls in a workspace
@@ -683,6 +370,9 @@ pub enum ControlAction {
         /// Sub-collections to expand (space-separated, repeatable)
         #[arg(long, num_args = 1..)]
         expand: Vec<String>,
+        /// Filter by approval state (spec param `requiredApprovals`)
+        #[arg(long, value_enum, ignore_case = true)]
+        required_approvals: Option<RequiredApprovals>,
     },
     /// Get a control by ID
     Get {
@@ -714,6 +404,14 @@ pub enum ControlAction {
         /// Activity description
         #[arg(long)]
         activity: Option<String>,
+        /// External evidence metadata: a JSON array, sent as the string field
+        /// `externalEvidenceMetadata` (default `[]`: no evidence)
+        #[arg(long, default_value = "[]")]
+        external_evidence_metadata: String,
+        /// Base64 evidence files: a JSON array, sent as the string field
+        /// `base64Files` (default `[]`: no evidence)
+        #[arg(long, default_value = "[]")]
+        base64_files: String,
         /// Print a JSON skeleton and exit (no API call)
         #[arg(long)]
         example: bool,
@@ -1006,12 +704,32 @@ pub enum EvidenceAction {
         /// Description
         #[arg(long)]
         description: Option<String>,
-        /// Renewal schedule type
+        /// Renewal schedule type (required with --file or --file-key)
         #[arg(long, value_enum, ignore_case = true)]
         renewal_schedule_type: Option<RenewalScheduleType>,
-        /// Path to a file to upload (multipart)
+        /// Date the artifact was filed, YYYY-MM-DD (required with --file or --file-key)
         #[arg(long)]
+        filed_at: Option<String>,
+        /// Owner user ID (required with --file or --file-key)
+        #[arg(long)]
+        owner_id: Option<u64>,
+        /// Path to a file to upload as the artifact (multipart)
+        #[arg(
+            long,
+            conflicts_with = "file_key",
+            requires = "filed_at",
+            requires = "owner_id",
+            requires = "renewal_schedule_type"
+        )]
         file: Option<std::path::PathBuf>,
+        /// Pre-uploaded S3 object key to use as the artifact (from `POST /upload-urls`)
+        #[arg(
+            long,
+            requires = "filed_at",
+            requires = "owner_id",
+            requires = "renewal_schedule_type"
+        )]
+        file_key: Option<String>,
         /// Print a JSON skeleton and exit (no API call)
         #[arg(long)]
         example: bool,
@@ -1317,6 +1035,12 @@ pub enum MonitorAction {
         /// Stream all pages as NDJSON instead of buffering
         #[arg(long)]
         all: bool,
+        /// Filter on draft state (true or false)
+        #[arg(long)]
+        draft: Option<bool>,
+        /// Filter by test name
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Get a monitoring test by ID
     Get {
@@ -1384,6 +1108,9 @@ pub enum AuditAction {
         workspace_id: String,
         /// Audit ID
         audit_id: String,
+        /// Sub-collections to expand (space-separated, e.g. dcfSuggestionsSummary)
+        #[arg(long, num_args = 1..)]
+        expand: Vec<String>,
     },
 }
 

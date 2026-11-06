@@ -5,15 +5,16 @@
 //! Confirmed camelCase: `controlId`, `workspaceId`.
 //!
 //! Phase 4 adds: `--all` NDJSON streaming, `--expand`, confirm-on-mutation.
-//! The control create op is multipart (`POST /workspaces/{id}/controls`);
-//! when `--file` is provided the upload path is used.
+//! Control create sends JSON. The spec requires `externalEvidenceMetadata` and
+//! `base64Files`, both JSON arrays carried as strings; they default to `"[]"`.
 
-use crate::cli::ControlAction;
+use crate::cli::{ControlAction, RequiredApprovals};
 use crate::client::{DrataClient, encode_query};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
 use crate::output::print_value;
+use crate::query::{QueryPath, wire_name};
 use crate::spec;
 use eyre::{Result, bail};
 use serde_json::{Value, json};
@@ -40,7 +41,11 @@ pub async fn handle(action: &ControlAction, client: &DrataClient, config: &Confi
             workspace_id,
             all,
             expand,
-        } => list(client, config, workspace_id, *all, expand).await,
+            required_approvals,
+        } => {
+            let path = build_list_path(workspace_id, required_approvals.as_ref(), expand);
+            list(client, config, &path, *all).await
+        }
         ControlAction::Get {
             workspace_id,
             control_id,
@@ -53,6 +58,8 @@ pub async fn handle(action: &ControlAction, client: &DrataClient, config: &Confi
             code,
             question,
             activity,
+            external_evidence_metadata,
+            base64_files,
             example: _,
         } => {
             create(
@@ -65,6 +72,8 @@ pub async fn handle(action: &ControlAction, client: &DrataClient, config: &Confi
                 code.as_deref(),
                 question.as_deref(),
                 activity.as_deref(),
+                external_evidence_metadata,
+                base64_files,
             )
             .await
         }
@@ -104,15 +113,22 @@ pub async fn handle(action: &ControlAction, client: &DrataClient, config: &Confi
 // Verbs
 // ---------------------------------------------------------------------------
 
+/// Build the `GET .../controls` path with the `requiredApprovals` filter and
+/// `expand[]`. Pure.
+fn build_list_path(workspace_id: &str, required_approvals: Option<&RequiredApprovals>, expand: &[String]) -> String {
+    let mut q = QueryPath::new(format!("/workspaces/{}/controls", workspace_id));
+    q.push_opt("requiredApprovals", required_approvals.map(wire_name));
+    append_expand(&q.finish(), expand)
+}
+
 #[instrument(skip(client, config))]
-async fn list(client: &DrataClient, config: &Config, workspace_id: &str, all: bool, expand: &[String]) -> Result<()> {
-    debug!(workspace_id, all, expand_len = expand.len(), "control list");
-    let base = append_expand(&format!("/workspaces/{}/controls", workspace_id), expand);
+async fn list(client: &DrataClient, config: &Config, path: &str, all: bool) -> Result<()> {
+    debug!(path, all, "control list");
     if all {
         let mut stdout = io::stdout();
-        client.stream_all(&base, &mut stdout).await?;
+        client.stream_all(path, &mut stdout).await?;
     } else {
-        let items = client.get_all(&base).await?;
+        let items = client.get_all(path).await?;
         let result = json!({ "data": items });
         print_value(&result, &config.output_format);
     }
@@ -146,10 +162,13 @@ async fn create(
     code: Option<&str>,
     question: Option<&str>,
     activity: Option<&str>,
+    external_evidence_metadata: &str,
+    base64_files: &str,
 ) -> Result<()> {
-    // Spec requires name, description, and code. Validate before confirming so
-    // we never prompt for a request the server would reject. workspace_id is
-    // clap-required unless --example (which never reaches this handler).
+    // Spec requires name, description, code, externalEvidenceMetadata and
+    // base64Files. Validate before confirming so we never prompt for a request
+    // the server would reject. workspace_id is clap-required unless --example
+    // (which never reaches this handler).
     let workspace_id =
         workspace_id.ok_or_else(|| eyre::eyre!("`drata control create` requires <workspace_id> (or use --example)"))?;
     debug!(workspace_id, "control create");
@@ -157,13 +176,19 @@ async fn create(
     let description =
         description.ok_or_else(|| eyre::eyre!("`drata control create` requires --description (or use --example)"))?;
     let code = code.ok_or_else(|| eyre::eyre!("`drata control create` requires --code (or use --example)"))?;
+    let body = build_create_body(
+        name,
+        description,
+        code,
+        question,
+        activity,
+        external_evidence_metadata,
+        base64_files,
+    )?;
     let path = format!("/workspaces/{}/controls", workspace_id);
     if !confirm("POST", &path)? {
         bail!("aborted");
     }
-    let mut body = json!({ "name": name, "description": description, "code": code });
-    set_opt(&mut body, "question", question);
-    set_opt(&mut body, "activity", activity);
     let result = client.post(&path, body).await?;
     print_value(&result, &config.output_format);
     Ok(())
@@ -236,6 +261,40 @@ async fn compare(client: &DrataClient, config: &Config, workspace_id: &str, cont
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Build the control-create body. `externalEvidenceMetadata` and `base64Files`
+/// are string fields whose content is a JSON array: each flag value must parse
+/// as an array, and is then sent verbatim as a string. Pure.
+fn build_create_body(
+    name: &str,
+    description: &str,
+    code: &str,
+    question: Option<&str>,
+    activity: Option<&str>,
+    external_evidence_metadata: &str,
+    base64_files: &str,
+) -> Result<Value> {
+    require_json_array("--external-evidence-metadata", external_evidence_metadata)?;
+    require_json_array("--base64-files", base64_files)?;
+    let mut body = json!({
+        "name": name,
+        "description": description,
+        "code": code,
+        "externalEvidenceMetadata": external_evidence_metadata,
+        "base64Files": base64_files,
+    });
+    set_opt(&mut body, "question", question);
+    set_opt(&mut body, "activity", activity);
+    Ok(body)
+}
+
+fn require_json_array(flag: &str, raw: &str) -> Result<()> {
+    match serde_json::from_str::<Value>(raw) {
+        Ok(Value::Array(_)) => Ok(()),
+        Ok(_) => bail!("{} must be a JSON array, got: {}", flag, raw),
+        Err(e) => bail!("{} is not valid JSON: {}", flag, e),
+    }
+}
 
 fn set_opt(body: &mut Value, key: &str, value: Option<&str>) {
     if let Some(v) = value {

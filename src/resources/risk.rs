@@ -54,6 +54,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
             impact,
             likelihood,
             status,
+            vendor_id,
             example: _,
         } => {
             create(
@@ -67,6 +68,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
                 *impact,
                 *likelihood,
                 status.as_ref(),
+                *vendor_id,
             )
             .await
         }
@@ -79,6 +81,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
             impact,
             likelihood,
             status,
+            vendor_id,
         } => {
             update(
                 client,
@@ -92,6 +95,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
                 *impact,
                 *likelihood,
                 status.as_ref(),
+                *vendor_id,
             )
             .await
         }
@@ -145,6 +149,7 @@ async fn create(
     impact: Option<f64>,
     likelihood: Option<f64>,
     status: Option<&RiskStatus>,
+    vendor_id: Option<u64>,
 ) -> Result<()> {
     // register_id is clap-required unless --example (which never reaches here).
     let register_id =
@@ -170,6 +175,9 @@ async fn create(
     if let Some(s) = status {
         body["status"] = json!(risk_status_str(s));
     }
+    if let Some(v) = vendor_id {
+        body["vendorId"] = json!(v);
+    }
     let result = client
         .post(&format!("/risk-registers/{}/risks", register_id), body)
         .await?;
@@ -191,8 +199,9 @@ async fn update(
     impact: Option<f64>,
     likelihood: Option<f64>,
     status: Option<&RiskStatus>,
+    vendor_id: Option<u64>,
 ) -> Result<()> {
-    debug!(register_id, risk_id, "risk update");
+    debug!(register_id, risk_id, ?vendor_id, "risk update");
     if !confirm("PUT", &format!("/risk-registers/{}/risks/{}", register_id, risk_id))? {
         bail!("aborted");
     }
@@ -210,6 +219,9 @@ async fn update(
     }
     if let Some(s) = status {
         body["status"] = json!(risk_status_str(s));
+    }
+    if let Some(v) = vendor_id {
+        body["vendorId"] = json!(v);
     }
     let result = client
         .put(&format!("/risk-registers/{}/risks/{}", register_id, risk_id), body)

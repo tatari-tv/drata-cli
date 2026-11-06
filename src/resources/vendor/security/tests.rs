@@ -47,7 +47,7 @@ fn decision_str_matches_spec() {
 
 #[test]
 fn list_path_no_filters_is_bare() {
-    let path = build_list_path("v1", &[], &[], &[], &[]);
+    let path = build_list_path("v1", &[], &[], &[], None, None, None, None, &[]);
     assert_eq!(path, "/vendors/v1/security-reviews");
 }
 
@@ -58,6 +58,10 @@ fn list_path_encodes_bracketed_array_filters() {
         &[SecurityReviewStatus::InProgress],
         &[SecurityReviewType::SocReport],
         &[SecurityReviewDecision::Approved],
+        None,
+        None,
+        None,
+        None,
         &[],
     );
     // Brackets must be percent-encoded in the key (status%5B%5D=...), matching expand[].
@@ -74,6 +78,10 @@ fn list_path_repeats_multi_value_filters() {
         &[SecurityReviewStatus::NotYetStarted, SecurityReviewStatus::Completed],
         &[],
         &[],
+        None,
+        None,
+        None,
+        None,
         &[],
     );
     assert_eq!(
@@ -127,6 +135,7 @@ fn example_only_for_update_with_flag() {
         security_review_id: 42,
         title: None,
         soc_form: None,
+        updated_at: None,
         data: None,
         example: true,
     };
@@ -140,6 +149,7 @@ fn example_none_when_update_flag_false() {
         security_review_id: 42,
         title: None,
         soc_form: None,
+        updated_at: None,
         data: None,
         example: false,
     };
@@ -153,6 +163,10 @@ fn example_none_for_non_create_non_update_actions() {
         status: vec![],
         review_type: vec![],
         decision: vec![],
+        created_from: None,
+        created_to: None,
+        updated_from: None,
+        updated_to: None,
         expand: vec![],
         all: false,
     };
@@ -175,6 +189,9 @@ fn example_none_for_non_create_non_update_actions() {
         vendor_id: "v1".to_string(),
         security_review_id: 42,
         action: SecurityReviewAction::Finalize,
+        decision: None,
+        note: None,
+        reset_decision: false,
     };
     assert!(example_if_requested(&run_action).is_none());
 
@@ -198,6 +215,7 @@ fn update_example_skeleton_is_valid_json() {
     let parsed: serde_json::Value = serde_json::from_str(SECURITY_REVIEW_UPDATE_EXAMPLE).unwrap();
     assert!(parsed.get("title").is_some());
     assert!(parsed.get("socForm").is_some());
+    assert!(parsed.get("updatedAt").is_some());
     // Confirm update skeleton does NOT include create-only fields.
     assert!(parsed.get("securityReviewStatus").is_none());
     assert!(parsed.get("securityReviewType").is_none());
@@ -253,27 +271,131 @@ fn create_body_uses_translated_keys() {
 }
 
 #[test]
-fn update_body_only_has_title_and_soc_form() {
-    // UpdateDTO has only title + socForm; create's fields must not appear
-    let mut body = serde_json::json!({});
-    set_opt_str(&mut body, "title", Some("Updated title"));
-    set_opt_str(&mut body, "socForm", Some("SOC2_TYPE_II"));
-
+fn update_body_has_only_update_fields() {
+    let body = build_update_body(
+        Some("Updated title"),
+        Some(r#"{"reportOpinion": {}}"#),
+        Some("2025-07-01T16:45:55.246Z"),
+    )
+    .unwrap();
     assert_eq!(body["title"], serde_json::json!("Updated title"));
-    assert_eq!(body["socForm"], serde_json::json!("SOC2_TYPE_II"));
-    // Confirm create-only fields are absent
+    assert_eq!(body["socForm"], serde_json::json!({"reportOpinion": {}}));
+    assert_eq!(body["updatedAt"], serde_json::json!("2025-07-01T16:45:55.246Z"));
+    // Create-only fields never appear in an update body.
     assert!(body.get("securityReviewStatus").is_none());
     assert!(body.get("securityReviewType").is_none());
     assert!(body.get("reviewDeadlineAt").is_none());
 }
 
 #[test]
-fn run_action_body_uses_action_string() {
-    let finalize_body = serde_json::json!({ "action": action_str(&SecurityReviewAction::Finalize) });
-    let reopen_body = serde_json::json!({ "action": action_str(&SecurityReviewAction::Reopen) });
+fn update_body_rejects_non_json_soc_form() {
+    let err = build_update_body(None, Some("SOC2_TYPE_II"), None).unwrap_err();
+    assert!(err.to_string().contains("--soc-form"), "{err}");
+}
 
-    assert_eq!(finalize_body["action"], serde_json::json!("finalize"));
-    assert_eq!(reopen_body["action"], serde_json::json!("reopen"));
+#[test]
+fn update_body_omits_unset_updated_at() {
+    let body = build_update_body(Some("t"), None, None).unwrap();
+    assert!(body.get("updatedAt").is_none());
+}
+
+#[test]
+fn run_action_finalize_body_has_decision_and_note() {
+    let body = build_run_action_body(
+        &SecurityReviewAction::Finalize,
+        Some(&SecurityReviewDecision::ApprovedWithConditions),
+        Some("pen test due in Q3"),
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "action": "finalize",
+            "decision": "APPROVED_WITH_CONDITIONS",
+            "note": "pen test due in Q3",
+        })
+    );
+}
+
+#[test]
+fn run_action_bare_finalize_sends_only_action() {
+    let body = build_run_action_body(&SecurityReviewAction::Finalize, None, None, false).unwrap();
+    assert_eq!(body, serde_json::json!({"action": "finalize"}));
+}
+
+#[test]
+fn run_action_reopen_body_has_reset_decision() {
+    let body = build_run_action_body(&SecurityReviewAction::Reopen, None, None, true).unwrap();
+    assert_eq!(body, serde_json::json!({"action": "reopen", "resetDecision": true}));
+}
+
+#[test]
+fn run_action_rejects_finalize_flags_on_reopen() {
+    let err = build_run_action_body(
+        &SecurityReviewAction::Reopen,
+        Some(&SecurityReviewDecision::Rejected),
+        None,
+        false,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("--action finalize"), "{err}");
+    assert!(build_run_action_body(&SecurityReviewAction::Reopen, None, Some("n"), false).is_err());
+}
+
+#[test]
+fn run_action_rejects_reset_decision_on_finalize() {
+    let err = build_run_action_body(&SecurityReviewAction::Finalize, None, None, true).unwrap_err();
+    assert!(err.to_string().contains("--action reopen"), "{err}");
+}
+
+#[test]
+fn list_path_encodes_created_and_updated_bounds() {
+    let path = build_list_path(
+        "v1",
+        &[],
+        &[],
+        &[],
+        Some("2026-01-01"),
+        Some("2026-02-01"),
+        Some("2026-03-01"),
+        Some("2026-04-01"),
+        &[],
+    );
+    assert_eq!(
+        path,
+        "/vendors/v1/security-reviews?createdAtFrom=2026-01-01&createdAtTo=2026-02-01\
+         &updatedAtFrom=2026-03-01&updatedAtTo=2026-04-01"
+    );
+}
+
+#[test]
+fn create_with_file_requires_document_type() {
+    use crate::cli::Cli;
+    use clap::Parser;
+    let base = [
+        "drata",
+        "vendor",
+        "security-review",
+        "create-with-file",
+        "1",
+        "--file",
+        "/dev/null",
+        "--title",
+        "t",
+        "--review-deadline-at",
+        "2026-12-31",
+        "--status",
+        "NOT_YET_STARTED",
+        "--type",
+        "SECURITY",
+    ];
+    let err = Cli::try_parse_from(base).unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    assert!(err.to_string().contains("--document-type"), "{err}");
+
+    let with_type = base.iter().copied().chain(["--document-type", "bridge_letter"]);
+    assert!(Cli::try_parse_from(with_type).is_ok(), "enum is case-insensitive");
 }
 
 // ---------------------------------------------------------------------------
@@ -298,7 +420,7 @@ fn create_with_file_uses_single_file_part_named_file() {
         "2026-12-31",
         &SecurityReviewStatus::InProgress,
         &SecurityReviewType::SocReport,
-        None,
+        &SecurityReviewDocumentType::ComplianceReport,
         None,
         None,
         None,
@@ -319,7 +441,7 @@ fn create_with_file_required_fields_use_translated_keys() {
         "2026-12-31",
         &SecurityReviewStatus::InProgress,
         &SecurityReviewType::SocReport,
-        None,
+        &SecurityReviewDocumentType::ComplianceReport,
         None,
         None,
         None,
@@ -335,19 +457,20 @@ fn create_with_file_required_fields_use_translated_keys() {
 }
 
 #[test]
-fn create_with_file_omits_unset_optionals() {
+fn create_with_file_always_sends_document_type_and_omits_unset_optionals() {
     let form = build_create_with_file_form(
         &PathBuf::from("/tmp/report.pdf"),
         "Annual review",
         "2026-12-31",
         &SecurityReviewStatus::NotYetStarted,
         &SecurityReviewType::Security,
-        None,
+        &SecurityReviewDocumentType::SocDocument,
         None,
         None,
         None,
     );
-    assert!(field(&form, "documentType").is_none());
+    // documentType is required by the spec, so it is always sent.
+    assert_eq!(field(&form, "documentType"), Some("SOC_DOCUMENT"));
     assert!(field(&form, "note").is_none());
     assert!(field(&form, "requestedAt").is_none());
     assert!(field(&form, "requesterUserId").is_none());
@@ -361,7 +484,7 @@ fn create_with_file_includes_set_optionals() {
         "2026-12-31",
         &SecurityReviewStatus::Completed,
         &SecurityReviewType::UploadReport,
-        Some("COMPLIANCE_REPORT"),
+        &SecurityReviewDocumentType::ComplianceReport,
         Some("a note"),
         Some("2026-06-28T00:00:00.000Z"),
         Some(42),
@@ -440,7 +563,7 @@ fn create_with_file_action_constructs() {
         review_deadline_at: "2026-12-31".to_string(),
         status: SecurityReviewStatus::NotYetStarted,
         review_type: SecurityReviewType::Security,
-        document_type: None,
+        document_type: SecurityReviewDocumentType::BridgeLetter,
         note: None,
         requested_at: None,
         requester_user_id: None,

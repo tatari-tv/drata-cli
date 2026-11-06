@@ -12,6 +12,7 @@ fn example_only_for_create_with_flag() {
         impact: None,
         likelihood: None,
         status: None,
+        vendor_id: None,
         example: true,
     };
     assert!(example_if_requested(&create_example).is_some());
@@ -24,6 +25,7 @@ fn example_only_for_create_with_flag() {
         impact: None,
         likelihood: None,
         status: None,
+        vendor_id: None,
         example: false,
     };
     assert!(example_if_requested(&create_no_example).is_none());

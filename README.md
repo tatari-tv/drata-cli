@@ -166,7 +166,7 @@ drata-cli policy version <policy_id> <version_id>
 drata-cli evidence list <workspace_id>
 drata-cli evidence get <workspace_id> <evidence_id>
 drata-cli evidence create <workspace_id> --example
-drata-cli evidence create <workspace_id> --name "SOC 2 Report" --renewal-schedule-type ONE_YEAR --file ./report.pdf
+drata-cli evidence create <workspace_id> --name "SOC 2 Report" --renewal-schedule-type ONE_YEAR --filed-at 2026-11-01 --owner-id 42 --file ./report.pdf
 drata-cli evidence update <workspace_id> <evidence_id> --renewal-schedule-type SIX_MONTHS
 drata-cli evidence remove <workspace_id> <evidence_id>
 drata-cli evidence get-version <workspace_id> <evidence_id> <version_id>
@@ -341,7 +341,7 @@ The following tags are intentionally left as raw-only (reachable via `drata raw`
 - **Risk Documents / Notes / Library** - sub-resource management, raw covers these
 - **Device Documents** - document sub-resources, raw covers get/list/delete
 - **Background Checks** - single POST endpoint
-- **Vendor Documents / Security Reviews / Types** - vendor sub-resources via raw
+- **Vendor Types** - vendor sub-resources via raw
 - **User Documents / Assigned Policies** - user sub-resources via raw
 - **Custom Connections** - connection management via raw
 - **Framework requirement create/update** - plus legacy requirement endpoints
@@ -372,4 +372,7 @@ otto build    # release binary
 ```
 
 CI requires a green `otto ci` before any commit. The `tests/coverage.rs` integration
-test asserts every operation is reachable and enforces a curated-coverage floor.
+test asserts every operation is reachable and enforces a curated-coverage floor,
+counted from the command table in `tests/commands/table.rs`: one row per curated
+operation, each dispatched against wiremock by `tests/commands.rs`. A new curated
+command needs a row, or `tests/commands.rs` fails.

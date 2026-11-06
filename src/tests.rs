@@ -30,7 +30,15 @@ fn is_auth_command_detects_onboarding() {
         action: VendorAction::List {
             patterns: vec![],
             all: false,
-            expand: vec![]
+            expand: vec![],
+            status: vec![],
+            category: vec![],
+            vendor_type: vec![],
+            vendor_type_id: vec![],
+            vendor_user_id: vec![],
+            sub_processor: None,
+            action_required: None,
+            review_deadline_status: vec![],
         }
     })));
 }
@@ -58,6 +66,14 @@ fn example_if_requested_none_for_list() {
             patterns: vec![],
             all: false,
             expand: vec![],
+            status: vec![],
+            category: vec![],
+            vendor_type: vec![],
+            vendor_type_id: vec![],
+            vendor_user_id: vec![],
+            sub_processor: None,
+            action_required: None,
+            review_deadline_status: vec![],
         },
     });
     assert!(example_if_requested(&cli).is_none());

@@ -8,6 +8,10 @@
 //!
 //! Phase 4 adds: `--all` NDJSON streaming, `--expand`, confirm-on-mutation,
 //! and `--file` multipart upload on create and update.
+//!
+//! Create takes one artifact source: `--file` (multipart) or `--file-key` (a
+//! pre-uploaded S3 key, JSON). Either source requires `--filed-at`,
+//! `--owner-id` and `--renewal-schedule-type`; clap enforces that pairing.
 
 use crate::cli::{EvidenceAction, RenewalScheduleType};
 use crate::client::{DrataClient, Multipart};
@@ -52,18 +56,27 @@ pub async fn handle(action: &EvidenceAction, client: &DrataClient, config: &Conf
             name,
             description,
             renewal_schedule_type,
+            filed_at,
+            owner_id,
             file,
+            file_key,
             example: _,
         } => {
+            let fields = CreateFields {
+                description: description.as_deref(),
+                renewal_schedule_type: renewal_schedule_type.as_ref(),
+                filed_at: filed_at.as_deref(),
+                owner_id: *owner_id,
+            };
             create(
                 client,
                 config,
                 confirm,
                 workspace_id.as_deref(),
                 name.as_deref(),
-                description.as_deref(),
-                renewal_schedule_type.as_ref(),
+                &fields,
                 file.as_deref(),
+                file_key.as_deref(),
             )
             .await
         }
@@ -138,6 +151,45 @@ async fn get(
     Ok(())
 }
 
+/// The optional scalar fields `evidence create` sends in either body shape.
+#[derive(Debug)]
+struct CreateFields<'a> {
+    description: Option<&'a str>,
+    renewal_schedule_type: Option<&'a RenewalScheduleType>,
+    filed_at: Option<&'a str>,
+    owner_id: Option<u64>,
+}
+
+/// Multipart body for create with a `--file` artifact. Pure.
+fn build_create_form(file: &std::path::Path, name: &str, fields: &CreateFields) -> Multipart {
+    let mut form = Multipart::single("file", file);
+    form.add_field("name", name)
+        .add_opt_field("description", fields.description)
+        .add_opt_field(
+            "renewalScheduleType",
+            fields.renewal_schedule_type.map(renewal_schedule_type_str),
+        )
+        .add_opt_field("filedAt", fields.filed_at)
+        .add_opt_field("ownerId", fields.owner_id.map(|id| id.to_string()));
+    form
+}
+
+/// JSON body for create without a file: optional `fileKey` artifact source plus
+/// the scalar fields. Pure.
+fn build_create_body(name: &str, fields: &CreateFields, file_key: Option<&str>) -> Value {
+    let mut body = json!({ "name": name });
+    set_opt(&mut body, "description", fields.description);
+    if let Some(rst) = fields.renewal_schedule_type {
+        body["renewalScheduleType"] = json!(renewal_schedule_type_str(rst));
+    }
+    set_opt(&mut body, "filedAt", fields.filed_at);
+    if let Some(id) = fields.owner_id {
+        body["ownerId"] = json!(id);
+    }
+    set_opt(&mut body, "fileKey", file_key);
+    body
+}
+
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip(client, config, confirm))]
 async fn create(
@@ -146,14 +198,19 @@ async fn create(
     confirm: &ConfirmFn,
     workspace_id: Option<&str>,
     name: Option<&str>,
-    description: Option<&str>,
-    renewal_schedule_type: Option<&RenewalScheduleType>,
+    fields: &CreateFields<'_>,
     file: Option<&std::path::Path>,
+    file_key: Option<&str>,
 ) -> Result<()> {
     // workspace_id is clap-required unless --example (which never reaches here).
     let workspace_id = workspace_id
         .ok_or_else(|| eyre::eyre!("`drata evidence create` requires <workspace_id> (or use --example)"))?;
-    debug!(workspace_id, has_file = file.is_some(), "evidence create");
+    debug!(
+        workspace_id,
+        has_file = file.is_some(),
+        has_file_key = file_key.is_some(),
+        "evidence create"
+    );
     // Spec requires `name` for both the JSON and multipart shapes.
     let name = name.ok_or_else(|| eyre::eyre!("`drata evidence create` requires --name (or use --example)"))?;
     let path = format!("/workspaces/{}/evidence-library", workspace_id);
@@ -161,22 +218,12 @@ async fn create(
         bail!("aborted");
     }
     if let Some(f) = file {
-        let mut form = Multipart::single("file", f);
-        form.add_field("name", name)
-            .add_opt_field("description", description)
-            .add_opt_field(
-                "renewalScheduleType",
-                renewal_schedule_type.map(renewal_schedule_type_str),
-            );
+        let form = build_create_form(f, name, fields);
         let result = client.post_multipart(&path, &form).await?;
         print_value(&result, &config.output_format);
         return Ok(());
     }
-    let mut body = json!({ "name": name });
-    set_opt(&mut body, "description", description);
-    if let Some(rst) = renewal_schedule_type {
-        body["renewalScheduleType"] = json!(renewal_schedule_type_str(rst));
-    }
+    let body = build_create_body(name, fields, file_key);
     let result = client.post(&path, body).await?;
     print_value(&result, &config.output_format);
     Ok(())

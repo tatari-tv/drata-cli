@@ -6,6 +6,8 @@ fn monitor_actions_are_constructible() {
     let list = MonitorAction::List {
         workspace_id: "ws1".to_string(),
         all: false,
+        draft: None,
+        name: None,
     };
     assert!(matches!(list, MonitorAction::List { .. }));
 
@@ -41,4 +43,13 @@ fn monitor_actions_are_constructible() {
         test_id: "t1".to_string(),
     };
     assert!(matches!(pass, MonitorAction::Passes { .. }));
+}
+
+#[test]
+fn monitor_list_path_encodes_draft_and_name() {
+    assert_eq!(
+        build_list_path("1", Some(false), Some("MFA check")),
+        "/workspaces/1/monitoring-tests?draft=false&name=MFA%20check"
+    );
+    assert_eq!(build_list_path("1", None, None), "/workspaces/1/monitoring-tests");
 }

@@ -11,13 +11,22 @@ use crate::client::DrataClient;
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::output::print_value;
+use crate::query::QueryPath;
 use eyre::{Result, bail};
 use serde_json::json;
 use tracing::{debug, instrument};
 
 pub async fn handle(action: &MonitorAction, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     match action {
-        MonitorAction::List { workspace_id, all } => list(client, config, workspace_id, *all).await,
+        MonitorAction::List {
+            workspace_id,
+            all,
+            draft,
+            name,
+        } => {
+            let path = build_list_path(workspace_id, *draft, name.as_deref());
+            list(client, config, &path, *all).await
+        }
         MonitorAction::Get { workspace_id, test_id } => get(client, config, workspace_id, test_id).await,
         MonitorAction::Update {
             workspace_id,
@@ -48,15 +57,22 @@ pub async fn handle(action: &MonitorAction, client: &DrataClient, config: &Confi
 // Verbs
 // ---------------------------------------------------------------------------
 
+/// Build the `GET .../monitoring-tests` path with the `draft` and `name`
+/// filters. Pure.
+fn build_list_path(workspace_id: &str, draft: Option<bool>, name: Option<&str>) -> String {
+    let mut q = QueryPath::new(format!("/workspaces/{}/monitoring-tests", workspace_id));
+    q.push_opt("draft", draft).push_opt("name", name);
+    q.finish()
+}
+
 #[instrument(skip(client, config))]
-async fn list(client: &DrataClient, config: &Config, workspace_id: &str, all: bool) -> Result<()> {
-    debug!(workspace_id, all, "monitor list");
-    let path = format!("/workspaces/{}/monitoring-tests", workspace_id);
+async fn list(client: &DrataClient, config: &Config, path: &str, all: bool) -> Result<()> {
+    debug!(path, all, "monitor list");
     if all {
         let mut stdout = std::io::stdout();
-        client.stream_all(&path, &mut stdout).await?;
+        client.stream_all(path, &mut stdout).await?;
     } else {
-        let items = client.get_all(&path).await?;
+        let items = client.get_all(path).await?;
         let result = json!({ "data": items });
         print_value(&result, &config.output_format);
     }

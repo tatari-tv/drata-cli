@@ -11,6 +11,7 @@
 use crate::cli::AuditAction;
 use crate::client::DrataClient;
 use crate::config::Config;
+use crate::expand::append_expand;
 use crate::output::print_value;
 use eyre::Result;
 use serde_json::json;
@@ -19,7 +20,11 @@ use tracing::{debug, instrument};
 pub async fn handle(action: &AuditAction, client: &DrataClient, config: &Config) -> Result<()> {
     match action {
         AuditAction::List { workspace_id, all } => list(client, config, workspace_id, *all).await,
-        AuditAction::Get { workspace_id, audit_id } => get(client, config, workspace_id, audit_id).await,
+        AuditAction::Get {
+            workspace_id,
+            audit_id,
+            expand,
+        } => get(client, config, workspace_id, audit_id, expand).await,
     }
 }
 
@@ -43,11 +48,16 @@ async fn list(client: &DrataClient, config: &Config, workspace_id: &str, all: bo
 }
 
 #[instrument(skip(client, config))]
-async fn get(client: &DrataClient, config: &Config, workspace_id: &str, audit_id: &str) -> Result<()> {
-    debug!(workspace_id, audit_id, "audit get");
-    let resp = client
-        .get(&format!("/workspaces/{}/audits/{}", workspace_id, audit_id))
-        .await?;
+async fn get(
+    client: &DrataClient,
+    config: &Config,
+    workspace_id: &str,
+    audit_id: &str,
+    expand: &[String],
+) -> Result<()> {
+    debug!(workspace_id, audit_id, expand_len = expand.len(), "audit get");
+    let path = append_expand(&format!("/workspaces/{}/audits/{}", workspace_id, audit_id), expand);
+    let resp = client.get(&path).await?;
     print_value(&resp, &config.output_format);
     Ok(())
 }

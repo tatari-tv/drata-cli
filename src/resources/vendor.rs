@@ -16,13 +16,16 @@
 //! `spec/drata-openapi-v2.json`): `renewalDate`, `recipientEmail`, etc. Bodies
 //! are built incrementally with `json!`.
 
-use crate::cli::{VendorAction, VendorQuestionnaireAction};
+use crate::cli::{
+    ReviewDeadlineStatus, VendorAction, VendorCategory, VendorQuestionnaireAction, VendorStatus, VendorType,
+};
 use crate::client::{DrataClient, Multipart};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
 use crate::filter;
 use crate::output::print_value;
+use crate::query::{QueryPath, wire_name};
 use eyre::{Result, bail};
 use serde_json::{Value, json};
 use std::io;
@@ -52,7 +55,32 @@ pub fn example_if_requested(action: &VendorAction) -> Option<&'static str> {
 
 pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     match action {
-        VendorAction::List { patterns, all, expand } => list(client, config, patterns, *all, expand).await,
+        VendorAction::List {
+            patterns,
+            all,
+            expand,
+            status,
+            category,
+            vendor_type,
+            vendor_type_id,
+            vendor_user_id,
+            sub_processor,
+            action_required,
+            review_deadline_status,
+        } => {
+            let path = build_list_path(
+                expand,
+                status,
+                category,
+                vendor_type,
+                vendor_type_id,
+                vendor_user_id,
+                *sub_processor,
+                *action_required,
+                review_deadline_status,
+            );
+            list(client, config, patterns, *all, &path).await
+        }
         VendorAction::Get { id, expand } => get(client, config, id, expand).await,
         VendorAction::Create {
             name,
@@ -84,6 +112,7 @@ pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config
             status,
             url,
             notes,
+            vendor_type_id,
         } => {
             update(
                 client,
@@ -96,6 +125,7 @@ pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config
                 status.as_deref(),
                 url.as_deref(),
                 notes.as_deref(),
+                *vendor_type_id,
             )
             .await
         }
@@ -126,14 +156,39 @@ pub async fn handle(action: &VendorAction, client: &DrataClient, config: &Config
 // CRUD
 // ---------------------------------------------------------------------------
 
+/// Build the `GET /vendors` path from the list filters: one bracketed key per
+/// value for the array filters, scalars for the two booleans, then `expand[]`.
+/// Pure, so the encoding is unit-tested.
+#[allow(clippy::too_many_arguments)]
+fn build_list_path(
+    expand: &[String],
+    status: &[VendorStatus],
+    category: &[VendorCategory],
+    vendor_type: &[VendorType],
+    vendor_type_id: &[u64],
+    vendor_user_id: &[u64],
+    sub_processor: Option<bool>,
+    action_required: Option<bool>,
+    review_deadline_status: &[ReviewDeadlineStatus],
+) -> String {
+    let mut q = QueryPath::new("/vendors");
+    q.push_each("statuses[]", status.iter().map(wire_name))
+        .push_each("categories[]", category.iter().map(wire_name))
+        .push_each("types[]", vendor_type.iter().map(wire_name))
+        .push_each("vendorTypeIds[]", vendor_type_id)
+        .push_each("vendorUserIds[]", vendor_user_id)
+        .push_opt("isSubProcessor", sub_processor)
+        .push_opt("actionRequired", action_required)
+        .push_each(
+            "nextReviewDeadlineStatus[]",
+            review_deadline_status.iter().map(wire_name),
+        );
+    append_expand(&q.finish(), expand)
+}
+
 #[instrument(skip(client, config))]
-async fn list(client: &DrataClient, config: &Config, patterns: &[String], all: bool, expand: &[String]) -> Result<()> {
-    debug!(
-        patterns_len = patterns.len(),
-        all,
-        expand_len = expand.len(),
-        "vendor list"
-    );
+async fn list(client: &DrataClient, config: &Config, patterns: &[String], all: bool, path: &str) -> Result<()> {
+    debug!(patterns_len = patterns.len(), all, path, "vendor list");
     // --all streams the full tenant export as NDJSON; name-pattern filtering is
     // buffered and does not apply to streaming mode. Reject the combination so
     // the caller cannot silently get a wrong result.
@@ -144,12 +199,11 @@ async fn list(client: &DrataClient, config: &Config, patterns: &[String], all: b
              omit --all to filter by name patterns."
         );
     }
-    let base = append_expand("/vendors", expand);
     if all {
         let mut stdout = io::stdout();
-        client.stream_all(&base, &mut stdout).await?;
+        client.stream_all(path, &mut stdout).await?;
     } else {
-        let raw = client.get_all(&base).await?;
+        let raw = client.get_all(path).await?;
         let filtered = filter::filter_into(raw, patterns, vendor_name);
         let result = json!({ "data": filtered });
         print_value(&result, &config.output_format);
@@ -209,8 +263,9 @@ async fn update(
     status: Option<&str>,
     url: Option<&str>,
     notes: Option<&str>,
+    vendor_type_id: Option<u64>,
 ) -> Result<()> {
-    debug!(id, "vendor update");
+    debug!(id, ?vendor_type_id, "vendor update");
     if !confirm("PUT", &format!("/vendors/{}", id))? {
         bail!("aborted");
     }
@@ -221,6 +276,9 @@ async fn update(
     set_opt(&mut body, "status", status);
     set_opt(&mut body, "url", url);
     set_opt(&mut body, "notes", notes);
+    if let Some(v) = vendor_type_id {
+        body["vendorTypeId"] = json!(v);
+    }
 
     let result = client.put(&format!("/vendors/{}", id), body).await?;
     print_value(&result, &config.output_format);

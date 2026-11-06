@@ -12,6 +12,7 @@ fn audit_actions_are_constructible() {
     let get = AuditAction::Get {
         workspace_id: "ws1".to_string(),
         audit_id: "a1".to_string(),
+        expand: vec![],
     };
     assert!(matches!(get, AuditAction::Get { .. }));
 }

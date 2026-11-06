@@ -9,6 +9,7 @@ pub mod confirm;
 pub mod expand;
 pub mod filter;
 pub mod output;
+pub mod query;
 pub mod raw;
 pub mod resources;
 pub mod spec;
@@ -79,58 +80,65 @@ pub fn run_auth(cli: &Cli, diag: &AuthDiagnostic) -> Result<()> {
 #[instrument(skip_all, fields(command = ?cli.command))]
 pub async fn run(cli: &Cli, config: &Config, confirm: ConfirmFn) -> Result<()> {
     let client = DrataClient::new(config.api_key.clone(), &config.region, config.allow_writes)?;
+    dispatch(cli, &client, config, &confirm).await
+}
 
+/// Route a parsed command to its handler over an already-built client. Split
+/// from `run` so the command table (`tests/commands.rs`) can dispatch every
+/// curated command against a wiremock base URL.
+#[instrument(skip_all, fields(command = ?cli.command))]
+pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     match &cli.command {
         Commands::Vendor { action } => {
-            resources::vendor::handle(action, &client, config, &confirm).await?;
+            resources::vendor::handle(action, client, config, confirm).await?;
         }
         Commands::Risk { action } => {
-            resources::risk::handle(action, &client, config, &confirm).await?;
+            resources::risk::handle(action, client, config, confirm).await?;
         }
         Commands::Control { action } => {
-            resources::control::handle(action, &client, config, &confirm).await?;
+            resources::control::handle(action, client, config, confirm).await?;
         }
         Commands::Device { action } => {
-            resources::device::handle(action, &client, config, &confirm).await?;
+            resources::device::handle(action, client, config, confirm).await?;
         }
         Commands::Personnel { action } => {
-            resources::personnel::handle(action, &client, config, &confirm).await?;
+            resources::personnel::handle(action, client, config, confirm).await?;
         }
         Commands::Policy { action } => {
-            resources::policy::handle(action, &client, config, &confirm).await?;
+            resources::policy::handle(action, client, config, confirm).await?;
         }
         Commands::Evidence { action } => {
-            resources::evidence::handle(action, &client, config, &confirm).await?;
+            resources::evidence::handle(action, client, config, confirm).await?;
         }
         Commands::Framework { action } => {
-            resources::framework::handle(action, &client, config, &confirm).await?;
+            resources::framework::handle(action, client, config, confirm).await?;
         }
         Commands::Asset { action } => {
-            resources::asset::handle(action, &client, config, &confirm).await?;
+            resources::asset::handle(action, client, config, confirm).await?;
         }
         Commands::Company { action } => {
-            resources::company::handle(action, &client, config).await?;
+            resources::company::handle(action, client, config).await?;
         }
         Commands::Workspace { action } => {
-            resources::workspace::handle(action, &client, config).await?;
+            resources::workspace::handle(action, client, config).await?;
         }
         Commands::Register { action } => {
-            resources::register::handle(action, &client, config, &confirm).await?;
+            resources::register::handle(action, client, config, confirm).await?;
         }
         Commands::User { action } => {
-            resources::user::handle(action, &client, config).await?;
+            resources::user::handle(action, client, config).await?;
         }
         Commands::Monitor { action } => {
-            resources::monitor::handle(action, &client, config, &confirm).await?;
+            resources::monitor::handle(action, client, config, confirm).await?;
         }
         Commands::Audit { action } => {
-            resources::audit::handle(action, &client, config).await?;
+            resources::audit::handle(action, client, config).await?;
         }
         Commands::Event { action } => {
-            resources::event::handle(action, &client, config).await?;
+            resources::event::handle(action, client, config).await?;
         }
         Commands::Raw(args) => {
-            raw::handle(args, &client, config, &confirm).await?;
+            raw::handle(args, client, config, confirm).await?;
         }
         Commands::Verify => {
             // Live create -> verify -> delete cycle against the real tenant.
@@ -139,7 +147,7 @@ pub async fn run(cli: &Cli, config: &Config, confirm: ConfirmFn) -> Result<()> {
             if !confirm("POST", "/vendors (create + delete a throwaway zzz-clitest- vendor)")? {
                 return Err(eyre::eyre!("aborted"));
             }
-            let result = verify::run(&client).await?;
+            let result = verify::run(client).await?;
             let json = serde_json::json!({
                 "vendorId": result.vendor_id,
                 "created": result.created,
