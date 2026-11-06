@@ -85,9 +85,13 @@ async fn app_users_set_body_carries_every_user_passed_and_nothing_else() {
             "set",
             "7",
             "--user",
-            "1a2b:jane.doe:jane@acme.com:Admin,ReadOnly",
+            "1a2b:jane.doe:jane@acme.com",
             "3c4d:bob:bob@acme.com",
-            "5e6f:eve:eve@acme.com:Viewer",
+            "5e6f:eve:eve@acme.com",
+            "--role",
+            "1a2b:Admin",
+            "1a2b:ReadOnly",
+            "5e6f:Viewer",
         ],
         ResponseTemplate::new(200).set_body_json(json!({"savedCount": 3})),
     )
@@ -236,7 +240,7 @@ async fn period_create_scopes_applications_and_warns_of_the_one_active_period() 
             "--ending-date",
             "2026-12-01T00:00:00Z",
             "--application",
-            "1:10,11",
+            "1:10:11",
             "2:12",
         ],
         object(),
@@ -367,4 +371,73 @@ async fn app_remove_prompt_names_the_period_side_effect() {
         "{}",
         seen[0].1
     );
+}
+
+#[tokio::test]
+async fn a_comma_is_never_a_list_separator() {
+    // A comma in a role is part of the one role, sent as a single string.
+    let req = sent(
+        &[
+            "access-review",
+            "app",
+            "users",
+            "set",
+            "7",
+            "--user",
+            "1a2b:jane:jane@acme.com",
+            "--role",
+            "1a2b:Admin,ReadOnly",
+        ],
+        object(),
+    )
+    .await;
+    assert_eq!(body(&req)["identities"][0]["roles"], json!(["Admin,ReadOnly"]));
+    // A comma between reviewer ids makes one non-numeric id: a clap usage error, no request.
+    let err = Cli::try_parse_from([
+        "drata",
+        "access-review",
+        "period",
+        "create",
+        "--starting-date",
+        "a",
+        "--ending-date",
+        "b",
+        "--application",
+        "1:10,11",
+    ])
+    .expect_err("comma-joined reviewers are rejected");
+    assert_eq!(err.exit_code(), 2);
+    let msg = err.to_string();
+    assert!(
+        msg.contains("`10,11` is not a numeric reviewer id") && msg.contains("REVIEWER_ID[:REVIEWER_ID...]"),
+        "{msg}"
+    );
+}
+
+#[tokio::test]
+async fn a_role_for_a_user_not_in_the_set_fails_before_any_request() {
+    let r = run(
+        &[
+            "access-review",
+            "app",
+            "users",
+            "set",
+            "7",
+            "--user",
+            "1a2b:jane:jane@acme.com",
+            "--role",
+            "9z:Admin",
+        ],
+        object(),
+        true,
+        default_confirm(true),
+    )
+    .await;
+    assert!(
+        r.result
+            .expect_err("unknown identity")
+            .to_string()
+            .contains("no --user gives")
+    );
+    assert!(r.requests.is_empty());
 }

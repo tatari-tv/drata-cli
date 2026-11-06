@@ -560,6 +560,24 @@ fn access_review_flags_take_spec_values_case_insensitively_and_numeric_ids() {
     assert!(!parses(&["access-review", "app", "users", "set", "1"]));
     assert!(!parses(&[
         "access-review",
+        "app",
+        "users",
+        "set",
+        "1",
+        "--role",
+        "a:Admin"
+    ]));
+    assert!(!parses(&[
+        "access-review",
+        "app",
+        "users",
+        "set",
+        "1",
+        "--user",
+        "a:b:c@d.e:Admin"
+    ]));
+    assert!(!parses(&[
+        "access-review",
         "period",
         "create",
         "--starting-date",

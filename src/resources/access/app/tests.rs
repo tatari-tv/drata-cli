@@ -1,9 +1,13 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
-use crate::cli::{AccessReviewAppAction, review_user};
+use crate::cli::{AccessReviewAppAction, review_user, role_grant};
 
 fn user(raw: &str) -> ReviewUser {
     review_user(raw).unwrap()
+}
+
+fn role(raw: &str) -> RoleGrant {
+    role_grant(raw).unwrap()
 }
 
 #[test]
@@ -49,12 +53,13 @@ fn empty_update_is_rejected() {
 #[test]
 fn users_body_carries_every_user_passed_and_nothing_else() {
     let users = [
-        user("1a2b:jane.doe:jane@acme.com:Admin,ReadOnly"),
+        user("1a2b:jane.doe:jane@acme.com"),
         user("3c4d:bob:bob@acme.com"),
-        user("5e6f:eve:eve@acme.com:Viewer"),
+        user("5e6f:eve:eve@acme.com"),
     ];
+    let roles = [role("1a2b:Admin"), role("5e6f:Viewer"), role("1a2b:ReadOnly")];
     assert_eq!(
-        build_users_body(&users).unwrap(),
+        build_users_body(&users, &roles).unwrap(),
         json!({"identities": [
             {"identityId": "1a2b", "username": "jane.doe", "email": "jane@acme.com", "roles": ["Admin", "ReadOnly"]},
             {"identityId": "3c4d", "username": "bob", "email": "bob@acme.com"},
@@ -66,13 +71,22 @@ fn users_body_carries_every_user_passed_and_nothing_else() {
 #[test]
 fn users_body_rejects_a_repeated_identity_id() {
     let users = [user("1a2b:jane:jane@acme.com"), user("1a2b:janet:janet@acme.com")];
-    let err = build_users_body(&users).unwrap_err();
+    let err = build_users_body(&users, &[]).unwrap_err();
     assert!(err.to_string().contains("`1a2b` is given twice"), "{err}");
 }
 
 #[test]
+fn users_body_rejects_a_role_for_an_unknown_user_or_given_twice() {
+    let users = [user("1a2b:jane:jane@acme.com")];
+    let err = build_users_body(&users, &[role("9z:Admin")]).unwrap_err();
+    assert!(err.to_string().contains("which no --user gives"), "{err}");
+    let err = build_users_body(&users, &[role("1a2b:Admin"), role("1a2b:Admin")]).unwrap_err();
+    assert!(err.to_string().contains("`1a2b:Admin` is given twice"), "{err}");
+}
+
+#[test]
 fn users_set_prompt_says_omitted_users_are_removed_and_counts_them() {
-    let body = build_users_body(&[user("a:b:c@d.e"), user("f:g:h@i.j")]).unwrap();
+    let body = build_users_body(&[user("a:b:c@d.e"), user("f:g:h@i.j")], &[]).unwrap();
     let prompt = users_set_prompt("/access-review-applications/7/users", &body);
     assert!(
         prompt.starts_with("/access-review-applications/7/users (") && prompt.contains("full user list with 2 users"),
@@ -110,6 +124,7 @@ fn example_only_for_body_verbs_with_the_flag() {
         action: AccessReviewAppUsersAction::Set {
             application_id: None,
             users: vec![],
+            roles: vec![],
             data: None,
             example: true,
         },
@@ -130,30 +145,49 @@ fn example_only_for_body_verbs_with_the_flag() {
 }
 
 #[test]
-fn user_flag_parses_three_parts_and_optional_roles() {
+fn user_flag_parses_exactly_three_parts() {
     assert_eq!(
-        user("1a2b:jane.doe:jane@acme.com:Admin, ReadOnly"),
+        user("1a2b: jane.doe :jane@acme.com"),
         ReviewUser {
             identity_id: "1a2b".to_string(),
             username: "jane.doe".to_string(),
             email: "jane@acme.com".to_string(),
-            roles: vec!["Admin".to_string(), "ReadOnly".to_string()],
         }
     );
-    assert!(user("a:b:c@d.e").roles.is_empty());
-    assert!(user("a:b:c@d.e:").roles.is_empty());
 }
 
 #[test]
-fn user_flag_rejects_a_missing_or_empty_part() {
+fn user_flag_rejects_a_missing_empty_or_fourth_part() {
     for raw in [
         "1a2b",
         "1a2b:jane",
         "1a2b::jane@acme.com",
         ":jane:jane@acme.com",
         "1a2b:jane: ",
+        "1a2b:jane:jane@acme.com:Admin",
     ] {
         let err = review_user(raw).unwrap_err();
         assert!(err.contains("IDENTITY_ID:USERNAME:EMAIL"), "{raw}: {err}");
+    }
+    assert!(
+        review_user("1a2b:jane:jane@acme.com:Admin")
+            .unwrap_err()
+            .contains("--role")
+    );
+}
+
+#[test]
+fn role_flag_takes_everything_after_the_first_colon_literally() {
+    assert_eq!(
+        role("1a2b:Admin,ReadOnly"),
+        RoleGrant {
+            identity_id: "1a2b".to_string(),
+            role: "Admin,ReadOnly".to_string(),
+        }
+    );
+    assert_eq!(role("1a2b:org:admin").role, "org:admin");
+    for raw in ["1a2b", "1a2b:", ":Admin"] {
+        let err = role_grant(raw).unwrap_err();
+        assert!(err.contains("IDENTITY_ID:ROLE"), "{raw}: {err}");
     }
 }

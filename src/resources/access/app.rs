@@ -3,7 +3,7 @@
 //! says users left out are removed.
 
 use super::{body_or_data, example, require};
-use crate::cli::{AccessReviewAppAction, AccessReviewAppUsersAction, ReviewUser};
+use crate::cli::{AccessReviewAppAction, AccessReviewAppUsersAction, ReviewUser, RoleGrant};
 use crate::client::DrataClient;
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
@@ -73,25 +73,50 @@ pub fn build_update_body(
 }
 
 /// The `users set` body: `identities`, one entry per `--user` and nothing
-/// else. `roles` is sent only when given (the spec: "Omit for an empty
-/// list"). Two users with one identity id are rejected: the spec makes the id
-/// unique within the application. Pure.
-pub fn build_users_body(users: &[ReviewUser]) -> Result<Value> {
+/// else, each with the `--role` values naming its identity id, in the order
+/// given. `roles` is sent only when a user has one (the spec: "Omit for an
+/// empty list"). Rejected before the confirm: two users with one identity id
+/// (the spec makes it unique within the application), a role for an identity
+/// id no `--user` names, and the same role given twice to one user. Pure.
+pub fn build_users_body(users: &[ReviewUser], roles: &[RoleGrant]) -> Result<Value> {
     let mut seen = HashSet::new();
-    let mut identities = Vec::with_capacity(users.len());
     for user in users {
         if !seen.insert(user.identity_id.as_str()) {
             bail!("identity id `{}` is given twice in --user", user.identity_id);
         }
-        let mut identity = Map::new();
-        identity.insert("identityId".to_string(), json!(user.identity_id));
-        identity.insert("username".to_string(), json!(user.username));
-        identity.insert("email".to_string(), json!(user.email));
-        if !user.roles.is_empty() {
-            identity.insert("roles".to_string(), json!(user.roles));
-        }
-        identities.push(Value::Object(identity));
     }
+    let mut granted = HashSet::new();
+    for grant in roles {
+        if !seen.contains(grant.identity_id.as_str()) {
+            bail!(
+                "--role `{}:{}` names identity id `{}`, which no --user gives",
+                grant.identity_id,
+                grant.role,
+                grant.identity_id
+            );
+        }
+        if !granted.insert((grant.identity_id.as_str(), grant.role.as_str())) {
+            bail!("--role `{}:{}` is given twice", grant.identity_id, grant.role);
+        }
+    }
+    let identities: Vec<Value> = users
+        .iter()
+        .map(|user| {
+            let mut identity = Map::new();
+            identity.insert("identityId".to_string(), json!(user.identity_id));
+            identity.insert("username".to_string(), json!(user.username));
+            identity.insert("email".to_string(), json!(user.email));
+            let user_roles: Vec<&str> = roles
+                .iter()
+                .filter(|g| g.identity_id == user.identity_id)
+                .map(|g| g.role.as_str())
+                .collect();
+            if !user_roles.is_empty() {
+                identity.insert("roles".to_string(), json!(user_roles));
+            }
+            Value::Object(identity)
+        })
+        .collect();
     Ok(json!({ "identities": identities }))
 }
 
@@ -215,11 +240,12 @@ async fn handle_users(
         AccessReviewAppUsersAction::Set {
             application_id,
             users,
+            roles,
             data,
             example: _,
         } => {
             let path = users_path(require(*application_id, "<application_id>", "app users set")?);
-            let body = body_or_data(data.as_deref(), || build_users_body(users))?;
+            let body = body_or_data(data.as_deref(), || build_users_body(users, roles))?;
             debug!(path, users = users.len(), "access-review app users set");
             if !confirm("PUT", &users_set_prompt(&path, &body))? {
                 bail!("aborted");

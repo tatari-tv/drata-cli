@@ -24,75 +24,90 @@ pub enum AccessReviewActionKind {
 }
 
 /// One reviewable user for `app users set`, parsed from
-/// `IDENTITY_ID:USERNAME:EMAIL[:ROLE,ROLE...]`.
+/// `IDENTITY_ID:USERNAME:EMAIL`. Roles come from `--role`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReviewUser {
     pub identity_id: String,
     pub username: String,
     pub email: String,
-    pub roles: Vec<String>,
+}
+
+/// One role for one `app users set` user, parsed from `IDENTITY_ID:ROLE`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoleGrant {
+    pub identity_id: String,
+    pub role: String,
 }
 
 /// One application scoped into a new review period, parsed from
-/// `APPLICATION_ID:REVIEWER_ID[,REVIEWER_ID...]`.
+/// `APPLICATION_ID:REVIEWER_ID[:REVIEWER_ID...]`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReviewedApplication {
     pub application_id: u64,
     pub reviewer_ids: Vec<u64>,
 }
 
-/// Parse `--user IDENTITY_ID:USERNAME:EMAIL[:ROLE,ROLE...]`. The first three
-/// parts are required and non-empty; roles are optional and comma-separated.
-/// A role containing a comma, or an id containing a colon, goes through `--data`.
+const USER_USAGE: &str = "expected IDENTITY_ID:USERNAME:EMAIL (roles go in --role IDENTITY_ID:ROLE)";
+
+/// Parse `--user IDENTITY_ID:USERNAME:EMAIL`: exactly three non-empty parts.
+/// A fourth part is rejected rather than folded into the email, so a role
+/// typed into `--user` fails loudly instead of corrupting the address.
 pub fn review_user(raw: &str) -> Result<ReviewUser, String> {
-    let mut parts = raw.splitn(4, ':');
-    let mut next = |what: &str| match parts.next() {
-        Some(p) if !p.trim().is_empty() => Ok(p.trim().to_string()),
-        _ => Err(format!(
-            "`{raw}` has no {what}; expected IDENTITY_ID:USERNAME:EMAIL[:ROLE,ROLE...]"
-        )),
+    let parts: Vec<&str> = raw.split(':').map(str::trim).collect();
+    let [identity_id, username, email] = parts.as_slice() else {
+        return Err(format!("`{raw}` has {} `:`-separated parts; {USER_USAGE}", parts.len()));
     };
-    let identity_id = next("identity id")?;
-    let username = next("username")?;
-    let email = next("email")?;
-    let roles = parts
-        .next()
-        .map(|r| {
-            r.split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default();
+    for (what, part) in [("identity id", identity_id), ("username", username), ("email", email)] {
+        if part.is_empty() {
+            return Err(format!("`{raw}` has no {what}; {USER_USAGE}"));
+        }
+    }
     Ok(ReviewUser {
-        identity_id,
-        username,
-        email,
-        roles,
+        identity_id: identity_id.to_string(),
+        username: username.to_string(),
+        email: email.to_string(),
     })
 }
 
-/// Parse `--application APPLICATION_ID:REVIEWER_ID[,REVIEWER_ID...]`. Every
-/// application in a period needs at least one reviewer (the spec requires
-/// `reviewersIds`), so a bare id is rejected.
-pub fn reviewed_application(raw: &str) -> Result<ReviewedApplication, String> {
-    let usage = "expected APPLICATION_ID:REVIEWER_ID[,REVIEWER_ID...]";
-    let (app, reviewers) = raw
+/// Parse `--role IDENTITY_ID:ROLE`. The spec's roles are free-form strings
+/// (no enum), so everything after the first `:` is the role, taken literally:
+/// a role may contain `:` or `,`, and neither is ever split.
+pub fn role_grant(raw: &str) -> Result<RoleGrant, String> {
+    let usage = "expected IDENTITY_ID:ROLE";
+    let (identity_id, role) = raw
         .split_once(':')
-        .ok_or_else(|| format!("`{raw}` names no reviewers; {usage}"))?;
+        .ok_or_else(|| format!("`{raw}` names no role; {usage}"))?;
+    if identity_id.trim().is_empty() || role.is_empty() {
+        return Err(format!("`{raw}` has an empty identity id or role; {usage}"));
+    }
+    Ok(RoleGrant {
+        identity_id: identity_id.trim().to_string(),
+        role: role.to_string(),
+    })
+}
+
+/// Parse `--application APPLICATION_ID:REVIEWER_ID[:REVIEWER_ID...]`. Every
+/// application in a period needs at least one reviewer (the spec requires
+/// `reviewersIds`), so a bare id is rejected. Ids are numeric, so a comma is
+/// never a separator: `10,11` fails as one non-numeric id.
+pub fn reviewed_application(raw: &str) -> Result<ReviewedApplication, String> {
+    let usage = "expected APPLICATION_ID:REVIEWER_ID[:REVIEWER_ID...]";
+    let mut parts = raw.split(':');
+    let app = parts.next().unwrap_or_default();
     let application_id = app
         .trim()
         .parse::<u64>()
         .map_err(|_| format!("`{app}` is not a numeric application id; {usage}"))?;
-    let reviewer_ids = reviewers
-        .split(',')
+    let reviewer_ids = parts
         .map(|r| {
             r.trim()
                 .parse::<u64>()
                 .map_err(|_| format!("`{r}` is not a numeric reviewer id; {usage}"))
         })
         .collect::<Result<Vec<u64>, String>>()?;
+    if reviewer_ids.is_empty() {
+        return Err(format!("`{raw}` names no reviewers; {usage}"));
+    }
     Ok(ReviewedApplication {
         application_id,
         reviewer_ids,
@@ -188,9 +203,12 @@ pub enum AccessReviewAppUsersAction {
         /// Application ID (required unless --example)
         #[arg(required_unless_present = "example")]
         application_id: Option<u64>,
-        /// Users as IDENTITY_ID:USERNAME:EMAIL[:ROLE,ROLE...] (space-separated); the complete set
+        /// Users as IDENTITY_ID:USERNAME:EMAIL (space-separated); the complete set
         #[arg(long = "user", value_name = "USER", num_args = 1.., value_parser = review_user, conflicts_with = "data", required_unless_present_any = ["data", "example"])]
         users: Vec<ReviewUser>,
+        /// Roles as IDENTITY_ID:ROLE, one per value (space-separated); the role is taken literally
+        #[arg(long = "role", value_name = "ROLE", num_args = 1.., value_parser = role_grant, conflicts_with = "data")]
+        roles: Vec<RoleGrant>,
         /// Full JSON body: inline, @file or - for stdin
         #[arg(long)]
         data: Option<String>,
@@ -249,7 +267,7 @@ pub enum AccessReviewPeriodAction {
         /// Ending date-time, e.g. 2026-12-01T00:00:00Z
         #[arg(long, conflicts_with = "data", required_unless_present_any = ["data", "example"])]
         ending_date: Option<String>,
-        /// Applications to review, as APPLICATION_ID:REVIEWER_ID[,REVIEWER_ID...] (space-separated)
+        /// Applications to review, as APPLICATION_ID:REVIEWER_ID[:REVIEWER_ID...] (space-separated)
         #[arg(long = "application", value_name = "APPLICATION", num_args = 1.., value_parser = reviewed_application, conflicts_with = "data", required_unless_present_any = ["data", "example"])]
         applications: Vec<ReviewedApplication>,
         /// Full JSON body: inline, @file or - for stdin

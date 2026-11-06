@@ -362,3 +362,28 @@ None.
 
 ### Open questions
 - None.
+
+## Phase 11 follow-up: no comma-separated values
+Supersedes the Phase 11 entries for `--user` and `--application`. The house CLI rule (`~/repos/.claude/refs/cli.md`) forbids comma-separated list values, and Phase 11 split roles and reviewer ids on commas.
+
+### Design decisions
+- `app users set` now takes `--user IDENTITY_ID:USERNAME:EMAIL` (exactly three `:`-separated parts) plus `--role IDENTITY_ID:ROLE`, one role per value, space-separated or repeated. `build_users_body(users, roles)` attaches each role to the user whose identity id it names, in the order given. Rejected before the confirm: a role naming an identity id that no `--user` gives, and the same role given twice to one user. A fourth part in `--user` is rejected with a pointer to `--role`, so the old `...:EMAIL:Admin` form fails loudly instead of landing in the email.
+- Why not shape (a), `IDENTITY_ID:USERNAME:EMAIL[:ROLE[:ROLE...]]`: the spec has no role enum. `AccessReviewUserIdentityRequestPublicV2Dto.roles` is `array<string>`, described as "Free-form strings, not a fixed enum", so a role can contain `:`. Under `--role`, everything after the first `:` is the role, taken literally: `--role 1a2b:org:admin` sends `org:admin`, and `--role 1a2b:Admin,ReadOnly` sends the one role `Admin,ReadOnly`. No value is ever split on a comma.
+- `period create --application APPLICATION_ID:REVIEWER_ID[:REVIEWER_ID...]`: reviewer ids are numeric, so `:` is safe as the repeat separator. A comma is never a separator: `1:10,11` fails clap parsing (exit 2) with "`10,11` is not a numeric reviewer id; expected APPLICATION_ID:REVIEWER_ID[:REVIEWER_ID...]".
+- Tests:
+  - `role_flag_takes_everything_after_the_first_colon_literally` and `application_flag_never_splits_on_a_comma` (unit)
+  - `a_comma_is_never_a_list_separator` (wire, plus clap exit 2)
+  - `a_role_for_a_user_not_in_the_set_fails_before_any_request`
+  - `users_body_rejects_a_role_for_an_unknown_user_or_given_twice`
+  - `user_flag_rejects_a_missing_empty_or_fourth_part`
+  - Each was reverted once: comma splitting reintroduced in both parsers, a fourth `--user` part accepted, both role checks removed, roles attached to the wrong user, and roles dropped. Each targeted test failed, then the files were restored and touched.
+- `--example` output is unchanged; it comes from the spec. The README has no `access-review` entry yet (Phase 13 updates it). The command-table rows already used comma-free values.
+
+### Deviations
+- None.
+
+### Tradeoffs
+- A separate `--role` flag keyed by identity id vs roles inside `--user` | roles are free-form and may hold `:`, so they cannot share `--user`'s separator. The cost is repeating the identity id once per role.
+
+### Open questions
+- None.

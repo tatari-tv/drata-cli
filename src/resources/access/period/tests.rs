@@ -37,7 +37,7 @@ fn list_path_carries_the_status_filter() {
 #[test]
 fn create_body_scopes_each_application_with_its_reviewers() {
     let apps = [
-        reviewed_application("1:10,11").unwrap(),
+        reviewed_application("1:10:11").unwrap(),
         reviewed_application("2:12").unwrap(),
     ];
     assert_eq!(
@@ -129,7 +129,7 @@ fn example_only_for_body_verbs_with_the_flag() {
 #[test]
 fn application_flag_parses_an_id_and_its_reviewers() {
     assert_eq!(
-        reviewed_application("7:1, 2,3").unwrap(),
+        reviewed_application("7:1: 2:3").unwrap(),
         ReviewedApplication {
             application_id: 7,
             reviewer_ids: vec![1, 2, 3],
@@ -139,8 +139,20 @@ fn application_flag_parses_an_id_and_its_reviewers() {
 
 #[test]
 fn application_flag_rejects_no_reviewers_and_non_numeric_ids() {
-    for raw in ["7", "7:", "x:1", "7:1,y", "7:1,"] {
+    for raw in ["7", "7:", "x:1", "7:1:y", "7:1:"] {
         let err = reviewed_application(raw).unwrap_err();
-        assert!(err.contains("APPLICATION_ID:REVIEWER_ID"), "{raw}: {err}");
+        assert!(
+            err.contains("APPLICATION_ID:REVIEWER_ID[:REVIEWER_ID...]"),
+            "{raw}: {err}"
+        );
     }
+}
+
+#[test]
+fn application_flag_never_splits_on_a_comma() {
+    let err = reviewed_application("7:10,11").unwrap_err();
+    assert!(
+        err.starts_with("`10,11` is not a numeric reviewer id") && err.contains("REVIEWER_ID[:REVIEWER_ID...]"),
+        "{err}"
+    );
 }
