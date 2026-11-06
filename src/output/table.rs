@@ -54,6 +54,22 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("statusCode") && obj.contains_key("outcome") {
         return Some(render_item_results);
     }
+    // Compliance-check exclusion rows carry `targetId` + `targetType`.
+    if obj.contains_key("targetId") && obj.contains_key("targetType") {
+        return Some(render_compliance_exclusions);
+    }
+    // Custom field definition rows carry `customFieldId`.
+    if obj.contains_key("customFieldId") {
+        return Some(render_custom_fields);
+    }
+    // Scoped personnel group rows carry `connectionProvider` + `name`.
+    if obj.contains_key("connectionProvider") && obj.contains_key("name") {
+        return Some(render_scoped_groups);
+    }
+    // Personnel group rows carry `externalId` + `name` (a vendor has neither).
+    if obj.contains_key("externalId") && obj.contains_key("name") {
+        return Some(render_groups);
+    }
     // Codebase exclusion rows carry `findingId` + `repositoryName`.
     if obj.contains_key("findingId") && obj.contains_key("repositoryName") {
         return Some(render_codebase_exclusions);
@@ -252,6 +268,66 @@ fn render_item_results(rows: &[Value], width: usize) -> String {
                     .unwrap_or_default()
             },
             |r| r.get("error").map(|e| str_field(e, "message")).unwrap_or_default(),
+        ],
+        width,
+    )
+}
+
+fn render_compliance_exclusions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "TARGET", "CHECKS", "REASON", "START", "END"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| scalar_field(r, "targetId"),
+            |r| joined_strings(r, "complianceCheckTypes"),
+            |r| str_field(r, "reason"),
+            |r| str_field(r, "startDate"),
+            |r| str_field(r, "endDate"),
+        ],
+        width,
+    )
+}
+
+fn render_custom_fields(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "TYPE", "REQUIRED", "HIDDEN", "ENTITIES"],
+        rows,
+        &[
+            |r| scalar_field(r, "customFieldId"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "type"),
+            |r| bool_field(r, "isRequired"),
+            |r| bool_field(r, "isHidden"),
+            |r| joined_strings(r, "entityTypes"),
+        ],
+        width,
+    )
+}
+
+fn render_scoped_groups(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "PROVIDER"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "connectionProvider"),
+        ],
+        width,
+    )
+}
+
+fn render_groups(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "EXTERNAL_ID", "CONNECTION", "UPDATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "externalId"),
+            |r| scalar_field(r, "connectionId"),
+            |r| str_field(r, "updatedAt"),
         ],
         width,
     )

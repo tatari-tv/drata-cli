@@ -420,3 +420,74 @@ fn recipe_validation_prints_whole_as_json() {
     );
     assert!(pick_renderer(&body).is_none(), "a renderer claimed {body}");
 }
+
+#[test]
+fn personnel_phase_seven_spec_rows_pick_their_own_renderer() {
+    let ws = "/workspaces/{workspaceId}";
+    let cases: [(Value, RowRenderer, &str); 5] = [
+        (
+            spec_response_row(&format!("{ws}/compliance-check-exclusions")),
+            render_compliance_exclusions,
+            "Employee is on extended leave",
+        ),
+        (
+            spec_response_row("/custom-field-definitions"),
+            render_custom_fields,
+            "Regulatory Owner",
+        ),
+        (spec_response_row("/groups"), render_groups, "Engineering Team"),
+        (
+            spec_response_row(&format!("{ws}/scoped-personnel-groups")),
+            render_scoped_groups,
+            "IT Ops",
+        ),
+        (
+            // `employmentStatus` is an enum with no example, so every key is present as null.
+            spec_response_object("get", "/personnel-search", "200", true),
+            render_personnel,
+            "2023-01-01",
+        ),
+    ];
+    for (row, want, cell) in cases {
+        let got = pick_renderer(&row).unwrap_or_else(|| panic!("no renderer for {row}"));
+        assert!(std::ptr::fn_addr_eq(got, want), "wrong renderer for {row}");
+        let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
+        assert!(out.contains(cell), "`{cell}` missing from\n{out}");
+    }
+}
+
+#[test]
+fn phase_seven_single_objects_print_whole_as_json() {
+    // Counts, resource attributes and the exclusion results carry no row shape
+    // a sniff may claim: each prints whole.
+    let ws = "/workspaces/{workspaceId}";
+    for (method, path, status) in [
+        ("get", format!("{ws}/scoped-personnel-counts"), "200"),
+        (
+            "get",
+            format!("{ws}/custom-connections/{{connectionId}}/resources/{{resourceId}}/attributes"),
+            "200",
+        ),
+        ("post", format!("{ws}/compliance-check-exclusions"), "201"),
+        ("post", format!("{ws}/compliance-check-exclusions/action-delete"), "200"),
+    ] {
+        let body = spec_response_object(method, &path, status, true);
+        assert!(pick_renderer(&body).is_none(), "{path}: a renderer claimed {body}");
+    }
+}
+
+#[test]
+fn custom_field_and_group_rows_show_their_columns() {
+    let fields = json!({"data": [{"customFieldId": 42, "name": "Owner", "type": "TEXT", "isRequired": true,
+        "isHidden": false, "entityTypes": ["RISK", "ASSET"]}]});
+    let out = render(&fields, DEFAULT_WIDTH).unwrap();
+    for cell in ["42", "Owner", "TEXT", "RISK,ASSET"] {
+        assert!(out.contains(cell), "`{cell}` missing from\n{out}");
+    }
+    let exclusions = json!({"data": [{"id": 7, "targetId": "9", "targetType": "PERSONNEL", "reason": "left",
+        "complianceCheckTypes": ["OFFBOARDING"], "startDate": "2026-07-01", "endDate": null}]});
+    let out = render(&exclusions, DEFAULT_WIDTH).unwrap();
+    for cell in ["7", "9", "OFFBOARDING", "left"] {
+        assert!(out.contains(cell), "`{cell}` missing from\n{out}");
+    }
+}

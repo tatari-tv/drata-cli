@@ -332,7 +332,7 @@ async fn run(call: Call, client: &DrataClient, config: &Config, confirm: &Confir
                 .map_err(|e| custom::retest_error(e, &test_id))?;
             print_value(&result, &config.output_format);
         }
-        Call::Bulk { path, body } => bulk::post(client, config, &path, body, bulk::status_code_failed).await?,
+        Call::Bulk { path, body } => bulk::post(client, config, &path, body, bulk::STATUS_CODE).await?,
     }
     debug!(method, path, "monitor complete");
     Ok(())

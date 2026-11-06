@@ -40,6 +40,8 @@ pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
         Commands::Asset { action } => resources::asset::example_if_requested(action),
         Commands::Register { action } => resources::register::example_if_requested(action),
         Commands::Monitor { action } => resources::monitor::example_if_requested(action),
+        Commands::ComplianceCheckExclusion { action } => resources::compliance::example_if_requested(action),
+        Commands::CustomField { action } => resources::custom::example_if_requested(action),
         Commands::Raw(args) => raw::example_if_requested(args),
         _ => None,
     }
@@ -120,6 +122,18 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
         }
         Commands::Personnel { action } => {
             resources::personnel::handle(action, client, config, confirm).await?;
+        }
+        Commands::Group { action } => {
+            resources::personnel::group::handle(action, client, config).await?;
+        }
+        Commands::ComplianceCheckExclusion { action } => {
+            resources::compliance::handle(action, client, config, confirm).await?;
+        }
+        Commands::CustomField { action } => {
+            resources::custom::handle_field(action, client, config, confirm).await?;
+        }
+        Commands::CustomConnection { action } => {
+            resources::custom::handle_connection(action, client, config).await?;
         }
         Commands::Policy { action } => {
             resources::policy::handle(action, client, config, confirm).await?;

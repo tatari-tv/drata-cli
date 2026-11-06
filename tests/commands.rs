@@ -1061,3 +1061,271 @@ async fn create_sends_name_description_and_recipe() {
         })
     );
 }
+
+/// Dispatch `argv` (after `drata`) against a mock answering every request with
+/// `response`, with the caller's confirm function and no `--yes`; returns the
+/// dispatch result and every request the server saw.
+async fn with_confirm(
+    argv: &[&str],
+    response: ResponseTemplate,
+    confirm: drata_cli::confirm::ConfirmFn,
+) -> (eyre::Result<()>, Vec<wiremock::Request>) {
+    let server = MockServer::start().await;
+    Mock::given(any()).respond_with(response).mount(&server).await;
+    let cli = Cli::try_parse_from(std::iter::once("drata").chain(argv.iter().copied())).expect("argv parses");
+    let config = test_config();
+    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+        .expect("client builds")
+        .with_base_url(server.uri());
+    let result = drata_cli::dispatch(&cli, &client, &config, &confirm).await;
+    (result, server.received_requests().await.unwrap_or_default())
+}
+
+/// `with_confirm` with `--yes`.
+async fn yes(argv: &[&str], response: ResponseTemplate) -> (eyre::Result<()>, Vec<wiremock::Request>) {
+    with_confirm(argv, response, default_confirm(true)).await
+}
+
+const EXCLUDE_ONE_FAILED: &str = r#"{"results": [
+    {"targetId": "1", "outcome": "EXCLUDED", "exclusionIds": [10]},
+    {"targetId": "2", "outcome": "FAILED_INVALID_TARGET", "exclusionIds": []}
+], "successCount": 1, "skippedCount": 1}"#;
+
+const EXCLUDE_ARGS: [&str; 11] = [
+    "compliance-check-exclusion",
+    "create",
+    "1",
+    "--target-id",
+    "1",
+    "2",
+    "--compliance-check",
+    "offboarding",
+    "--reason",
+    "left",
+    "--start-date",
+];
+
+#[tokio::test]
+async fn exclusion_action_with_one_failed_item_in_a_2xx_body_exits_1() {
+    let argv = [&EXCLUDE_ARGS[..], &["2026-07-01T00:00:00Z"]].concat();
+    let (result, requests) = yes(&argv, ResponseTemplate::new(201).set_body_string(EXCLUDE_ONE_FAILED)).await;
+    let msg = format!("{:#}", result.expect_err("one FAILED_* row exits 1"));
+    assert_eq!(msg, "1 of 2 items failed");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method.as_str(), "POST");
+    assert_eq!(requests[0].url.path(), "/workspaces/1/compliance-check-exclusions");
+    assert_eq!(
+        body(&requests[0]),
+        json!({"targetIds": ["1", "2"], "complianceCheckTypes": ["OFFBOARDING"],
+               "reason": "left", "startDate": "2026-07-01T00:00:00Z"})
+    );
+}
+
+#[tokio::test]
+async fn exclusion_remove_with_a_failed_item_exits_1_and_skips_do_not() {
+    let failed = r#"{"results": [{"targetId": "1", "outcome": "FAILED_NOT_DELETED", "exclusionIds": []}],
+        "successCount": 0, "skippedCount": 1}"#;
+    let argv = [
+        "compliance-check-exclusion",
+        "remove",
+        "1",
+        "--target-id",
+        "1",
+        "--compliance-check",
+        "offboarding",
+    ];
+    let (result, requests) = yes(&argv, ResponseTemplate::new(200).set_body_string(failed)).await;
+    assert_eq!(format!("{:#}", result.expect_err("exits 1")), "1 of 1 items failed");
+    assert_eq!(
+        requests[0].url.path(),
+        "/workspaces/1/compliance-check-exclusions/action-delete"
+    );
+    assert_eq!(
+        body(&requests[0]),
+        json!({"targetIds": ["1"], "complianceCheckTypes": ["OFFBOARDING"]})
+    );
+
+    let skipped = r#"{"results": [{"targetId": "1", "outcome": "SKIPPED_NO_EXCLUSION", "exclusionIds": []}],
+        "successCount": 0, "skippedCount": 1}"#;
+    let (result, _) = yes(&argv, ResponseTemplate::new(200).set_body_string(skipped)).await;
+    result.expect("a skipped target is not a failure");
+}
+
+#[tokio::test]
+async fn exclusion_response_without_results_is_an_error_not_a_pass() {
+    let argv = [&EXCLUDE_ARGS[..], &["2026-07-01T00:00:00Z"]].concat();
+    let (result, _) = yes(&argv, ResponseTemplate::new(201).set_body_json(json!({"data": []}))).await;
+    let msg = format!("{:#}", result.expect_err("no results is loud"));
+    assert!(msg.contains("expected per-item results under `results`"), "{msg}");
+}
+
+#[tokio::test]
+async fn personnel_group_add_sends_the_group_id() {
+    let (result, requests) = yes(&["personnel", "group", "add", "1", "42"], template(Response::Object)).await;
+    result.expect("dispatch succeeds");
+    assert_eq!(requests[0].method.as_str(), "POST");
+    assert_eq!(body(&requests[0]), json!({"groupId": 42}));
+}
+
+#[tokio::test]
+async fn personnel_group_replace_sends_the_full_set_and_the_prompt_says_unlisted_are_removed() {
+    use std::sync::{Arc, Mutex};
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&prompts);
+    let confirm: drata_cli::confirm::ConfirmFn = Box::new(move |method, path| {
+        seen.lock().expect("lock").push(format!("{method} {path}"));
+        Ok(true)
+    });
+    let (result, requests) = with_confirm(
+        &["personnel", "group", "replace", "1", "--group-id", "3", "4"],
+        template(Response::Empty),
+        confirm,
+    )
+    .await;
+    result.expect("dispatch succeeds");
+    assert_eq!(requests[0].method.as_str(), "PUT");
+    assert_eq!(body(&requests[0]), json!({"groupIds": [3, 4]}));
+    let prompts = prompts.lock().expect("lock");
+    assert_eq!(prompts.len(), 1);
+    assert!(
+        prompts[0].starts_with("PUT /workspaces/1/scoped-personnel-groups"),
+        "{prompts:?}"
+    );
+    assert!(prompts[0].contains("groups not listed are removed"), "{prompts:?}");
+}
+
+#[tokio::test]
+async fn personnel_group_replace_declined_sends_nothing() {
+    let (result, requests) = with_confirm(
+        &["personnel", "group", "replace", "1", "--group-id", "3"],
+        template(Response::Empty),
+        drata_cli::confirm::always_no(),
+    )
+    .await;
+    assert_eq!(format!("{:#}", result.expect_err("declined")), "aborted");
+    assert!(requests.is_empty());
+}
+
+#[tokio::test]
+async fn personnel_group_replace_clear_sends_an_empty_set_and_needs_the_flag() {
+    let (result, requests) = yes(
+        &["personnel", "group", "replace", "1", "--clear"],
+        template(Response::Empty),
+    )
+    .await;
+    result.expect("dispatch succeeds");
+    assert_eq!(body(&requests[0]), json!({"groupIds": []}));
+    // Neither --group-id nor --clear, or both: a usage error, never an accidental clear.
+    assert!(Cli::try_parse_from(["drata", "personnel", "group", "replace", "1"]).is_err());
+    assert!(
+        Cli::try_parse_from([
+            "drata",
+            "personnel",
+            "group",
+            "replace",
+            "1",
+            "--clear",
+            "--group-id",
+            "3"
+        ])
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn personnel_search_facet_requests_one_page_with_the_facet() {
+    let (result, requests) = yes(
+        &[
+            "personnel",
+            "search",
+            "--workspace-id",
+            "1",
+            "--facet",
+            "groupids",
+            "--q",
+            "Sm",
+        ],
+        ResponseTemplate::new(200).set_body_json(json!({
+            "data": [], "pagination": {"cursor": "next"}, "facets": {"groupIds": []}
+        })),
+    )
+    .await;
+    result.expect("dispatch succeeds");
+    assert_eq!(requests.len(), 1, "a facet search fetches one page even with a cursor");
+    assert_eq!(requests[0].url.path(), "/workspaces/1/personnel-search");
+    assert_eq!(requests[0].url.query(), Some("q=Sm&facets%5B%5D=groupIds"));
+}
+
+#[tokio::test]
+async fn custom_field_create_sends_options_and_always_hidden_and_required() {
+    let (result, requests) = yes(
+        &[
+            "custom-field",
+            "create",
+            "--name",
+            "Color",
+            "--field-type",
+            "options",
+            "--option",
+            "RED",
+            "BLUE",
+            "--required",
+        ],
+        template(Response::Object),
+    )
+    .await;
+    result.expect("dispatch succeeds");
+    assert_eq!(
+        body(&requests[0]),
+        json!({"name": "Color", "fieldType": "OPTIONS", "isHidden": false, "isRequired": true,
+               "options": [{"value": "RED", "position": 1, "isHidden": false},
+                           {"value": "BLUE", "position": 2, "isHidden": false}]})
+    );
+}
+
+#[tokio::test]
+async fn custom_field_get_by_name_and_resource_attribute_by_name_encode_one_segment() {
+    let (result, requests) = yes(
+        &["custom-field", "get", "name:Regulatory Owner"],
+        template(Response::Object),
+    )
+    .await;
+    result.expect("dispatch succeeds");
+    assert_eq!(
+        requests[0].url.path(),
+        "/custom-field-definitions/name:Regulatory%20Owner"
+    );
+    let (result, requests) = yes(
+        &[
+            "custom-connection",
+            "resource-attribute",
+            "1",
+            "name:HR System",
+            "name:Employees",
+        ],
+        template(Response::Object),
+    )
+    .await;
+    result.expect("dispatch succeeds");
+    assert_eq!(
+        requests[0].url.path(),
+        "/workspaces/1/custom-connections/name:HR%20System/resources/name:Employees/attributes"
+    );
+}
+
+#[test]
+fn phase_seven_examples_come_from_the_spec_without_auth() {
+    for argv in [
+        &["compliance-check-exclusion", "create", "--example"][..],
+        &["custom-field", "create", "--example"][..],
+    ] {
+        let cli = Cli::try_parse_from(std::iter::once("drata").chain(argv.iter().copied())).expect("argv parses");
+        let skeleton = drata_cli::example_if_requested(&cli)
+            .unwrap_or_else(|| panic!("{argv:?}: no example"))
+            .expect("skeleton builds");
+        serde_json::from_str::<serde_json::Value>(&skeleton).expect("skeleton is JSON");
+    }
+    let cli = Cli::try_parse_from(["drata", "custom-field", "create", "--example"]).expect("parses");
+    let skeleton = drata_cli::example_if_requested(&cli).expect("some").expect("ok");
+    assert!(skeleton.contains("fieldType"), "{skeleton}");
+}

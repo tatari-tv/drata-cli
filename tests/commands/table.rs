@@ -33,6 +33,13 @@ pub enum Response {
 /// One excluded item: the per-item results body the exclusion ops answer.
 pub const ITEM_RESULTS: &str = r#"{"data": [{"statusCode": 201, "outcome": "EXCLUDED", "data": {"id": "sg-1", "connectionId": 1, "exclusionIds": [10]}}]}"#;
 
+/// One personnel excluded: the per-target results body the compliance-check
+/// exclusion create op answers.
+pub const EXCLUDE_RESULTS: &str = r#"{"results": [{"targetId": "1", "outcome": "EXCLUDED", "exclusionIds": [10]}], "successCount": 1, "skippedCount": 0}"#;
+
+/// One personnel's exclusions deleted: the body the delete op answers.
+pub const DELETE_RESULTS: &str = r#"{"results": [{"targetId": "1", "outcome": "DELETED", "exclusionIds": [10]}], "successCount": 1, "skippedCount": 0}"#;
+
 /// A valid recipe: the validation body `validate-recipe` exits 0 on.
 pub const RECIPE_VALID: &str = r#"{"isValid": true, "errors": []}"#;
 
@@ -341,6 +348,105 @@ pub const ROWS: &[Row] = &[
         "PUT",
         "/personnel/{personnelId}",
         &["personnel", "update", "1", "--started-at", "2026-01-01"],
+        Object,
+    ),
+    row("GET", "/personnel-search", &["personnel", "search"], Page),
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/personnel-search",
+        &["personnel", "search", "--workspace-id", "1"],
+        Page,
+    ),
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/scoped-personnel-counts",
+        &["personnel", "group", "counts", "1"],
+        Object,
+    ),
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/scoped-personnel-groups",
+        &["personnel", "group", "list", "1"],
+        Page,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/scoped-personnel-groups",
+        &["personnel", "group", "add", "1", "42"],
+        Object,
+    ),
+    row(
+        "PUT",
+        "/workspaces/{workspaceId}/scoped-personnel-groups",
+        &["personnel", "group", "replace", "1", "--group-id", "1", "2"],
+        Empty,
+    ),
+    row(
+        "DELETE",
+        "/workspaces/{workspaceId}/scoped-personnel-groups/{groupId}",
+        &["personnel", "group", "remove", "1", "42"],
+        Empty,
+    ),
+    // groups
+    row("GET", "/groups", &["group", "list"], Page),
+    // compliance-check exclusions
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/compliance-check-exclusions",
+        &["compliance-check-exclusion", "list", "1"],
+        Page,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/compliance-check-exclusions",
+        &[
+            "compliance-check-exclusion",
+            "create",
+            "1",
+            "--target-id",
+            "1",
+            "--compliance-check",
+            "offboarding",
+            "--reason",
+            "left",
+            "--start-date",
+            "2026-07-01T00:00:00Z",
+        ],
+        Json(201, EXCLUDE_RESULTS),
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/compliance-check-exclusions/action-delete",
+        &[
+            "compliance-check-exclusion",
+            "remove",
+            "1",
+            "--target-id",
+            "1",
+            "--compliance-check",
+            "offboarding",
+        ],
+        Json(200, DELETE_RESULTS),
+    ),
+    // custom fields
+    row("GET", "/custom-field-definitions", &["custom-field", "list"], Page),
+    row(
+        "GET",
+        "/custom-field-definitions/{customFieldId}",
+        &["custom-field", "get", "1"],
+        Object,
+    ),
+    row(
+        "POST",
+        "/custom-field-definitions",
+        &["custom-field", "create", "--name", "n", "--field-type", "text"],
+        Object,
+    ),
+    // custom connections
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/custom-connections/{connectionId}/resources/{resourceId}/attributes",
+        &["custom-connection", "resource-attribute", "1", "2", "3"],
         Object,
     ),
     // policies

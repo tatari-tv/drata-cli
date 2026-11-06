@@ -202,3 +202,109 @@ fn codebase_exclusion_expand_takes_spec_values_only() {
     assert!(parses(&[&list[..], &["EXCLUSIONDESIGNATOR"]].concat()));
     assert!(!parses(&[&list[..], &["connection"]].concat()));
 }
+
+#[test]
+fn personnel_search_enums_match_the_spec() {
+    for p in ["/personnel-search", "/workspaces/{workspaceId}/personnel-search"] {
+        same::<EmploymentStatus>(p, "employmentStatus[]");
+        same::<PersonnelSyncStatus>(p, "syncStatus");
+        same::<PersonnelSearchExpand>(p, "expand[]");
+        same::<PersonnelSearchFacet>(p, "facets[]");
+        for name in [
+            "complianceStatus[]",
+            "acceptedPoliciesStatus[]",
+            "bgCheckStatus[]",
+            "identityMfaStatus[]",
+            "securityTrainingStatus[]",
+            "hipaaTrainingStatus[]",
+            "aiAwarenessTrainingStatus[]",
+            "offboardingStatus[]",
+            "agentInstalledStatus[]",
+            "passwordManagerStatus[]",
+            "diskEncryptionStatus[]",
+            "antivirusStatus[]",
+            "autoUpdatesStatus[]",
+            "lockScreenStatus[]",
+        ] {
+            same::<ComplianceCheckStatus>(p, name);
+        }
+    }
+}
+
+#[test]
+fn compliance_check_and_custom_field_enums_match_the_spec() {
+    let p = "/workspaces/{workspaceId}/compliance-check-exclusions";
+    same::<ComplianceCheckType>(p, "complianceCheck");
+    same::<ComplianceCheckExclusionExpand>(p, "expand[]");
+    same::<CustomFieldEntityType>("/custom-field-definitions", "entityType");
+    assert_eq!(
+        flag_values::<ComplianceCheckType>(),
+        body_array_values(p, "complianceCheckTypes"),
+        "create --compliance-check"
+    );
+    assert_eq!(
+        flag_values::<ComplianceCheckType>(),
+        body_array_values(&format!("{p}/action-delete"), "complianceCheckTypes"),
+        "remove --compliance-check"
+    );
+    assert_eq!(
+        flag_values::<CustomFieldType>(),
+        body_values("/custom-field-definitions", "application/json", "fieldType"),
+        "custom-field create --field-type"
+    );
+}
+
+/// The spec's enum values for the array body field `field` of `POST path`.
+fn body_array_values(path: &str, field: &str) -> BTreeSet<String> {
+    let spec = spec();
+    let schema = resolve(
+        &spec,
+        &spec["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"],
+    );
+    let items = resolve(&spec, &schema["properties"][field]["items"]);
+    items["enum"]
+        .as_array()
+        .unwrap_or_else(|| panic!("POST {path} {field} items have no enum"))
+        .iter()
+        .map(|v| v.as_str().expect("string enum").to_string())
+        .collect()
+}
+
+#[test]
+fn personnel_and_exclusion_enum_flags_take_spec_values_only() {
+    assert!(parses(&["personnel", "search", "--bg-check-status", "not_assessed"]));
+    assert!(!parses(&["personnel", "search", "--bg-check-status", "UNKNOWN"]));
+    assert!(parses(&[
+        "personnel",
+        "search",
+        "--employment-status",
+        "service_account"
+    ]));
+    assert!(!parses(&["personnel", "search", "--sync-status", "PARTIAL"]));
+    let create = [
+        "compliance-check-exclusion",
+        "remove",
+        "1",
+        "--target-id",
+        "1",
+        "--compliance-check",
+    ];
+    assert!(parses(&[&create[..], &["hdd_encryption"]].concat()));
+    assert!(!parses(&[&create[..], &["DISK_ENCRYPTION"]].concat()));
+    assert!(parses(&[
+        "custom-field",
+        "create",
+        "--name",
+        "n",
+        "--field-type",
+        "options_numeric"
+    ]));
+    assert!(!parses(&[
+        "custom-field",
+        "create",
+        "--name",
+        "n",
+        "--field-type",
+        "FORMULA"
+    ]));
+}

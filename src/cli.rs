@@ -7,12 +7,18 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+mod custom;
+mod exclusion;
 mod monitor;
+mod personnel;
 mod risk;
 mod ticket;
 mod upload;
 mod vendor;
+pub use custom::*;
+pub use exclusion::*;
 pub use monitor::*;
+pub use personnel::*;
 pub use risk::*;
 pub use ticket::*;
 pub use upload::*;
@@ -162,10 +168,30 @@ pub enum Commands {
         #[command(subcommand)]
         action: DeviceAction,
     },
-    /// Manage personnel records
+    /// Manage personnel records, search them, and scope workspaces by personnel group
     Personnel {
         #[command(subcommand)]
         action: PersonnelAction,
+    },
+    /// List personnel groups (teams and departments)
+    Group {
+        #[command(subcommand)]
+        action: GroupAction,
+    },
+    /// List, create and remove personnel compliance-check exclusions
+    ComplianceCheckExclusion {
+        #[command(subcommand)]
+        action: ComplianceCheckExclusionAction,
+    },
+    /// List, get and create custom field definitions
+    CustomField {
+        #[command(subcommand)]
+        action: CustomFieldAction,
+    },
+    /// Inspect Custom Connections
+    CustomConnection {
+        #[command(subcommand)]
+        action: CustomConnectionAction,
     },
     /// Manage policies
     Policy {
@@ -562,63 +588,6 @@ pub enum DeviceAction {
         /// Document type (required by the spec)
         #[arg(long = "type", value_enum, ignore_case = true)]
         doc_type: DeviceDocumentType,
-    },
-}
-
-// ---------------------------------------------------------------------------
-// Personnel
-// ---------------------------------------------------------------------------
-
-#[derive(ValueEnum, Clone, Debug)]
-#[clap(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum EmploymentStatus {
-    CurrentEmployee,
-    FormerEmployee,
-    CurrentContractor,
-    FormerContractor,
-    OutOfScope,
-    Unknown,
-    SpecialFormerEmployee,
-    SpecialFormerContractor,
-    FutureHire,
-    ServiceAccount,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum PersonnelAction {
-    /// List all personnel
-    List {
-        /// Stream all pages as NDJSON instead of buffering
-        #[arg(long)]
-        all: bool,
-        /// Sub-collections to expand (space-separated, repeatable)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
-    },
-    /// Get a personnel record by ID
-    Get {
-        /// Personnel ID
-        personnel_id: String,
-        /// Sub-collections to expand (space-separated, repeatable)
-        #[arg(long, num_args = 1..)]
-        expand: Vec<String>,
-    },
-    /// Update a personnel record
-    Update {
-        /// Personnel ID
-        personnel_id: String,
-        /// Employment status
-        #[arg(long, value_enum, ignore_case = true)]
-        employment_status: Option<EmploymentStatus>,
-        /// Start date (ISO 8601)
-        #[arg(long)]
-        started_at: Option<String>,
-        /// Separation date (ISO 8601)
-        #[arg(long)]
-        separated_at: Option<String>,
-        /// Reason if not a human (e.g. SERVICE_ACCOUNT)
-        #[arg(long)]
-        not_human_reason: Option<String>,
     },
 }
 

@@ -5,7 +5,14 @@
 //! `employmentStatus`, `startedAt`, `separatedAt`, `notHumanReason`.
 //! Enum field promoted to `clap::ValueEnum`: `employmentStatus`.
 //!
+//! `search` reads `/personnel-search` or `/workspaces/{workspaceId}/personnel-search`
+//! (`search.rs`); `group` is the workspace personnel scope (`scope.rs`, beta).
+//!
 //! Phase 4 adds: `--all` NDJSON streaming, `--expand`, confirm-on-mutation.
+
+pub mod group;
+pub mod scope;
+pub mod search;
 
 use crate::cli::{EmploymentStatus, PersonnelAction};
 use crate::client::DrataClient;
@@ -27,6 +34,11 @@ pub async fn handle(
     match action {
         PersonnelAction::List { all, expand } => list(client, config, *all, expand).await,
         PersonnelAction::Get { personnel_id, expand } => get(client, config, personnel_id, expand).await,
+        PersonnelAction::Search(args) => {
+            let (query, facets) = search::build_search(args)?;
+            crate::resources::search::run(client, config, query, &facets).await
+        }
+        PersonnelAction::Group { action } => scope::handle(action, client, config, confirm).await,
         PersonnelAction::Update {
             personnel_id,
             employment_status,
