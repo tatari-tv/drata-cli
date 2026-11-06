@@ -344,7 +344,7 @@ Observed on branch `refresh-drata-spec-and-safebase-docs` (main + the spec refre
 - Coverage tripwire per spec
 
 ### Rollout Plan
-- Prerequisite: land the open spec-refresh branch (`refresh-drata-spec-and-safebase-docs`) first
+- Prerequisite: land the open spec-refresh branch (`refresh-drata-spec-and-safebase-docs`) first, then `docs/plan/2026-11-05-drata-v2-endpoint-coverage.md`, whose Phase 2 adds `src/client/presigned.rs` (`put_presigned(method, url, headers, bytes)`); this plan's Phase 6 upload step 2 reuses it
 - One commit per phase on a feature branch, `otto ci` green each
 - `bump release` on the PR; install; shakedown against Tatari's SafeBase with `zzz-clitest-` objects
 - Rollback: install the prior release; if `credentials.json` was rewritten, restore `credentials.json.pre-safebase`
