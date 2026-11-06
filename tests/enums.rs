@@ -427,3 +427,87 @@ fn policy_version_language_is_the_spec_enum_and_the_version_command_keeps_its_ge
     ]));
     assert!(!parses(&["policy-language", "list", "1", "2", "--status", "bogus"]));
 }
+
+#[test]
+fn evidence_item_enums_match_the_spec() {
+    let items = "/workspaces/{workspaceId}/evidence";
+    let item = "/workspaces/{workspaceId}/evidence/{evidenceId}";
+    same::<EvidenceItemExpand>(items, "expand[]");
+    same::<EvidenceItemExpand>(item, "expand[]");
+    same::<ComputedEvidenceStatus>(items, "evidenceStatuses[]");
+    same::<ArtifactType>(items, "artifactTypes[]");
+    same::<ArtifactType>(&format!("{item}/artifacts"), "artifactTypes[]");
+    assert_eq!(
+        flag_values::<ArtifactActionKind>(),
+        body_values(
+            &format!("{item}/artifacts/{{artifactId}}/actions"),
+            "application/json",
+            "action"
+        ),
+        "artifact run-action --action"
+    );
+    assert_eq!(
+        flag_values::<RenewalScheduleType>(),
+        body_values(items, "application/json", "renewalScheduleType"),
+        "evidence-item create --renewal-schedule-type"
+    );
+}
+
+#[test]
+fn evidence_item_enum_flags_take_spec_values_case_insensitively() {
+    assert!(parses(&[
+        "evidence-item",
+        "list",
+        "1",
+        "--status",
+        "needs_artifact",
+        "--artifact-type",
+        "s3_file",
+        "--expand",
+        "OWNERS"
+    ]));
+    assert!(!parses(&["evidence-item", "list", "1", "--status", "ERROR"]));
+    assert!(parses(&[
+        "evidence-item",
+        "artifact",
+        "run-action",
+        "1",
+        "2",
+        "3",
+        "--action",
+        "RESTORE"
+    ]));
+    assert!(!parses(&[
+        "evidence-item",
+        "artifact",
+        "run-action",
+        "1",
+        "2",
+        "3",
+        "--action",
+        "delete"
+    ]));
+}
+
+#[test]
+fn evidence_item_artifact_flags_need_filed_at_and_ids_are_numeric() {
+    assert!(!parses(&[
+        "evidence-item",
+        "create",
+        "1",
+        "--name",
+        "x",
+        "--url",
+        "https://example.com"
+    ]));
+    assert!(!parses(&["evidence-item", "get", "1", "abc"]));
+    assert!(!parses(&[
+        "evidence-item",
+        "create",
+        "1",
+        "--name",
+        "x",
+        "--data",
+        "{}"
+    ]));
+}

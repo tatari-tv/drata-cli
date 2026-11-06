@@ -303,3 +303,33 @@ None.
 
 ### Open questions
 None.
+
+## Phase 10: Evidence items
+### Design decisions
+- Verb map (10 ops, 10 rows added to the command table, floor 176 -> 186), all under the new noun `drata evidence-item`: `list <ws>`, `get <ws> <id>`, `create <ws>`, `update <ws> <id>`, `remove <ws> <id>`, `upload <ws> --file` (POST `evidence-files`), `artifact list <ws> <id>`, `artifact update <ws> <id> <artifact>`, `artifact remove <ws> <id> <artifact>`, `artifact run-action <ws> <id> <artifact> --action archive|restore` (POST `.../actions`). `drata evidence` is untouched and still the Evidence Library.
+- Clap types in `src/cli/evidence.rs` (re-exported), resource in `src/resources/evidence/item.rs` (`evidence::item`, beside the library's `evidence.rs`) | the module path says which evidence resource; the library's clap types stay in `src/cli.rs` (no rename, Non-Goals).
+- Evidence and artifact ids are `u64` positionals, the workspace id a `String` through `encode_path_segment` | the spec types both ids as numbers, so a non-numeric id is a clap exit 2, not a request (same as Phase 4).
+- Artifacts as flags: `--url <url>...`, `--file-key <key>...`, `--ticket-url <url>...`, all filed on one `--filed-at` (clap `requires`; a stray `--filed-at` with no artifact is rejected in `build_new_artifacts`). `create` sends them as `artifacts` with a `type` key; `update` sends `newArtifacts` with an `artifactType` key; the spec names the field differently in the two DTOs, and `build_new_artifacts(args, type_key)` takes the key. `--file-key` reuses the Phase 1 `evidence create --file-key` name.
+- `create` always sends `artifacts` (empty when no artifact flag): the spec marks it required. `update` is a partial update: only flagged fields go out; `--archive-artifact` -> `pastArtifacts`, `--restore-artifact` -> `currentArtifacts`. Rejected before confirm: nothing to change, an id in both lists, and a `--renewal-schedule-type` other than `NONE` without `--renewal-date` (the update DTO: "required if renewalScheduleType is not NONE"). `replaceArtifacts` and `base64File` go through `--data`.
+- `artifact update`: `--name` / `--filed-at` set, `--clear-name` / `--clear-filed-at` send `null` (the spec's documented clear), conflicting pairwise; an empty update is an error before confirm.
+- `upload` checks `--file` is a readable file before confirm, sends one multipart `file` part, and prints only the response's `fileKey` (a body without one is an error) | the same contract as `upload-url create --file` printing `objectKey`: the output feeds `--file-key` directly. The other response fields are logged at debug.
+- Partial artifact failure: `create` and `update` print the response, then fail the command when `artifactsCreated < artifactsRequested` (`check_artifacts_created`): the spec says the item is still saved when some artifact uploads fail, and the Overview's per-item rule is exit 1 on any failed row.
+- Confirm prompts: `remove` reads `DELETE /workspaces/1/evidence/2 (permanently deletes the evidence item and all of its artifacts)`; `artifact remove` names the version history and points at `run-action --action archive` as the reversible alternative. The sentence rides in the path argument, as Phase 7's `personnel group replace` does. Every mutating verb goes through confirm and the client's write guard (`mutations_are_blocked_without_a_write_credential`).
+- Value enums: `EvidenceItemExpand`, `ComputedEvidenceStatus`, `ArtifactType` (one enum for the item list's `ArtifactTypeEnum` and the artifact list's `ArtifactType`; same values, asserted for both), `ArtifactActionKind` (not ending in `Action`, per the Overview); `RenewalScheduleType` is reused and asserted equal to the create body's `RenewalScheduleTypeEnum`. All in `tests/enums.rs`.
+- `--example` on `create`, `update`, `artifact update`, `artifact run-action` from `spec::example_for_operation`.
+- Renderers (`src/output/table.rs`), above the Evidence Library sniff: `render_evidence_item_mutations` (`artifactsRequested` + `artifactsCreated`, the create/update response), `render_evidence_items` (`evidenceTemplateCode` + `renewalScheduleType`; a library row carries `renewalSchema` instead), `render_evidence_artifacts` (`artifactVersion` + `artifactType`). `evidence_item_rows_pick_the_item_table_and_library_rows_keep_the_library_table` feeds the spec examples of the item list, item get, create response, artifact list, and the library list and get through `pick_renderer`.
+- Wiremock tests in a new `tests/evidence.rs` (`tests/commands.rs` is near the 1500-line limit). Each builder, path, prompt, partial-artifact and renderer change was reverted once and its test failed, then restored.
+
+### Deviations
+- The doc names no verb for the `evidence-files` op; it is `evidence-item upload`, at the item noun rather than under `artifact`, because the op is workspace-scoped and takes no evidence id.
+- The partial-artifact exit rule is not in the Phase 10 bullet; it applies the Overview's per-item rule to the `artifactsCreated` / `artifactsRequested` counts the spec returns.
+
+### Tradeoffs
+- One `--filed-at` for every new artifact and no per-artifact `artifactName` vs a multi-token flag per artifact | the common case is one artifact; mixed dates or names go through `--data` with the `--example` skeleton.
+- `check_artifacts_created` passes a body without both counts vs failing it | the spec marks both required, but failing a saved create on a missing count would report a write as failed; the response is printed whole either way.
+- `create` sends an empty `artifacts` array when no artifact flag is given vs requiring one client-side | the schema has no `minItems` and `NEEDS_ARTIFACT` is a real item status; the server judges.
+- `upload` prints only `fileKey` vs the whole response | matches `upload-url create --file`; `originalFilename`, `mimeType` and `fileSize` echo the input.
+- No `--sort`, `--sort-dir`, `--size` on either list | same as Phases 3 to 9; reachable through `drata raw`.
+
+### Open questions
+- None.

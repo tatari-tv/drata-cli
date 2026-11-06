@@ -532,3 +532,42 @@ fn policy_language_spec_rows_pick_their_own_renderer() {
         assert!(out.contains(cell), "`{cell}` missing from\n{out}");
     }
 }
+
+#[test]
+fn evidence_item_rows_pick_the_item_table_and_library_rows_keep_the_library_table() {
+    let item = "/workspaces/{workspaceId}/evidence/{evidenceId}";
+    let cases: [(Value, RowRenderer, &str); 5] = [
+        (
+            spec_response_row("/workspaces/{workspaceId}/evidence"),
+            render_evidence_items,
+            "ONE_YEAR",
+        ),
+        (spec_response_row(item), render_evidence_items, "READY"),
+        (
+            spec_response_object("post", "/workspaces/{workspaceId}/evidence", "201", true),
+            render_evidence_item_mutations,
+            "Security Policy Document",
+        ),
+        (
+            spec_response_row(&format!("{item}/artifacts")),
+            render_evidence_artifacts,
+            "S3_FILE",
+        ),
+        (
+            spec_response_row("/workspaces/{workspaceId}/evidence-library"),
+            render_evidence,
+            "REQ-12",
+        ),
+    ];
+    for (row, want, cell) in cases {
+        let got = pick_renderer(&row).unwrap_or_else(|| panic!("no renderer for {row}"));
+        assert!(std::ptr::fn_addr_eq(got, want), "wrong renderer for {row}");
+        let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
+        assert!(out.contains(cell), "`{cell}` missing from\n{out}");
+    }
+    let library = spec_response_row("/workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}");
+    assert!(std::ptr::fn_addr_eq(
+        pick_renderer(&library).unwrap(),
+        render_evidence as RowRenderer
+    ));
+}

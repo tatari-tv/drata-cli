@@ -161,6 +161,20 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("currentVersionId") || obj.contains_key("scope") {
         return Some(render_policies);
     }
+    // Evidence item create/update responses carry `artifactsRequested` +
+    // `artifactsCreated` beside `evidenceTemplateCode`. Above the item sniff.
+    if obj.contains_key("artifactsRequested") && obj.contains_key("artifactsCreated") {
+        return Some(render_evidence_item_mutations);
+    }
+    // Evidence item rows carry `renewalScheduleType` beside `evidenceTemplateCode`;
+    // an Evidence Library row has `renewalSchema` instead. Above the library sniff.
+    if obj.contains_key("evidenceTemplateCode") && obj.contains_key("renewalScheduleType") {
+        return Some(render_evidence_items);
+    }
+    // Evidence item artifact rows carry `artifactVersion` + `artifactType`.
+    if obj.contains_key("artifactVersion") && obj.contains_key("artifactType") {
+        return Some(render_evidence_artifacts);
+    }
     // Evidence library rows carry `evidenceTemplateCode`.
     if obj.contains_key("evidenceTemplateCode") || obj.contains_key("implementationGuidance") {
         return Some(render_evidence);
@@ -648,6 +662,73 @@ fn render_policies(rows: &[Value], width: usize) -> String {
             |r| str_field(r, "status"),
             |r| str_field(r, "renewalDate"),
             |r| str_field(r, "publishedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_evidence_items(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "NAME",
+            "STATUS",
+            "SCHEDULE",
+            "RENEWAL",
+            "TEMPLATE_CODE",
+            "UPDATED",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "status"),
+            |r| str_field(r, "renewalScheduleType"),
+            |r| str_field(r, "renewalDate"),
+            |r| str_field(r, "evidenceTemplateCode"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_evidence_item_mutations(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "NAME",
+            "ARTIFACTS_CREATED",
+            "ARTIFACTS_REQUESTED",
+            "SCHEDULE",
+            "RENEWAL",
+            "UPDATED",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| scalar_field(r, "artifactsCreated"),
+            |r| scalar_field(r, "artifactsRequested"),
+            |r| str_field(r, "renewalScheduleType"),
+            |r| str_field(r, "renewalDate"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_evidence_artifacts(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "TYPE", "VERSION", "FILED", "ARCHIVED", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "artifactName"),
+            |r| str_field(r, "artifactType"),
+            |r| scalar_field(r, "artifactVersion"),
+            |r| str_field(r, "filedAt"),
+            |r| str_field(r, "archivedAt"),
+            |r| str_field(r, "createdAt"),
         ],
         width,
     )

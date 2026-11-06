@@ -46,6 +46,9 @@ pub const RECIPE_VALID: &str = r#"{"isValid": true, "errors": []}"#;
 /// A recipe for the `--recipe` rows.
 pub const RECIPE: &str = r#"{"assertion": "nofail", "allConnections": true, "providers": []}"#;
 
+/// The evidence-files upload answer: `upload` prints its `fileKey`.
+pub const EVIDENCE_FILE: &str = r#"{"fileKey": "acct/evidence-library/1/f.txt", "originalFilename": "f.txt", "mimeType": "text/plain", "fileSize": 1}"#;
+
 #[derive(Debug)]
 pub struct Row {
     pub method: &'static str,
@@ -1297,6 +1300,86 @@ pub const ROWS: &[Row] = &[
             "2",
             "--action",
             "retractWriteAccess",
+        ],
+        Object,
+    ),
+    // evidence items (the Evidence tag; not the Evidence Library)
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/evidence",
+        &["evidence-item", "list", "1"],
+        Page,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/evidence",
+        &[
+            "evidence-item",
+            "create",
+            "1",
+            "--name",
+            "x",
+            "--url",
+            "https://example.com",
+            "--filed-at",
+            "2026-11-01",
+        ],
+        Object,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/evidence-files",
+        &["evidence-item", "upload", "1", "--file", FIXTURE],
+        Json(201, EVIDENCE_FILE),
+    ),
+    row(
+        "DELETE",
+        "/workspaces/{workspaceId}/evidence/{evidenceId}",
+        &["evidence-item", "remove", "1", "2"],
+        Empty,
+    ),
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/evidence/{evidenceId}",
+        &["evidence-item", "get", "1", "2"],
+        Object,
+    ),
+    row(
+        "PUT",
+        "/workspaces/{workspaceId}/evidence/{evidenceId}",
+        &["evidence-item", "update", "1", "2", "--name", "y"],
+        Object,
+    ),
+    row(
+        "GET",
+        "/workspaces/{workspaceId}/evidence/{evidenceId}/artifacts",
+        &["evidence-item", "artifact", "list", "1", "2"],
+        Page,
+    ),
+    row(
+        "DELETE",
+        "/workspaces/{workspaceId}/evidence/{evidenceId}/artifacts/{artifactId}",
+        &["evidence-item", "artifact", "remove", "1", "2", "3"],
+        Empty,
+    ),
+    row(
+        "PUT",
+        "/workspaces/{workspaceId}/evidence/{evidenceId}/artifacts/{artifactId}",
+        &["evidence-item", "artifact", "update", "1", "2", "3", "--name", "z"],
+        Object,
+    ),
+    row(
+        "POST",
+        "/workspaces/{workspaceId}/evidence/{evidenceId}/artifacts/{artifactId}/actions",
+        &[
+            "evidence-item",
+            "artifact",
+            "run-action",
+            "1",
+            "2",
+            "3",
+            "--action",
+            "archive",
         ],
         Object,
     ),

@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 mod custom;
+mod evidence;
 mod exclusion;
 mod identity;
 mod monitor;
@@ -18,6 +19,7 @@ mod ticket;
 mod upload;
 mod vendor;
 pub use custom::*;
+pub use evidence::*;
 pub use exclusion::*;
 pub use identity::*;
 pub use monitor::*;
@@ -221,6 +223,11 @@ pub enum Commands {
     Evidence {
         #[command(subcommand)]
         action: EvidenceAction,
+    },
+    /// Manage evidence items and their artifacts in a workspace (the spec's Evidence tag)
+    EvidenceItem {
+        #[command(subcommand)]
+        action: EvidenceItemAction,
     },
     /// Manage frameworks and requirements in a workspace
     Framework {

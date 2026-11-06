@@ -13,6 +13,8 @@
 //! pre-uploaded S3 key, JSON). Either source requires `--filed-at`,
 //! `--owner-id` and `--renewal-schedule-type`; clap enforces that pairing.
 
+pub mod item;
+
 use crate::cli::{EvidenceAction, RenewalScheduleType};
 use crate::client::{DrataClient, Multipart};
 use crate::config::Config;
