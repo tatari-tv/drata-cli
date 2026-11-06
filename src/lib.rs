@@ -148,6 +148,9 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
         Commands::Policy { action } => {
             resources::policy::handle(action, client, config, confirm).await?;
         }
+        Commands::PolicyLanguage { action } => {
+            resources::policy::language::handle(action, client, config).await?;
+        }
         Commands::Evidence { action } => {
             resources::evidence::handle(action, client, config, confirm).await?;
         }

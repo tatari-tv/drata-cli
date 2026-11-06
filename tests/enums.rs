@@ -366,3 +366,64 @@ fn identity_action_is_per_kind_and_client_type_is_the_spec_enum() {
         "nope"
     ]));
 }
+
+#[test]
+fn policy_language_enums_match_the_spec() {
+    let languages = "/policies/{policyId}/policy-versions/{policyVersionId}/languages";
+    same::<PolicyVersionStatus>(languages, "statuses[]");
+    same::<PolicyVersionStatus>("/policy-language-versions", "statuses[]");
+    same::<PolicyLanguageVersionListExpand>("/policy-language-versions", "expand[]");
+    same::<PolicyLanguageVersionExpand>("/policy-language-versions/{policyLanguageVersionId}", "expand[]");
+    let sources = &spec()["components"]["schemas"]["CreatePolicySourceTypeEnum"]["enum"];
+    let want: BTreeSet<String> = sources
+        .as_array()
+        .expect("CreatePolicySourceTypeEnum has values")
+        .iter()
+        .map(|v| v.as_str().expect("string enum").to_string())
+        .collect();
+    assert_eq!(flag_values::<PolicySourceType>(), want);
+}
+
+#[test]
+fn policy_version_language_is_the_spec_enum_and_the_version_command_keeps_its_get_form() {
+    let spec_languages = drata_cli::spec::enum_values("PolicyLanguageEnum").expect("spec has PolicyLanguageEnum");
+    for language in spec_languages {
+        assert!(
+            parses(&[
+                "policy",
+                "version",
+                "replace-file",
+                "1",
+                "2",
+                "--file",
+                "f.pdf",
+                "--language",
+                &language.to_uppercase()
+            ]),
+            "{language}"
+        );
+    }
+    assert!(!parses(&[
+        "policy",
+        "version",
+        "replace-file",
+        "1",
+        "2",
+        "--file",
+        "f.pdf",
+        "--language",
+        "klingon"
+    ]));
+    assert!(parses(&["policy", "version", "1", "2"]), "the get form is kept");
+    assert!(!parses(&["policy", "version", "1"]), "get needs both ids");
+    assert!(parses(&[
+        "policy-language",
+        "list",
+        "1",
+        "2",
+        "--status",
+        "draft",
+        "published"
+    ]));
+    assert!(!parses(&["policy-language", "list", "1", "2", "--status", "bogus"]));
+}

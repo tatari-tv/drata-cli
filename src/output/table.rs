@@ -70,6 +70,14 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("externalId") && obj.contains_key("name") {
         return Some(render_groups);
     }
+    // Policy language variant rows carry `hasPdf` + `hasHtml` next to `language`.
+    if obj.contains_key("language") && obj.contains_key("hasPdf") && obj.contains_key("hasHtml") {
+        return Some(render_policy_languages);
+    }
+    // Policy language setting rows are `{language, default}`.
+    if obj.len() == 2 && obj.contains_key("language") && obj.contains_key("default") {
+        return Some(render_policy_language_settings);
+    }
     // User identity rows (infrastructure and version control) carry `identityId`.
     if obj.contains_key("identityId") {
         return Some(render_identities);
@@ -337,6 +345,42 @@ fn render_groups(rows: &[Value], width: usize) -> String {
             |r| scalar_field(r, "connectionId"),
             |r| str_field(r, "updatedAt"),
         ],
+        width,
+    )
+}
+
+fn render_policy_languages(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "LANGUAGE",
+            "DEFAULT",
+            "FILE",
+            "PDF",
+            "HTML",
+            "ORIGINAL_FILE",
+            "UPDATED",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "language"),
+            |r| bool_field(r, "default"),
+            |r| bool_field(r, "hasFile"),
+            |r| bool_field(r, "hasPdf"),
+            |r| bool_field(r, "hasHtml"),
+            |r| str_field(r, "originalFileName"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_policy_language_settings(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["LANGUAGE", "DEFAULT"],
+        rows,
+        &[|r| str_field(r, "language"), |r| bool_field(r, "default")],
         width,
     )
 }

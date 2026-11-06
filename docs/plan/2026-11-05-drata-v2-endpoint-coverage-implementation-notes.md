@@ -279,3 +279,27 @@ None.
 
 ### Open questions
 None.
+
+## Phase 9: Policies and policy languages
+### Design decisions
+- Verb map (6 ops, 6 rows added to the command table, floor 170 -> 176): `policy version create <policy>`, `policy version replace-file <policy> <version> --file [--language]`, `policy-language list <policy> <version>`, `policy-language settings`, `policy-language versions`, `policy-language get <id>`.
+- `policy version` keeps its existing meaning (`policy version <policy> <version>` is a get) and gains subcommands beside it: `args_conflicts_with_subcommands` + `subcommand_negates_reqs`, with the two positionals `required = true` so clap still demands both for the get form. Nothing was renamed. `tests/enums.rs` pins both forms (`policy version 1 2` parses, `policy version 1` does not) and `policy_version_with_two_ids_still_gets_the_version` proves the get on the wire.
+- `create` is multipart when `--file` is present (UPLOADED) and typed JSON otherwise (EXTERNAL, `--external-file-id`), because the spec accepts both content types and an EXTERNAL version has no file. Multipart field names are the spec's property names verbatim (`sourceType`, `ownerId`, `isMaterialChange`, `renewalDate`, `requiresApproval`, `externalFileId`, `fileName`, `description`, `changeSummary`, `changesExplanation`, `requiresAcknowledgement`, `file`); `replace-file` sends `file` and optional `language`. Flags of the wrong source type (`--file` with EXTERNAL, `--external-file-id` with UPLOADED, UPLOADED without `--file`, EXTERNAL without `--external-file-id`) are rejected before the confirm and the request (`build_create`).
+- The four spec-required fields (`sourceType`, `ownerId`, `isMaterialChange`, `renewalDate`) are clap-required unless `--data` or `--example`. Booleans take a value (`--material-change true|false`), like `--sub-processor` and `--done` elsewhere, so `false` is sendable. `--data` is the whole body sent as JSON (no file part); `--example` prints the spec skeleton.
+- `--language` is spec-driven (`policy_language` over `PolicyLanguageEnum`, case-insensitive, normalized to the spec value), same approach as `--client-type`. `tests/enums.rs` asserts every spec value parses and a bogus one is rejected.
+- Value enums: `PolicyVersionStatus`, `PolicyLanguageVersionListExpand`, `PolicyLanguageVersionExpand`; `PolicySourceType` is reused (its values equal `CreatePolicySourceTypeEnum`, asserted). `policy_language_enums_match_the_spec` covers them.
+- `policy-language get` sends the client's `Accept: application/json`; the `text/html` representation stays out (Non-Goals).
+- Renderers (`src/output/table.rs`): `render_policy_languages` (sniff `language` + `hasPdf` + `hasHtml`, used by the version-languages list and the language-versions list) and `render_policy_language_settings` (exactly `{language, default}`), above the identity sniffs. `policy_language_spec_rows_pick_their_own_renderer` feeds the three spec response examples through `pick_renderer`.
+- New code in `src/cli/policy.rs`, `src/resources/policy/version.rs`, `src/resources/policy/language.rs`. The wiremock tests are in `tests/policy.rs`, because adding them to `tests/commands.rs` took it past the 1500-line bloat check.
+
+### Deviations
+- The doc names no verbs for `policy-language`; `list | settings | versions | get` is my choice, following the repo's `list`/`get` and the spec's own names.
+- `policy version` is no longer a leaf, so `every_curated_leaf_has_a_row` does not demand a row for the get form. The existing row stays and still proves `GET .../policy-versions/{id}`.
+
+### Tradeoffs
+- Positionals plus subcommands on `policy version` vs an explicit `policy version get` | the task says do not rename; the cost is that a policy id literally named `create` or `replace-file` cannot use the get form (ids are numeric).
+- No `--sort`, `--sort-dir`, `--include-total-count`, `--size` on the list verbs | same as Phases 3, 4, 6, 7 and 8; reachable through `drata raw`.
+- Optional booleans take a value vs a presence flag | a presence flag cannot send `false`.
+
+### Open questions
+None.

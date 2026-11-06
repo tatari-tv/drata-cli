@@ -12,6 +12,7 @@ mod exclusion;
 mod identity;
 mod monitor;
 mod personnel;
+mod policy;
 mod risk;
 mod ticket;
 mod upload;
@@ -21,6 +22,7 @@ pub use exclusion::*;
 pub use identity::*;
 pub use monitor::*;
 pub use personnel::*;
+pub use policy::*;
 pub use risk::*;
 pub use ticket::*;
 pub use upload::*;
@@ -204,6 +206,11 @@ pub enum Commands {
     CustomConnection {
         #[command(subcommand)]
         action: CustomConnectionAction,
+    },
+    /// List policy languages and language versions
+    PolicyLanguage {
+        #[command(subcommand)]
+        action: PolicyLanguageAction,
     },
     /// Manage policies
     Policy {
@@ -683,12 +690,17 @@ pub enum PolicyAction {
         #[arg(long, num_args = 1..)]
         expand: Vec<String>,
     },
-    /// Get a specific policy version
+    /// Get a specific policy version, or create one / replace its file
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Version {
         /// Policy ID
-        policy_id: String,
+        #[arg(required = true)]
+        policy_id: Option<String>,
         /// Version ID
-        version_id: String,
+        #[arg(required = true)]
+        version_id: Option<String>,
+        #[command(subcommand)]
+        action: Option<PolicyVersionAction>,
     },
 }
 

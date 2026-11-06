@@ -158,6 +158,13 @@ drata-cli policy update <policy_id> --name "Updated Policy"
 drata-cli policy actions <policy_id>
 drata-cli policy versions <policy_id>
 drata-cli policy version <policy_id> <version_id>
+drata-cli policy version create <policy_id> --example
+drata-cli policy version create <policy_id> --source-type UPLOADED --owner-id 42 --material-change false --renewal-date 2027-01-01 --file ./policy-v2.pdf
+drata-cli policy version replace-file <policy_id> <version_id> --file ./policy-v2.pdf --language fr-FR
+drata-cli policy-language settings
+drata-cli policy-language list <policy_id> <version_id> --status published draft
+drata-cli policy-language versions --policy-id 7 --expand policy
+drata-cli policy-language get <id> --expand downloadPdfUrl
 ```
 
 ### Evidence Library

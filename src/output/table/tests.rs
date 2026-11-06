@@ -512,3 +512,23 @@ fn identity_phase_eight_spec_rows_pick_their_own_renderer() {
         }
     }
 }
+
+#[test]
+fn policy_language_spec_rows_pick_their_own_renderer() {
+    let cases: [(&str, RowRenderer, &str); 3] = [
+        (
+            "/policies/{policyId}/policy-versions/{policyVersionId}/languages",
+            render_policy_languages,
+            "information-security-policy-es.pdf",
+        ),
+        ("/policy-language-versions", render_policy_languages, "en-US"),
+        ("/policy-language-settings", render_policy_language_settings, "en-US"),
+    ];
+    for (path, want, cell) in cases {
+        let row = spec_response_row(path);
+        let got = pick_renderer(&row).unwrap_or_else(|| panic!("no renderer for {row}"));
+        assert!(std::ptr::fn_addr_eq(got, want), "wrong renderer for {path}: {row}");
+        let out = render(&json!({ "data": [row] }), DEFAULT_WIDTH).unwrap();
+        assert!(out.contains(cell), "`{cell}` missing from\n{out}");
+    }
+}
