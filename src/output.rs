@@ -78,7 +78,11 @@ fn try_write_to_pager(content: &str) -> bool {
 }
 
 fn pager_command() -> (String, Vec<String>) {
-    if let Ok(env) = std::env::var("PAGER") {
+    pager_command_from(std::env::var("PAGER").ok())
+}
+
+fn pager_command_from(pager: Option<String>) -> (String, Vec<String>) {
+    if let Some(env) = pager {
         let trimmed = env.trim();
         if !trimmed.is_empty() {
             let mut parts = trimmed.split_whitespace();
