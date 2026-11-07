@@ -332,6 +332,33 @@ Observed on branch `drata-v2-endpoint-coverage` (HEAD 371c13f), 2026-11-05, `tar
 
 - Gated on the shakedown: does `vendor security-review create-with-file` succeed as multipart? Both the June and current specs list only `application/json` for that op, yet its body requires `file` as a binary string, which JSON cannot carry. v0.1.5 already sent multipart, so this is not a change in this plan (implementation notes, Phase 1; round-2 audit finding D1). Settling it takes one live write on a `zzz-clitest-` vendor. The CLI has no DELETE for a security review, so that write needs explicit approval before the shakedown runs it.
 
+## Shakedown Results (v0.2.0)
+
+Run 2026-11-07 on Tatari's tenant with the installed `drata v0.2.0` (tag `v0.2.0` -> `36b4fcd`). Full report, commands and outputs: `docs/shakedown-v0.2.0.md`.
+
+Read ops (119 GET rows in the command table):
+
+- exercised (82): every `vendor`, `vendor security-review` and cross-vendor read with data on the tenant (`list`, `get`, `search` and `--facet`, `actions`, `questionnaires`, `summary`, `note list`, `observation list`), `vendor-questionnaire-template list | questions`, `vendor-risk-level list`, `risk list | get | search`, `register list | get`, `control list | requirements | compare`, `device` (4), `personnel list | get | search | group list | group counts`, `group list`, `compliance-check-exclusion list`, `custom-field list`, `policy list | get | versions | version | actions`, `policy-language list | versions`, `evidence list | get`, `framework list | requirements | requirement controls`, `asset list` (`--all` only) `| get`, `company get`, `workspace list`, `user` (5), `monitor list | get | exclusions | failures | passes | ticket list`, `audit list | get --expand dcfSuggestionsSummary`, `event list` (`--all` only) `| get`, both identity nouns (`list | get | actions`), `access-review app list | get | users list`, `access-review period list`, `connection aws | azure | gcp | gitlab list`
+- blocked (402) (9): `vendor-criteria list`, `vendor-criteria-creation list`, `vendor security-review assessment list | get | stats`, `vendor security-review workflow`, `vendor security-review residual-risk`, `risk insights`, `risk ticket list`
+- blocked, not by plan tier (6): `evidence-item list | get | artifact list` (403, tenant has not opted into the new Drata Experience), `vendor security-review follow-up-questionnaire | access-request-requirements` (403, AI agent not available), `policy-language settings` (400, policy languages not enabled)
+- server 404/400 on an existing ID (4): `control get` (404 for every ID, both keys, also through `raw`), `control ticket list`, `vendor trust-overview` (vendor has no Trust Center), `monitor codebase-exclusion list` (400, not a codebase test)
+- unverified (18): no data on the tenant, only the 404 path ran: `vendor questionnaire get | questions`, `vendor security-review note get | observation get`, `custom-field get`, `policy-language get`, `evidence get-version`, `access-review period get | app get | app users | evidence-package`, `connection aws | azure | gcp | gitlab get`, `custom-connection resource-attribute`, `audit request dcf-suggestion list | get`
+
+Rollout Plan writes:
+
+- `upload-url create --file`: exercised. Printed only the `objectKey`; the presigned URL never reached stdout or the log. The unattached `zzz-clitest.txt` S3 object stays
+- `evidence-item create`: blocked (403, new Drata Experience opt-in). `evidence-item remove`: unverified, nothing to remove
+- `risk ticket link`: blocked (402). `risk ticket unlink`: unverified, nothing linked
+- `vendor security-review note | observation create | remove`: unverified. The `zzz-clitest-` vendor (40, created with `vendor create`, removed with `vendor remove`, confirmed gone) has no security review, and creating one has no DELETE op, so it needs the same approval as `create-with-file`
+- Open Question (`create-with-file` as multipart): still open, not run
+
+CLI defects found, detail in the report:
+
+- `asset list` and `event list` drain every page (about 990 and 1,890 requests on this tenant) past the 500 req/min limit; the resulting Cloudflare 429 (`retry-after: 162`) fails every concurrent `drata` call
+- the 429 retry caps `Retry-After` at 60 s, so all three retries land inside the block and fail after about 3 silent minutes
+- `monitor list` table prints `id` in the ID column, but every monitor verb takes `testId`
+- cosmetic: `vendor remove` prints `null`; `--all | head` exits 1 on the broken pipe; README `--expand questionnaires contacts` example is rejected by the server and README still calls the binary `drata-cli`
+
 ## Review Log
 
 - Pass 1, draft: shape from the design-research brief; Appendix A generated from the two spec versions
