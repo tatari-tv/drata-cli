@@ -10,7 +10,7 @@
 //!
 //! Phase 4 adds: confirm-on-mutation.
 
-use crate::cli::FrameworkAction;
+use crate::cli::{FrameworkAction, FrameworkRequirementAction};
 use crate::client::DrataClient;
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
@@ -81,6 +81,14 @@ pub async fn handle(
             workspace_id,
             framework_id,
         } => requirements(client, config, workspace_id, framework_id).await,
+        FrameworkAction::Requirement {
+            action:
+                FrameworkRequirementAction::Controls {
+                    workspace_id,
+                    framework_id,
+                    requirement_id,
+                },
+        } => requirement_controls(client, config, workspace_id, framework_id, requirement_id).await,
     }
 }
 
@@ -163,6 +171,32 @@ async fn requirements(client: &DrataClient, config: &Config, workspace_id: &str,
         .await?;
     let result = json!({ "data": all });
     print_value(&result, &config.output_format);
+    Ok(())
+}
+
+fn requirement_controls_path(workspace_id: &str, framework_id: &str, requirement_id: &str) -> String {
+    format!(
+        "/workspaces/{}/frameworks/{}/requirements/{}/controls",
+        workspace_id, framework_id, requirement_id
+    )
+}
+
+#[instrument(skip(client, config))]
+async fn requirement_controls(
+    client: &DrataClient,
+    config: &Config,
+    workspace_id: &str,
+    framework_id: &str,
+    requirement_id: &str,
+) -> Result<()> {
+    debug!(
+        workspace_id,
+        framework_id, requirement_id, "framework requirement controls"
+    );
+    let all = client
+        .get_all(&requirement_controls_path(workspace_id, framework_id, requirement_id))
+        .await?;
+    print_value(&json!({ "data": all }), &config.output_format);
     Ok(())
 }
 

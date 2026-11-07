@@ -15,10 +15,22 @@ use std::process::{Command, Stdio};
 
 mod table;
 
+pub use table::Table;
+
 /// Threshold below which we skip the pager even on a TTY.
 const PAGER_MIN_LINES: usize = 2;
 
 pub fn print_value(value: &Value, format: &OutputFormat) {
+    print_with(value, format, table::render);
+}
+
+/// `print_value` with a named table instead of a sniffed one, for a row shape
+/// another op shares (see `Table`).
+pub fn print_value_as(value: &Value, format: &OutputFormat, table: Table) {
+    print_with(value, format, |v, width| table::render_as(v, width, table));
+}
+
+fn print_with(value: &Value, format: &OutputFormat, render: impl Fn(&Value, usize) -> Option<String>) {
     let as_json = match format {
         OutputFormat::Json => true,
         OutputFormat::Table => false,
@@ -30,7 +42,7 @@ pub fn print_value(value: &Value, format: &OutputFormat) {
     let rendered = if as_json {
         serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
     } else {
-        match table::render(value, width) {
+        match render(value, width) {
             Some(t) => t.trim_end_matches('\n').to_string(),
             None => serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
         }
@@ -78,7 +90,11 @@ fn try_write_to_pager(content: &str) -> bool {
 }
 
 fn pager_command() -> (String, Vec<String>) {
-    if let Ok(env) = std::env::var("PAGER") {
+    pager_command_from(std::env::var("PAGER").ok())
+}
+
+fn pager_command_from(pager: Option<String>) -> (String, Vec<String>) {
+    if let Some(env) = pager {
         let trimmed = env.trim();
         if !trimmed.is_empty() {
             let mut parts = trimmed.split_whitespace();

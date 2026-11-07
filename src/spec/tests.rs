@@ -2,9 +2,9 @@
 use super::*;
 
 #[test]
-fn enumerates_all_167_operations() {
+fn enumerates_every_operation_in_the_committed_spec() {
     let ops = operations().unwrap();
-    assert_eq!(ops.len(), 167, "spec should expose exactly 167 operations");
+    assert_eq!(ops.len(), 308, "spec should expose exactly 308 operations");
 }
 
 #[test]
@@ -31,19 +31,19 @@ fn methods_are_upper_cased_and_known() {
 }
 
 #[test]
-fn operation_tags_include_the_two_missing_from_top_level() {
-    // The whole point of sourcing tags from operations: these two are NOT in the
-    // 33-entry top-level `tags` list.
+fn operation_tags_include_tags_once_missing_from_top_level() {
+    // Tags are sourced from operations because the top-level `tags` list once
+    // omitted these two; keep asserting them so a regression in either list shows.
     let tags = operation_tags().unwrap();
-    assert_eq!(tags.len(), 35, "expected 35 operation-level tags, got {}", tags.len());
+    assert_eq!(tags.len(), 51, "expected 51 operation-level tags, got {}", tags.len());
     assert!(tags.contains(&"Audit Requests".to_string()));
     assert!(tags.contains(&"Procurement Connection Mappings".to_string()));
 }
 
 #[test]
-fn ten_operations_are_multipart_uploads() {
+fn fourteen_operations_are_multipart_uploads() {
     let multipart = operations().unwrap().into_iter().filter(|op| op.multipart).count();
-    assert_eq!(multipart, 10, "expected 10 multipart upload operations");
+    assert_eq!(multipart, 14, "expected 14 multipart upload operations");
 }
 
 #[test]
@@ -96,4 +96,17 @@ fn example_for_get_operation_is_none() {
 fn example_for_unknown_operation_is_none() {
     let example = example_for_operation("post", "/no/such/path").unwrap();
     assert!(example.is_none());
+}
+
+#[test]
+fn example_for_schema_builds_a_named_component() {
+    let resource = example_for_schema("CustomTestRecipeResourcePublicV2Dto").unwrap();
+    assert_eq!(resource["resource"], json!("Employees"));
+    assert!(resource["evaluator"]["all"].is_array(), "{resource}");
+}
+
+#[test]
+fn example_for_unknown_schema_is_an_error() {
+    let err = example_for_schema("NoSuchSchemaDto").unwrap_err();
+    assert!(err.to_string().contains("NoSuchSchemaDto"), "{err}");
 }

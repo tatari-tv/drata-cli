@@ -23,6 +23,7 @@ use tracing::{debug, instrument};
 pub fn example_if_requested(action: &PolicyAction) -> Option<Result<String>> {
     match action {
         PolicyAction::Create { example: true, .. } => Some(example_skeleton("POST", "/policies")),
+        PolicyAction::Version { action: Some(sub), .. } => version::example_if_requested(sub),
         _ => None,
     }
 }
@@ -79,7 +80,13 @@ pub async fn handle(action: &PolicyAction, client: &DrataClient, config: &Config
         }
         PolicyAction::Actions { policy_id } => actions(client, config, policy_id).await,
         PolicyAction::Versions { policy_id, expand } => versions(client, config, policy_id, expand).await,
-        PolicyAction::Version { policy_id, version_id } => version(client, config, policy_id, version_id).await,
+        PolicyAction::Version { action: Some(sub), .. } => version::handle(sub, client, config, confirm).await,
+        PolicyAction::Version {
+            policy_id: Some(policy_id),
+            version_id: Some(version_id),
+            action: None,
+        } => get_version(client, config, policy_id, version_id).await,
+        PolicyAction::Version { .. } => bail!("`policy version` requires <policy_id> <version_id> or a subcommand"),
     }
 }
 
@@ -205,8 +212,8 @@ async fn update(
 #[instrument(skip(client, config))]
 async fn actions(client: &DrataClient, config: &Config, policy_id: &str) -> Result<()> {
     debug!(policy_id, "policy actions");
-    let all = client.get_all(&format!("/policies/{}/actions", policy_id)).await?;
-    let result = json!({ "data": all });
+    // One unpaginated `{data}` envelope: the op takes no query params, `size` included.
+    let result = client.get(&format!("/policies/{}/actions", policy_id)).await?;
     print_value(&result, &config.output_format);
     Ok(())
 }
@@ -222,7 +229,7 @@ async fn versions(client: &DrataClient, config: &Config, policy_id: &str, expand
 }
 
 #[instrument(skip(client, config))]
-async fn version(client: &DrataClient, config: &Config, policy_id: &str, version_id: &str) -> Result<()> {
+async fn get_version(client: &DrataClient, config: &Config, policy_id: &str, version_id: &str) -> Result<()> {
     debug!(policy_id, version_id, "policy version get");
     let resp = client
         .get(&format!("/policies/{}/policy-versions/{}", policy_id, version_id))
@@ -247,6 +254,9 @@ fn source_type_str(st: &PolicySourceType) -> &'static str {
         PolicySourceType::External => "EXTERNAL",
     }
 }
+
+pub mod language;
+pub mod version;
 
 #[cfg(test)]
 mod tests;

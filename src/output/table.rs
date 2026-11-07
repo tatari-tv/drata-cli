@@ -23,19 +23,42 @@ type RowRenderer = fn(&[Value], usize) -> String;
 /// Dispatch on the detected shape of a Drata response. Returns `Some(table)`
 /// when a renderer matches, `None` otherwise (caller falls back to JSON).
 pub fn render(value: &Value, width: usize) -> Option<String> {
+    render_with(value, width, pick_renderer)
+}
+
+/// A table the command names instead of sniffing, for a row shape another op
+/// shares. Identity action rows and policy action rows carry the same keys
+/// (`action`, `label`, `description`, `payloadSchema`), so no sniff can tell
+/// them apart: a sniff would hand `policy actions` the identity table, where
+/// v0.1.5 printed JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Table {
+    IdentityActions,
+}
+
+/// Render `value` with the named table: the same envelope handling as
+/// `render`, with the renderer fixed rather than sniffed.
+pub fn render_as(value: &Value, width: usize, table: Table) -> Option<String> {
+    let renderer: RowRenderer = match table {
+        Table::IdentityActions => render_identity_actions,
+    };
+    render_with(value, width, |_| Some(renderer))
+}
+
+fn render_with(value: &Value, width: usize, pick: impl Fn(&Value) -> Option<RowRenderer>) -> Option<String> {
     // List envelope: `{ "data": [ {...}, ... ] }`.
     if let Some(arr) = value.get("data").and_then(|v| v.as_array()) {
         if arr.is_empty() {
             // Render an empty table rather than dumping `[]` as JSON.
             return Some("(no results)".to_string());
         }
-        let renderer = pick_renderer(&arr[0])?;
+        let renderer = pick(&arr[0])?;
         return Some(renderer(arr, width));
     }
 
     // Single-object response (e.g. `get`): wrap as a one-row list.
     if value.is_object() {
-        let renderer = pick_renderer(value)?;
+        let renderer = pick(value)?;
         let rows = [value.clone()];
         return Some(renderer(&rows, width));
     }
@@ -46,6 +69,125 @@ pub fn render(value: &Value, width: usize) -> Option<String> {
 /// Choose a renderer by sniffing the fields present on a sample row.
 fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     let obj = sample.as_object()?;
+    // Ticket rows carry `externalTicketId`.
+    if obj.contains_key("externalTicketId") {
+        return Some(render_tickets);
+    }
+    // Per-item bulk results carry a per-item `statusCode` + `outcome`.
+    if obj.contains_key("statusCode") && obj.contains_key("outcome") {
+        return Some(render_item_results);
+    }
+    // Compliance-check exclusion rows carry `targetId` + `targetType`.
+    if obj.contains_key("targetId") && obj.contains_key("targetType") {
+        return Some(render_compliance_exclusions);
+    }
+    // DCF suggestion rows carry `dcfCode` + `confidenceLevel`.
+    if obj.contains_key("dcfCode") && obj.contains_key("confidenceLevel") {
+        return Some(render_dcf_suggestions);
+    }
+    // Standard connection rows (AWS, Azure, GCP, GitLab) carry `clientAlias` + `state`.
+    if obj.contains_key("clientAlias") && obj.contains_key("state") {
+        return Some(render_connections);
+    }
+    // Custom field definition rows carry `customFieldId`.
+    if obj.contains_key("customFieldId") {
+        return Some(render_custom_fields);
+    }
+    // Scoped personnel group rows carry `connectionProvider` + `name`.
+    if obj.contains_key("connectionProvider") && obj.contains_key("name") {
+        return Some(render_scoped_groups);
+    }
+    // Personnel group rows carry `externalId` + `source` + `name`. `source` is
+    // what sets them apart: an asset and a control requirement also carry
+    // `externalId` + `name`, and keep their v0.1.5 output.
+    if obj.contains_key("externalId") && obj.contains_key("source") && obj.contains_key("name") {
+        return Some(render_groups);
+    }
+    // Policy language variant rows carry `hasPdf` + `hasHtml` next to `language`.
+    if obj.contains_key("language") && obj.contains_key("hasPdf") && obj.contains_key("hasHtml") {
+        return Some(render_policy_languages);
+    }
+    // Policy language setting rows are `{language, default}`.
+    if obj.len() == 2 && obj.contains_key("language") && obj.contains_key("default") {
+        return Some(render_policy_language_settings);
+    }
+    // Access review user rows carry `identityId` too, so they sit above the
+    // identity sniff: an application's loaded users add `hasAdminAccess`, a
+    // period application's users under review add `lastRejectedAt`.
+    if obj.contains_key("identityId") && obj.contains_key("hasAdminAccess") {
+        return Some(render_access_review_users);
+    }
+    if obj.contains_key("identityId") && obj.contains_key("lastRejectedAt") {
+        return Some(render_access_review_decisions);
+    }
+    // An application within a review period carries `applicationId` + `status`
+    // (the detail adds `reviewers` and `userCounts`).
+    if obj.contains_key("applicationId") && obj.contains_key("status") {
+        return Some(render_access_review_period_apps);
+    }
+    // Review period rows carry `startingDate` + `endingDate`.
+    if obj.contains_key("startingDate") && obj.contains_key("endingDate") {
+        return Some(render_access_review_periods);
+    }
+    // Access review application rows carry `source` + `reviewers`.
+    if obj.contains_key("source") && obj.contains_key("reviewers") {
+        return Some(render_access_review_apps);
+    }
+    // User identity rows (infrastructure and version control) carry
+    // `identityId` + `serviceAccount`. A custom connection's HRIS identity also
+    // carries `identityId`, but no `serviceAccount`, and keeps its v0.1.5 users table.
+    if obj.contains_key("identityId") && obj.contains_key("serviceAccount") {
+        return Some(render_identities);
+    }
+    // Codebase exclusion rows carry `findingId` + `exclusionDesignatorId`. A
+    // monitor failure on a codebase test also carries `findingId` +
+    // `repositoryName`, and keeps its v0.1.5 JSON output.
+    if obj.contains_key("findingId") && obj.contains_key("exclusionDesignatorId") {
+        return Some(render_codebase_exclusions);
+    }
+    // A retest acceptance is exactly `{testId, checkStatus}`; a monitoring test
+    // carries both among many more keys and keeps the monitor renderer below.
+    if obj.len() == 2 && obj.contains_key("testId") && obj.contains_key("checkStatus") {
+        return Some(render_retests);
+    }
+    // Security-review note and observation rows carry `securityReviewId` next to
+    // their free-text field. Above the vendor and questionnaire sniffs.
+    if obj.contains_key("securityReviewId") && (obj.contains_key("note") || obj.contains_key("observation")) {
+        return Some(render_findings);
+    }
+    // Assessment rows carry `criteriaName` + `currentStatus`.
+    if obj.contains_key("criteriaName") && obj.contains_key("currentStatus") {
+        return Some(render_assessments);
+    }
+    // Assessment stats are one object of counts keyed `notMet`.
+    if obj.contains_key("notMet") && obj.contains_key("partiallyMet") {
+        return Some(render_assessment_stats);
+    }
+    // Vendor criteria rows carry `isDraft` + `severity`.
+    if obj.contains_key("isDraft") && obj.contains_key("severity") {
+        return Some(render_criteria);
+    }
+    // Questionnaire template rows carry `isDefault` + `title`.
+    if obj.contains_key("isDefault") && obj.contains_key("title") {
+        return Some(render_templates);
+    }
+    // Questionnaire question rows (template or vendor) carry `question` +
+    // `allowMultipleSelection`; controls carry `question` with `code`.
+    if obj.contains_key("question") && obj.contains_key("allowMultipleSelection") {
+        return Some(render_questions);
+    }
+    // Vendor risk level rows carry `position` + `isSystem`.
+    if obj.contains_key("position") && obj.contains_key("isSystem") {
+        return Some(render_risk_levels);
+    }
+    // Criteria creation job rows are exactly `{id, workspaceId, status, createdAt}`.
+    if obj.len() == 4
+        && ["id", "workspaceId", "status", "createdAt"]
+            .iter()
+            .all(|k| obj.contains_key(*k))
+    {
+        return Some(render_criteria_creations);
+    }
     // Questionnaire rows carry `recipientEmail` + `isCompleted`.
     if obj.contains_key("recipientEmail") || obj.contains_key("isCompleted") {
         return Some(render_questionnaires);
@@ -73,6 +215,20 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     // Policy rows carry `currentVersionId` or `scope`.
     if obj.contains_key("currentVersionId") || obj.contains_key("scope") {
         return Some(render_policies);
+    }
+    // Evidence item create/update responses carry `artifactsRequested` +
+    // `artifactsCreated` beside `evidenceTemplateCode`. Above the item sniff.
+    if obj.contains_key("artifactsRequested") && obj.contains_key("artifactsCreated") {
+        return Some(render_evidence_item_mutations);
+    }
+    // Evidence item rows carry `renewalScheduleType` beside `evidenceTemplateCode`;
+    // an Evidence Library row has `renewalSchema` instead. Above the library sniff.
+    if obj.contains_key("evidenceTemplateCode") && obj.contains_key("renewalScheduleType") {
+        return Some(render_evidence_items);
+    }
+    // Evidence item artifact rows carry `artifactVersion` + `artifactType`.
+    if obj.contains_key("artifactVersion") && obj.contains_key("artifactType") {
+        return Some(render_evidence_artifacts);
     }
     // Evidence library rows carry `evidenceTemplateCode`.
     if obj.contains_key("evidenceTemplateCode") || obj.contains_key("implementationGuidance") {
@@ -156,6 +312,479 @@ fn render_questionnaires(rows: &[Value], width: usize) -> String {
     )
 }
 
+fn render_tickets(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "EXTERNAL_ID", "DONE", "CONNECTION", "CREATED", "UPDATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "externalTicketId"),
+            |r| bool_field(r, "isDone"),
+            |r| scalar_field(r, "connectionId"),
+            |r| str_field(r, "createdAt"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+/// One row per requested item of a bulk op, in request order. `ITEM` is the
+/// requested target: a failure `id`, a `findingId` or an `exclusionId`.
+fn render_item_results(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["STATUS", "OUTCOME", "ITEM", "EXCLUSION_IDS", "ERROR"],
+        rows,
+        &[
+            |r| scalar_field(r, "statusCode"),
+            |r| str_field(r, "outcome"),
+            |r| {
+                let data = r.get("data").cloned().unwrap_or(Value::Null);
+                ["id", "findingId", "exclusionId"]
+                    .iter()
+                    .map(|k| scalar_field(&data, k))
+                    .find(|v| !v.is_empty())
+                    .unwrap_or_default()
+            },
+            |r| {
+                r.get("data")
+                    .and_then(|d| d.get("exclusionIds"))
+                    .and_then(Value::as_array)
+                    .map(|ids| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(","))
+                    .unwrap_or_default()
+            },
+            |r| r.get("error").map(|e| str_field(e, "message")).unwrap_or_default(),
+        ],
+        width,
+    )
+}
+
+fn render_compliance_exclusions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "TARGET", "CHECKS", "REASON", "START", "END"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| scalar_field(r, "targetId"),
+            |r| joined_strings(r, "complianceCheckTypes"),
+            |r| str_field(r, "reason"),
+            |r| str_field(r, "startDate"),
+            |r| str_field(r, "endDate"),
+        ],
+        width,
+    )
+}
+
+/// One renderer for the four providers: the target column is the first of the
+/// provider's identifying fields the row carries (AWS role ARN, Azure
+/// subscription, GCP project). GitLab rows have none, only an expiry.
+fn render_connections(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "ALIAS", "STATE", "TARGET", "TOKEN_EXPIRES", "UPDATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "clientAlias"),
+            |r| str_field(r, "state"),
+            |r| {
+                ["roleArn", "subscriptionId", "projectId"]
+                    .iter()
+                    .map(|k| str_field(r, k))
+                    .find(|v| !v.is_empty())
+                    .unwrap_or_default()
+            },
+            |r| str_field(r, "tokenExpiresAt"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_custom_fields(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "TYPE", "REQUIRED", "HIDDEN", "ENTITIES"],
+        rows,
+        &[
+            |r| scalar_field(r, "customFieldId"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "type"),
+            |r| bool_field(r, "isRequired"),
+            |r| bool_field(r, "isHidden"),
+            |r| joined_strings(r, "entityTypes"),
+        ],
+        width,
+    )
+}
+
+fn render_scoped_groups(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "PROVIDER"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "connectionProvider"),
+        ],
+        width,
+    )
+}
+
+fn render_groups(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "EXTERNAL_ID", "CONNECTION", "UPDATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "externalId"),
+            |r| scalar_field(r, "connectionId"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_policy_languages(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "LANGUAGE",
+            "DEFAULT",
+            "FILE",
+            "PDF",
+            "HTML",
+            "ORIGINAL_FILE",
+            "UPDATED",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "language"),
+            |r| bool_field(r, "default"),
+            |r| bool_field(r, "hasFile"),
+            |r| bool_field(r, "hasPdf"),
+            |r| bool_field(r, "hasHtml"),
+            |r| str_field(r, "originalFileName"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_policy_language_settings(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["LANGUAGE", "DEFAULT"],
+        rows,
+        &[|r| str_field(r, "language"), |r| bool_field(r, "default")],
+        width,
+    )
+}
+
+fn render_access_review_apps(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "SOURCE", "WEBSITE", "REVIEWERS", "UPDATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "source"),
+            |r| str_field(r, "websiteUrl"),
+            |r| joined_field(r, "reviewers", "email"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_access_review_users(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "IDENTITY_ID", "USERNAME", "EMAIL", "ROLES", "ADMIN"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "identityId"),
+            |r| str_field(r, "username"),
+            |r| str_field(r, "email"),
+            |r| joined_strings(r, "roles"),
+            |r| bool_field(r, "hasAdminAccess"),
+        ],
+        width,
+    )
+}
+
+fn render_access_review_decisions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "IDENTITY_ID",
+            "USERNAME",
+            "EMAIL",
+            "ROLES",
+            "STATUS",
+            "COMPLETED_BY",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "identityId"),
+            |r| str_field(r, "username"),
+            |r| str_field(r, "email"),
+            |r| joined_strings(r, "roles"),
+            |r| str_field(r, "status"),
+            |r| r.get("completedBy").map(|u| str_field(u, "email")).unwrap_or_default(),
+        ],
+        width,
+    )
+}
+
+fn render_access_review_periods(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "STARTING", "ENDING", "COMPLETED", "APPLICATIONS"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "startingDate"),
+            |r| str_field(r, "endingDate"),
+            |r| str_field(r, "completedAt"),
+            |r| {
+                r.get("applications")
+                    .and_then(Value::as_array)
+                    .map(|a| a.len().to_string())
+                    .unwrap_or_default()
+            },
+        ],
+        width,
+    )
+}
+
+fn render_access_review_period_apps(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "APPLICATION_ID",
+            "STATUS",
+            "NOT_REVIEWED",
+            "APPROVED",
+            "REJECTED",
+            "OUT_OF_SCOPE",
+            "REVIEWERS",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| scalar_field(r, "applicationId"),
+            |r| str_field(r, "status"),
+            |r| {
+                r.get("userCounts")
+                    .map(|c| scalar_field(c, "notReviewed"))
+                    .unwrap_or_default()
+            },
+            |r| {
+                r.get("userCounts")
+                    .map(|c| scalar_field(c, "approved"))
+                    .unwrap_or_default()
+            },
+            |r| {
+                r.get("userCounts")
+                    .map(|c| scalar_field(c, "rejected"))
+                    .unwrap_or_default()
+            },
+            |r| {
+                r.get("userCounts")
+                    .map(|c| scalar_field(c, "outOfScope"))
+                    .unwrap_or_default()
+            },
+            |r| joined_field(r, "reviewers", "email"),
+        ],
+        width,
+    )
+}
+
+fn render_identities(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "IDENTITY_ID",
+            "USERNAME",
+            "EMAIL",
+            "USER_ID",
+            "CONNECTION",
+            "SERVICE_ACCOUNT",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "identityId"),
+            |r| str_field(r, "username"),
+            |r| str_field(r, "email"),
+            |r| scalar_field(r, "userId"),
+            |r| scalar_field(r, "connectionId"),
+            |r| str_field(r, "serviceAccount"),
+        ],
+        width,
+    )
+}
+
+fn render_identity_actions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ACTION", "LABEL", "DESCRIPTION"],
+        rows,
+        &[
+            |r| str_field(r, "action"),
+            |r| str_field(r, "label"),
+            |r| str_field(r, "description"),
+        ],
+        width,
+    )
+}
+
+fn render_codebase_exclusions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "REPOSITORY", "FINDING_ID", "REASON", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "repositoryName"),
+            |r| str_field(r, "findingId"),
+            |r| str_field(r, "reason"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_retests(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["TEST_ID", "CHECK_STATUS"],
+        rows,
+        &[|r| scalar_field(r, "testId"), |r| str_field(r, "checkStatus")],
+        width,
+    )
+}
+
+fn render_findings(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "TEXT", "SOURCE", "ASSESSMENT", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| {
+                let text = str_field(r, "note");
+                if text.is_empty() { str_field(r, "observation") } else { text }
+            },
+            |r| str_field(r, "source"),
+            |r| scalar_field(r, "vendorAssessmentId"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
+fn render_assessments(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "CRITERIA", "STATUS", "SEVERITY", "SUMMARY"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "criteriaName"),
+            |r| str_field(r, "currentStatus"),
+            |r| str_field(r, "severity"),
+            |r| str_field(r, "analysisSummary"),
+        ],
+        width,
+    )
+}
+
+fn render_assessment_stats(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["MET", "NOT_MET", "PARTIALLY_MET", "INCONCLUSIVE", "N_A", "TOTAL"],
+        rows,
+        &[
+            |r| scalar_field(r, "met"),
+            |r| scalar_field(r, "notMet"),
+            |r| scalar_field(r, "partiallyMet"),
+            |r| scalar_field(r, "inconclusive"),
+            |r| scalar_field(r, "notApplicable"),
+            |r| scalar_field(r, "total"),
+        ],
+        width,
+    )
+}
+
+fn render_criteria(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "TYPE", "SEVERITY", "DRAFT", "SOURCE"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "type"),
+            |r| str_field(r, "severity"),
+            |r| bool_field(r, "isDraft"),
+            |r| str_field(r, "source"),
+        ],
+        width,
+    )
+}
+
+fn render_templates(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "TITLE", "STATUS", "TYPE", "DEFAULT", "RISK_LEVELS"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "title"),
+            |r| str_field(r, "status"),
+            |r| str_field(r, "type"),
+            |r| bool_field(r, "isDefault"),
+            |r| joined_strings(r, "riskLevels"),
+        ],
+        width,
+    )
+}
+
+fn render_questions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "QUESTION", "TYPE", "REQUIRED", "ANSWER"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "question"),
+            |r| str_field(r, "type"),
+            |r| bool_field(r, "required"),
+            |r| str_field(r, "answer"),
+        ],
+        width,
+    )
+}
+
+fn render_risk_levels(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "POSITION", "SYSTEM"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| scalar_field(r, "position"),
+            |r| bool_field(r, "isSystem"),
+        ],
+        width,
+    )
+}
+
+fn render_criteria_creations(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "WORKSPACE", "STATUS", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| scalar_field(r, "workspaceId"),
+            |r| str_field(r, "status"),
+            |r| str_field(r, "createdAt"),
+        ],
+        width,
+    )
+}
+
 fn render_risks(rows: &[Value], width: usize) -> String {
     render_table(
         &["ID", "TITLE", "TREATMENT", "IMPACT", "LIKELIHOOD", "STATUS"],
@@ -233,6 +862,73 @@ fn render_policies(rows: &[Value], width: usize) -> String {
             |r| str_field(r, "status"),
             |r| str_field(r, "renewalDate"),
             |r| str_field(r, "publishedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_evidence_items(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "NAME",
+            "STATUS",
+            "SCHEDULE",
+            "RENEWAL",
+            "TEMPLATE_CODE",
+            "UPDATED",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| str_field(r, "status"),
+            |r| str_field(r, "renewalScheduleType"),
+            |r| str_field(r, "renewalDate"),
+            |r| str_field(r, "evidenceTemplateCode"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_evidence_item_mutations(rows: &[Value], width: usize) -> String {
+    render_table(
+        &[
+            "ID",
+            "NAME",
+            "ARTIFACTS_CREATED",
+            "ARTIFACTS_REQUESTED",
+            "SCHEDULE",
+            "RENEWAL",
+            "UPDATED",
+        ],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "name"),
+            |r| scalar_field(r, "artifactsCreated"),
+            |r| scalar_field(r, "artifactsRequested"),
+            |r| str_field(r, "renewalScheduleType"),
+            |r| str_field(r, "renewalDate"),
+            |r| str_field(r, "updatedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_evidence_artifacts(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "NAME", "TYPE", "VERSION", "FILED", "ARCHIVED", "CREATED"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| str_field(r, "artifactName"),
+            |r| str_field(r, "artifactType"),
+            |r| scalar_field(r, "artifactVersion"),
+            |r| str_field(r, "filedAt"),
+            |r| str_field(r, "archivedAt"),
+            |r| str_field(r, "createdAt"),
         ],
         width,
     )
@@ -348,6 +1044,22 @@ fn render_monitors(rows: &[Value], width: usize) -> String {
             |r| str_field(r, "checkStatus"),
             |r| str_field(r, "checkResultStatus"),
             |r| str_field(r, "lastPassedAt"),
+        ],
+        width,
+    )
+}
+
+fn render_dcf_suggestions(rows: &[Value], width: usize) -> String {
+    render_table(
+        &["ID", "REQUEST", "DCF", "CONTROL", "CONFIDENCE", "STATUS"],
+        rows,
+        &[
+            |r| scalar_field(r, "id"),
+            |r| scalar_field(r, "requestId"),
+            |r| str_field(r, "dcfCode"),
+            |r| str_field(r, "controlName"),
+            |r| str_field(r, "confidenceLevel"),
+            |r| str_field(r, "status"),
         ],
         width,
     )
@@ -478,6 +1190,27 @@ fn str_field(row: &Value, key: &str) -> String {
         .unwrap_or_default()
 }
 
+/// An array of strings joined with commas; empty when absent.
+fn joined_strings(row: &Value, key: &str) -> String {
+    row.get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(","))
+        .unwrap_or_default()
+}
+
+/// One string field of each object in an array, joined with commas; empty when absent.
+fn joined_field(row: &Value, key: &str, field: &str) -> String {
+    row.get(key)
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.get(field)?.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default()
+}
+
 fn bool_field(row: &Value, key: &str) -> String {
     row.get(key)
         .and_then(|v| v.as_bool())
@@ -495,5 +1228,7 @@ fn scalar_field(row: &Value, key: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod parity;
 #[cfg(test)]
 mod tests;

@@ -1,120 +1,44 @@
 //! Coverage test: every spec operation must be reachable.
 //!
 //! Reachability has two sources:
-//! - **curated** typed commands (Phase 1: the vendors vertical), and
+//! - **curated** typed commands, counted from the command table
+//!   (`tests/commands/table.rs`), and
 //! - the **`raw`** namespace, which reaches ANY method+path pair.
 //!
 //! Because `raw` routes by method+path, an operation is reachable as long as it
 //! is routable (has a non-empty, upper-cased HTTP method and an absolute path).
 //! This test enumerates all operations from the spec, asserts each is routable
-//! (so the curated/raw split genuinely covers all 167 ops), and reports the
+//! (so the curated/raw split genuinely covers every op), and reports the
 //! curated-coverage percentage. It FAILS if a future op becomes unroutable or if
 //! a curated entry stops matching a real operation - the early-warning the
 //! design doc asks for.
 
 use drata_cli::spec::{self, Operation};
 
-/// The operations covered by curated typed commands as of Phase 3. Each entry is
-/// `(METHOD, path-template)` and MUST correspond to a real operation in the spec
-/// (the test asserts this, so a spec change that renames/removes one of these
-/// paths fails loudly rather than silently overstating coverage).
-const CURATED: &[(&str, &str)] = &[
-    // Phase 1: vendors vertical
-    ("GET", "/vendors"),
-    ("POST", "/vendors"),
-    ("GET", "/vendors/{vendorId}"),
-    ("PUT", "/vendors/{vendorId}"),
-    ("DELETE", "/vendors/{vendorId}"),
-    ("GET", "/vendors/{vendorId}/questionnaires"),
-    ("POST", "/vendors/{vendorId}/questionnaires"),
-    ("GET", "/vendors/{vendorId}/questionnaires/{questionnaireId}"),
-    // Phase 3: risks
-    ("GET", "/risk-registers/{riskRegisterId}/risks"),
-    ("POST", "/risk-registers/{riskRegisterId}/risks"),
-    ("GET", "/risk-registers/{riskRegisterId}/risks/{riskId}"),
-    ("PUT", "/risk-registers/{riskRegisterId}/risks/{riskId}"),
-    ("GET", "/risk-registers/{riskRegisterId}/insights"),
-    // Phase 3: controls
-    ("GET", "/workspaces/{workspaceId}/controls"),
-    ("POST", "/workspaces/{workspaceId}/controls"),
-    ("GET", "/workspaces/{workspaceId}/controls/{controlId}"),
-    ("PUT", "/workspaces/{workspaceId}/controls/{controlId}"),
-    ("GET", "/workspaces/{workspaceId}/controls/{controlId}/requirements"),
-    ("GET", "/workspaces/{workspaceId}/controls-requirement-comparison"),
-    // Phase 3: devices
-    ("GET", "/devices"),
-    ("GET", "/devices/{deviceId}"),
-    ("GET", "/personnel/{personnelId}/devices"),
-    ("GET", "/devices/{deviceId}/apps"),
-    // Phase 3: personnel
-    ("GET", "/personnel"),
-    ("GET", "/personnel/{personnelId}"),
-    ("PUT", "/personnel/{personnelId}"),
-    // Phase 3: policies
-    ("GET", "/policies"),
-    ("POST", "/policies"),
-    ("GET", "/policies/{policyId}"),
-    ("PUT", "/policies/{policyId}"),
-    ("GET", "/policies/{policyId}/actions"),
-    ("GET", "/policies/{policyId}/policy-versions"),
-    ("GET", "/policies/{policyId}/policy-versions/{policyVersionId}"),
-    // Phase 3: evidence library
-    ("GET", "/workspaces/{workspaceId}/evidence-library"),
-    ("POST", "/workspaces/{workspaceId}/evidence-library"),
-    ("GET", "/workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}"),
-    ("PUT", "/workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}"),
-    (
-        "DELETE",
-        "/workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}",
-    ),
-    (
-        "GET",
-        "/workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}/versions/{versionId}",
-    ),
-    // Phase 3: frameworks
-    ("GET", "/workspaces/{workspaceId}/frameworks"),
-    ("POST", "/workspaces/{workspaceId}/frameworks"),
-    ("PUT", "/workspaces/{workspaceId}/frameworks/{frameworkId}"),
-    ("GET", "/workspaces/{workspaceId}/frameworks/{frameworkId}/requirements"),
-    // Phase 3: assets
-    ("GET", "/assets"),
-    ("POST", "/assets"),
-    ("GET", "/assets/{assetId}"),
-    ("PUT", "/assets/{assetId}"),
-    ("DELETE", "/assets/{assetId}"),
-    // Phase 3: company
-    ("GET", "/company"),
-    // Phase 3: workspaces
-    ("GET", "/workspaces"),
-    // Phase 5: risk registers
-    ("GET", "/risk-registers"),
-    ("POST", "/risk-registers"),
-    ("GET", "/risk-registers/{riskRegisterId}"),
-    ("PUT", "/risk-registers/{riskRegisterId}"),
-    ("DELETE", "/risk-registers/{riskRegisterId}"),
-    // Phase 5: users and roles
-    ("GET", "/users"),
-    ("GET", "/users/{userId}"),
-    ("GET", "/roles"),
-    ("GET", "/roles/{roleId}"),
-    ("GET", "/roles/{roleId}/users"),
-    // Phase 5: monitoring tests
-    ("GET", "/workspaces/{workspaceId}/monitoring-tests"),
-    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}"),
-    ("PUT", "/workspaces/{workspaceId}/monitoring-tests/{testId}"),
-    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}/exclusions"),
-    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}/failures"),
-    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}/passes"),
-    // Phase 5: audits
-    ("GET", "/workspaces/{workspaceId}/audits"),
-    ("GET", "/workspaces/{workspaceId}/audits/{auditId}"),
-    // Phase 5: events
-    ("GET", "/events"),
-    ("GET", "/events/{eventId}"),
-];
+/// Operation count of the committed spec: a tripwire that fails on every spec refresh,
+/// so a refresh is a deliberate, reviewed change.
+const EXPECTED_OPERATIONS: usize = 308;
+
+/// The command table (`tests/commands/table.rs`). Only `method` and `path`
+/// are read here; `tests/commands.rs` reads the argv and response of each row.
+#[allow(dead_code)]
+#[path = "commands/table.rs"]
+mod table;
+
+/// Curated ops floor: the ops the curated commands reach as of the latest
+/// phase of `docs/plan/2026-11-05-drata-v2-endpoint-coverage.md`. A floor, not
+/// an equality: each phase raises it.
+const CURATED_FLOOR: usize = 227;
+
+/// The curated set, derived from the command table: every `(method, path)`
+/// here is reached by a command that `tests/commands.rs` dispatches and
+/// observes on the wire.
+fn curated() -> Vec<(&'static str, &'static str)> {
+    table::rows().map(|r| (r.method, r.path)).collect()
+}
 
 fn is_curated(op: &Operation) -> bool {
-    CURATED.iter().any(|(m, p)| *m == op.method && *p == op.path)
+    curated().iter().any(|(m, p)| *m == op.method && *p == op.path)
 }
 
 /// An operation is reachable via `raw` iff it is routable: a known upper-cased
@@ -126,7 +50,11 @@ fn raw_reachable(op: &Operation) -> bool {
 #[test]
 fn every_operation_is_reachable() {
     let ops = spec::operations().expect("spec operations parse");
-    assert_eq!(ops.len(), 167, "expected 167 operations");
+    assert_eq!(
+        ops.len(),
+        EXPECTED_OPERATIONS,
+        "expected {EXPECTED_OPERATIONS} operations"
+    );
 
     let unreachable: Vec<&Operation> = ops.iter().filter(|op| !is_curated(op) && !raw_reachable(op)).collect();
 
@@ -143,8 +71,8 @@ fn every_operation_is_reachable() {
 #[test]
 fn every_curated_entry_matches_a_real_operation() {
     let ops = spec::operations().expect("spec operations parse");
-    for (method, path) in CURATED {
-        let found = ops.iter().any(|op| op.method == *method && op.path == *path);
+    for (method, path) in curated() {
+        let found = ops.iter().any(|op| op.method == method && op.path == path);
         assert!(
             found,
             "curated entry `{} {}` has no matching spec operation",
@@ -160,25 +88,25 @@ fn reports_curated_coverage_percentage() {
     let curated = ops.iter().filter(|op| is_curated(op)).count();
     let pct = (curated as f64 / total as f64) * 100.0;
 
-    // Phase 5 raised the bar from 50 (Phase 3 baseline) to the Phase 5 set.
-    // This is a floor, not an equality: later phases raise it further.
-    assert!(
-        curated >= 70,
-        "curated coverage dropped below the Phase 5 baseline of 70 ops (got {})",
-        curated
-    );
-    assert_eq!(total, 167);
-
+    // Print before asserting so a failing run still shows the count.
     println!(
         "curated coverage: {}/{} operations ({:.1}%); raw covers all {}",
         curated, total, pct, total
     );
+
+    assert!(
+        curated >= CURATED_FLOOR,
+        "curated coverage dropped below the floor of {} ops (got {})",
+        CURATED_FLOOR,
+        curated
+    );
+    assert_eq!(total, EXPECTED_OPERATIONS);
 }
 
 #[test]
-fn operation_level_tags_number_thirty_five() {
+fn operation_level_tags_match_the_committed_spec() {
     let tags = spec::operation_tags().expect("operation tags parse");
-    assert_eq!(tags.len(), 35);
+    assert_eq!(tags.len(), 51);
     assert!(tags.contains(&"Audit Requests".to_string()));
     assert!(tags.contains(&"Procurement Connection Mappings".to_string()));
 }

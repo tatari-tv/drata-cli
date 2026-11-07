@@ -8,12 +8,14 @@
 //! Phase 4 adds: `--all` NDJSON streaming, `--expand`, confirm-on-mutation,
 //! document upload (multipart POST).
 
-use crate::cli::{RiskAction, RiskStatus, RiskTreatmentPlan};
+use crate::cli::{RiskAction, RiskSearchArgs, RiskSearchFacet, RiskStatus, RiskTicketAction, RiskTreatmentPlan};
 use crate::client::{DrataClient, Multipart};
 use crate::config::Config;
 use crate::confirm::ConfirmFn;
 use crate::expand::append_expand;
 use crate::output::print_value;
+use crate::query::{QueryPath, wire_name};
+use crate::resources::{search, ticket};
 use crate::spec;
 use eyre::{Result, bail};
 use serde_json::{Value, json};
@@ -25,6 +27,9 @@ pub fn example_if_requested(action: &RiskAction) -> Option<Result<String>> {
         RiskAction::Create { example: true, .. } => {
             Some(example_skeleton("POST", "/risk-registers/{riskRegisterId}/risks"))
         }
+        RiskAction::Ticket {
+            action: RiskTicketAction::Create { args, .. },
+        } => ticket::create_example(args, ticket::RISK_CREATE_SPEC_PATH),
         _ => None,
     }
 }
@@ -54,6 +59,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
             impact,
             likelihood,
             status,
+            vendor_id,
             example: _,
         } => {
             create(
@@ -67,6 +73,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
                 *impact,
                 *likelihood,
                 status.as_ref(),
+                *vendor_id,
             )
             .await
         }
@@ -79,6 +86,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
             impact,
             likelihood,
             status,
+            vendor_id,
         } => {
             update(
                 client,
@@ -92,6 +100,7 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
                 *impact,
                 *likelihood,
                 status.as_ref(),
+                *vendor_id,
             )
             .await
         }
@@ -101,6 +110,15 @@ pub async fn handle(action: &RiskAction, client: &DrataClient, config: &Config, 
             risk_id,
             files,
         } => upload(client, config, confirm, register_id, risk_id, files).await,
+        RiskAction::Remove { register_id, risk_id } => remove(client, config, confirm, register_id, risk_id).await,
+        RiskAction::Search(args) => {
+            let (query, facets) = build_search(args)?;
+            search::run(client, config, query, &facets).await
+        }
+        RiskAction::Ticket { action } => {
+            let (tickets, op) = ticket::risk_target(action)?;
+            ticket::handle(client, config, confirm, &tickets, op).await
+        }
     }
 }
 
@@ -145,6 +163,7 @@ async fn create(
     impact: Option<f64>,
     likelihood: Option<f64>,
     status: Option<&RiskStatus>,
+    vendor_id: Option<u64>,
 ) -> Result<()> {
     // register_id is clap-required unless --example (which never reaches here).
     let register_id =
@@ -170,6 +189,9 @@ async fn create(
     if let Some(s) = status {
         body["status"] = json!(risk_status_str(s));
     }
+    if let Some(v) = vendor_id {
+        body["vendorId"] = json!(v);
+    }
     let result = client
         .post(&format!("/risk-registers/{}/risks", register_id), body)
         .await?;
@@ -191,8 +213,9 @@ async fn update(
     impact: Option<f64>,
     likelihood: Option<f64>,
     status: Option<&RiskStatus>,
+    vendor_id: Option<u64>,
 ) -> Result<()> {
-    debug!(register_id, risk_id, "risk update");
+    debug!(register_id, risk_id, ?vendor_id, "risk update");
     if !confirm("PUT", &format!("/risk-registers/{}/risks/{}", register_id, risk_id))? {
         bail!("aborted");
     }
@@ -210,6 +233,9 @@ async fn update(
     }
     if let Some(s) = status {
         body["status"] = json!(risk_status_str(s));
+    }
+    if let Some(v) = vendor_id {
+        body["vendorId"] = json!(v);
     }
     let result = client
         .put(&format!("/risk-registers/{}/risks/{}", register_id, risk_id), body)
@@ -254,9 +280,59 @@ async fn upload(
     Ok(())
 }
 
+#[instrument(skip(client, config, confirm))]
+async fn remove(
+    client: &DrataClient,
+    config: &Config,
+    confirm: &ConfirmFn,
+    register_id: &str,
+    risk_id: &str,
+) -> Result<()> {
+    debug!(register_id, risk_id, "risk remove");
+    let path = format!("/risk-registers/{}/risks/{}", register_id, risk_id);
+    if !confirm("DELETE", &path)? {
+        bail!("aborted");
+    }
+    let result = client.delete(&path).await?;
+    print_value(&result, &config.output_format);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// The search query and the facet wire names. `/risks-search` spans every
+/// register; `/risk-registers/{id}/risks-search` is one register and does not
+/// accept the `riskRegisterId` facet, so that combination fails before any
+/// request. Pure.
+fn build_search(args: &RiskSearchArgs) -> Result<(QueryPath, Vec<String>)> {
+    if args.register_id.is_some() && args.facet.contains(&RiskSearchFacet::RiskRegisterId) {
+        bail!("--facet riskRegisterId is only valid when searching every register (omit --register-id)");
+    }
+    let base = match &args.register_id {
+        Some(id) => format!("/risk-registers/{}/risks-search", id),
+        None => "/risks-search".to_string(),
+    };
+    let mut q = QueryPath::new(base);
+    q.push_opt("q", args.q.as_deref())
+        .push_each("status[]", args.status.iter().map(wire_name))
+        .push_each("treatmentPlan[]", args.treatment_plan.iter().map(wire_name))
+        .push_each("type[]", args.kinds.iter().map(wire_name))
+        .push_each("riskRegisterId[]", &args.risk_register_ids)
+        .push_opt("inherentScoreGte", args.inherent_score_gte)
+        .push_opt("inherentScoreLte", args.inherent_score_lte)
+        .push_opt("residualScoreGte", args.residual_score_gte)
+        .push_opt("residualScoreLte", args.residual_score_lte)
+        .push_each("categories[]", &args.categories)
+        .push_each("controls[]", &args.controls)
+        .push_each("ownerEmails[]", &args.owner_emails)
+        .push_each("reviewerEmails[]", &args.reviewer_emails)
+        .push_each("vendorNames[]", &args.vendor_names)
+        .push_each("expand[]", args.expand.iter().map(wire_name));
+    let facets = args.facet.iter().map(wire_name).collect();
+    Ok((q, facets))
+}
 
 fn set_opt(body: &mut Value, key: &str, value: Option<&str>) {
     if let Some(v) = value {

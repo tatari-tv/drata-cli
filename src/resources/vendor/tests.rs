@@ -51,6 +51,14 @@ fn example_only_for_create_with_flag() {
         patterns: vec![],
         all: false,
         expand: vec![],
+        status: vec![],
+        category: vec![],
+        vendor_type: vec![],
+        vendor_type_id: vec![],
+        vendor_user_id: vec![],
+        sub_processor: None,
+        action_required: None,
+        review_deadline_status: vec![],
     };
     assert!(example_if_requested(&list).is_none());
 }
@@ -59,4 +67,119 @@ fn example_only_for_create_with_flag() {
 fn example_skeleton_is_valid_json() {
     let parsed: Value = serde_json::from_str(VENDOR_CREATE_EXAMPLE).unwrap();
     assert_eq!(parsed["name"], json!("Example Vendor"));
+}
+
+#[test]
+fn vendor_list_encodes_status_filters() {
+    use crate::cli::{ReviewDeadlineStatus, VendorCategory, VendorStatus, VendorType};
+    let path = build_list_path(
+        &["documents".to_string()],
+        &[VendorStatus::Active, VendorStatus::OnHold],
+        &[VendorCategory::Cs],
+        &[VendorType::Supplier],
+        &[4, 5],
+        &[9],
+        Some(true),
+        Some(false),
+        &[ReviewDeadlineStatus::DueSoon, ReviewDeadlineStatus::Overdue],
+    );
+    // Array filters repeat their bracketed key once per value (never
+    // comma-joined); the two booleans are scalars; expand[] comes last.
+    assert_eq!(
+        path,
+        "/vendors?statuses%5B%5D=ACTIVE&statuses%5B%5D=ON_HOLD\
+         &categories%5B%5D=CS\
+         &types%5B%5D=SUPPLIER\
+         &vendorTypeIds%5B%5D=4&vendorTypeIds%5B%5D=5\
+         &vendorUserIds%5B%5D=9\
+         &isSubProcessor=true&actionRequired=false\
+         &nextReviewDeadlineStatus%5B%5D=DUE_SOON&nextReviewDeadlineStatus%5B%5D=OVERDUE\
+         &expand%5B%5D=documents"
+    );
+}
+
+#[test]
+fn vendor_list_without_filters_is_bare() {
+    let path = build_list_path(&[], &[], &[], &[], &[], &[], None, None, &[]);
+    assert_eq!(path, "/vendors");
+}
+
+#[test]
+fn vendor_list_status_flag_is_space_separated_and_case_insensitive() {
+    use crate::cli::{Cli, Commands};
+    use clap::Parser;
+    let cli = Cli::try_parse_from(["drata", "vendor", "list", "--status", "active", "on_hold"]).unwrap();
+    let Commands::Vendor {
+        action: VendorAction::List { status, .. },
+    } = cli.command
+    else {
+        panic!("expected vendor list");
+    };
+    assert_eq!(status.len(), 2);
+}
+
+#[test]
+fn search_query_encodes_filters_and_collects_facets() {
+    use crate::cli::{Cli, Commands};
+    use clap::Parser;
+    let cli = Cli::try_parse_from([
+        "drata",
+        "vendor",
+        "search",
+        "--q",
+        "okta",
+        "--status",
+        "active",
+        "--category",
+        "security",
+        "--vendor-type-id",
+        "4",
+        "5",
+        "--risk",
+        "high",
+        "--impact-level",
+        "major",
+        "--sub-processor",
+        "false",
+        "--action-required",
+        "true",
+        "--renewal-from",
+        "2026-01-01",
+        "--renewal-to",
+        "2026-12-31",
+        "--review-deadline-status",
+        "overdue",
+        "--security-review-status",
+        "completed",
+        "--security-review-decision",
+        "rejected",
+        "--expand",
+        "documents",
+        "--facet",
+        "status",
+        "vendorTypeId",
+    ])
+    .unwrap();
+    let Commands::Vendor {
+        action: VendorAction::Search(args),
+    } = cli.command
+    else {
+        panic!("expected vendor search");
+    };
+    let (query, facets) = build_search(&args);
+    assert_eq!(
+        query.finish(),
+        "/vendors-search?q=okta&status%5B%5D=ACTIVE&category%5B%5D=SECURITY\
+         &vendorTypeIds%5B%5D=4&vendorTypeIds%5B%5D=5&risk=HIGH&impactLevel=MAJOR\
+         &isSubProcessor=false&actionRequired=true&renewalDateGte=2026-01-01&renewalDateLte=2026-12-31\
+         &nextReviewDeadlineStatus%5B%5D=OVERDUE&securityReviewStatus%5B%5D=COMPLETED\
+         &securityReviewDecision%5B%5D=REJECTED&expand%5B%5D=documents"
+    );
+    assert_eq!(facets, vec!["status", "vendorTypeId"]);
+}
+
+#[test]
+fn trust_overview_and_questions_paths() {
+    assert_eq!(build_trust_overview_path("3"), "/vendors/3/trust-overview");
+    assert_eq!(build_questions_path("3", "4"), "/vendors/3/questionnaires/4/questions");
 }

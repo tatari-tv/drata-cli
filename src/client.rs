@@ -150,6 +150,17 @@ pub fn encode_query(value: &str) -> String {
     utf8_percent_encode(value, QUERY_ENCODE_SET).to_string()
 }
 
+/// Characters that must be percent-encoded in one path segment: the query set
+/// plus the separators `/` and `?` and the escape `%`. `:` stays literal, so a
+/// `name:<draft name>` test id reads as the spec writes it.
+const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &QUERY_ENCODE_SET.add(b'/').add(b'?').add(b'%');
+
+/// Percent-encode a string for use as one URL path segment, so a free-text id
+/// cannot add segments or start the query string.
+pub fn encode_path_segment(value: &str) -> String {
+    utf8_percent_encode(value, PATH_SEGMENT_ENCODE_SET).to_string()
+}
+
 /// Region base URLs from the spec `servers` block. Selected by credential
 /// region; default is US.
 const US_BASE_URL: &str = "https://public-api.drata.com/public/v2";
@@ -186,6 +197,18 @@ pub fn base_url_for_region(region: &str) -> Result<&'static str> {
             )
         }
     }
+}
+
+/// Whether `send_inner` retries an HTTP 429.
+///
+/// `Default` retries up to `MAX_RETRY_ATTEMPTS` times, honoring `Retry-After`.
+/// `Never` sends once and returns the 429 as an `ApiError` carrying the
+/// server's body: for ops where 429 means "not now" (a post-run cooldown), not
+/// "slow down".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retry429 {
+    Default,
+    Never,
 }
 
 pub struct DrataClient {
@@ -230,11 +253,12 @@ impl DrataClient {
     }
 
     /// Shared request machinery: builds the request, sends it, retries 429
-    /// with `Retry-After` (bounded), maps 204 to `Value::Null`, and parses
-    /// error bodies through `format_api_error`. The write guardrail is enforced
-    /// here so every mutating path is covered, including `raw`.
-    #[instrument(skip(self, body), fields(%method, %path))]
-    async fn send_inner(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value> {
+    /// with `Retry-After` (bounded) unless `retry` is `Retry429::Never`, maps
+    /// 204 to `Value::Null`, and parses error bodies through
+    /// `format_api_error`. The write guardrail is enforced here so every
+    /// mutating path is covered, including `raw`.
+    #[instrument(skip(self, body), fields(%method, %path, ?retry))]
+    async fn send_inner(&self, method: Method, path: &str, body: Option<Value>, retry: Retry429) -> Result<Value> {
         if method != Method::GET && !self.allow_writes {
             warn!(%method, %path, "write blocked: credential not write-enabled");
             return Err(WriteGuardError {
@@ -264,7 +288,7 @@ impl DrataClient {
             let resp = req.send().await.context("HTTP request failed")?;
             let status = resp.status();
 
-            if status == StatusCode::TOO_MANY_REQUESTS {
+            if status == StatusCode::TOO_MANY_REQUESTS && retry == Retry429::Default {
                 if attempts > MAX_RETRY_ATTEMPTS {
                     bail!("Rate limited after {} attempts", MAX_RETRY_ATTEMPTS);
                 }
@@ -439,7 +463,7 @@ impl DrataClient {
 
     #[instrument(skip(self))]
     pub async fn get(&self, path: &str) -> Result<Value> {
-        self.send_inner(Method::GET, path, None).await
+        self.send_inner(Method::GET, path, None, Retry429::Default).await
     }
 
     /// GET a resource, returning `Ok(None)` on HTTP 404. All other errors
@@ -447,7 +471,7 @@ impl DrataClient {
     /// legitimate signal.
     #[instrument(skip(self))]
     pub async fn try_get(&self, path: &str) -> Result<Option<Value>> {
-        match self.send_inner(Method::GET, path, None).await {
+        match self.send_inner(Method::GET, path, None, Retry429::Default).await {
             Ok(v) => Ok(Some(v)),
             Err(e) => match e.downcast_ref::<ApiError>() {
                 Some(api_err) if api_err.status == StatusCode::NOT_FOUND => Ok(None),
@@ -458,17 +482,33 @@ impl DrataClient {
 
     #[instrument(skip(self, body))]
     pub async fn post(&self, path: &str, body: Value) -> Result<Value> {
-        self.send_inner(Method::POST, path, Some(body)).await
+        self.send_inner(Method::POST, path, Some(body), Retry429::Default).await
+    }
+
+    /// POST with no body, sent exactly once: a 429 comes back as an `ApiError`
+    /// carrying the server's body instead of being retried. For ops where 429
+    /// means "not now" (a post-run cooldown), not "slow down".
+    #[instrument(skip(self))]
+    pub async fn post_once(&self, path: &str) -> Result<Value> {
+        self.send_inner(Method::POST, path, None, Retry429::Never).await
     }
 
     #[instrument(skip(self, body))]
     pub async fn put(&self, path: &str, body: Value) -> Result<Value> {
-        self.send_inner(Method::PUT, path, Some(body)).await
+        self.send_inner(Method::PUT, path, Some(body), Retry429::Default).await
     }
 
     #[instrument(skip(self))]
     pub async fn delete(&self, path: &str) -> Result<Value> {
-        self.send_inner(Method::DELETE, path, None).await
+        self.send_inner(Method::DELETE, path, None, Retry429::Default).await
+    }
+
+    /// DELETE with a JSON body, for the ops whose spec requires one (the agent
+    /// review's `assessment-runs/current` takes `{}`).
+    #[instrument(skip(self, body))]
+    pub async fn delete_with_body(&self, path: &str, body: Value) -> Result<Value> {
+        self.send_inner(Method::DELETE, path, Some(body), Retry429::Default)
+            .await
     }
 
     /// Generic passthrough for the `raw` namespace. Non-GET is subject to the
@@ -476,7 +516,7 @@ impl DrataClient {
     #[instrument(skip(self, body))]
     pub async fn raw(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value> {
         let m = Method::from_str(&method.to_uppercase()).map_err(|_| eyre::eyre!("Invalid HTTP method: {}", method))?;
-        self.send_inner(m, path, body).await
+        self.send_inner(m, path, body, Retry429::Default).await
     }
 
     /// Paginate through all results for a Drata v2 cursor-paginated list
@@ -658,6 +698,7 @@ fn format_api_error(method: &Method, url: &str, status: StatusCode, body: &str) 
                 if !details.is_empty() {
                     s.push_str(&format!("\nDetails: {}", details.join("; ")));
                 }
+                s.push_str(&agent_guidance(&parsed));
                 s
             }
             // No message at the expected path: surface the raw body verbatim so
@@ -670,6 +711,40 @@ fn format_api_error(method: &Method, url: &str, status: StatusCode, body: &str) 
 
     format!("API error {} on {}: {}", status, target, body)
 }
+
+/// The agent review's 422 (`AgentActionNotAvailableResponsePublicV2Dto`)
+/// carries what to do next beside its `message`: one line per blocker
+/// (`reason: message [resolution]`), the actions available now, and the
+/// current step. Empty for any body without those keys.
+fn agent_guidance(parsed: &Value) -> String {
+    let mut out = String::new();
+    if let Some(blockers) = parsed.get("blockers").and_then(|b| b.as_array()) {
+        for b in blockers {
+            let reason = b.get("reason").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
+            let message = b.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            out.push_str(&format!("\nBlocker {}: {}", reason, message));
+            let resolution = b.get("resolution");
+            let r_type = resolution.and_then(|r| r.get("type")).and_then(|v| v.as_str());
+            let r_action = resolution.and_then(|r| r.get("action")).and_then(|v| v.as_str());
+            match (r_type, r_action) {
+                (Some(t), Some(a)) => out.push_str(&format!(" [{}: {}]", t, a)),
+                (Some(t), None) => out.push_str(&format!(" [{}]", t)),
+                _ => {}
+            }
+        }
+    }
+    if let Some(actions) = parsed.get("availableActions").and_then(|a| a.as_array()) {
+        let names: Vec<&str> = actions.iter().filter_map(|a| a.as_str()).collect();
+        let shown = if names.is_empty() { "none".to_string() } else { names.join(", ") };
+        out.push_str(&format!("\nAvailable actions: {}", shown));
+    }
+    if let Some(step) = parsed.get("currentStep").and_then(|s| s.as_str()) {
+        out.push_str(&format!("\nCurrent step: {}", step));
+    }
+    out
+}
+
+pub mod presigned;
 
 #[cfg(test)]
 mod tests;

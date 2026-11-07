@@ -1,0 +1,485 @@
+## Phase 0: Prove the unverified server behaviors
+### Design decisions
+- Keys came from the `DRATA_READONLY_API_KEY` and `DRATA_READWRITE_API_KEY` env vars (no `~/.config/drata/credentials.json` on this host) | scratchpad probe scripts | the read key for reads, the write key only for `POST /upload-urls`. The scripts passed the key to `curl` from the environment, so no key was echoed or written to a file.
+- Searched for a `zzz-clitest` monitor by paging the whole monitoring-test list, not only `?name=` | scratchpad | the server-side name filter is unverified, so a client-side scan rules out a false "none exists".
+
+### Deviations
+- None.
+
+### Tradeoffs
+- Skipped the retest probe rather than retesting a production monitor | no `zzz-clitest` test exists and the doc forbids any other target. The 409/429 behavior stays spec-documented, not live-verified.
+
+### Open questions
+- Create a `zzz-clitest` custom monitoring test (needs Phase 6's `monitor create`) so the retest cooldown gets probed during the Phase 6 shakedown?
+
+## Phase 1: Command table, truth-up, conform the existing curated surface
+### Design decisions
+- Command table lives in `tests/commands/table.rs`, pulled into both `tests/commands.rs` and `tests/coverage.rs` with `#[path]` | a file in a `tests/` subdirectory is not auto-built as its own test crate, and `#[path]` avoids a `mod.rs`. `coverage.rs` reads only `method` and `path`, so its `mod table` carries `#[allow(dead_code)]`.
+- One row per op, enforced by `rows_are_one_per_operation` | a second row for the same op would let a deleted row hide behind its twin and keep the count at 83.
+- Rows carry a `Response` enum (`Page`, `Object`, `Empty`) rather than a raw JSON value | three shapes cover every curated op; `Page` returns a null cursor so `get_all` stops after exactly one request.
+- `src/lib.rs` `run` now builds the client and calls a new `pub async fn dispatch(cli, client, config, confirm)` | the command table needs to dispatch over a client pointed at wiremock; `run` keeps its signature.
+- The dispatch test uses `default_confirm(cli.yes)` with `--yes` appended to every argv | it exercises the real confirm gate instead of an injected always-yes.
+- The leaf walk (`every_curated_leaf_has_a_row`) maps each row's argv to its subcommand path by descending `Cli::command()` while tokens name subcommands | no row needs a hand-written command path that could drift from its argv.
+- `src/cli.rs` vendor section moved to `src/cli/vendor.rs`, re-exported with `pub use vendor::*` | `cli.rs` was 1407 lines and the Phase 1 flags would have crossed the 1500-line bloat limit; `crate::cli::VendorAction` and friends keep their paths.
+- New `src/query.rs`: `QueryPath` (push / push_opt / push_each) and `wire_name` for clap `ValueEnum`s | vendor list, security-review list, control list and monitor list all build query strings; the security-review list's hand-rolled closure was replaced by it. `wire_name` reads clap's possible-value name, which equals the spec value because every filter enum is `SCREAMING_SNAKE_CASE`.
+- New filter enums `VendorStatus`, `VendorCategory`, `VendorType`, `ReviewDeadlineStatus`, `RequiredApprovals`, `SecurityReviewDocumentType` (all `ignore_case = true`) | the spec enumerates each, and Data Model says a curated flag that takes a Drata enum gets a `ValueEnum`.
+- `--sub-processor`, `--action-required`, `--draft` are `Option<bool>` taking `true|false` | matches the existing `monitor update --enabled`, and lets a caller filter on `false`.
+- `run-action` body is built by the pure `build_run_action_body`, which rejects `--decision`/`--note` with `reopen` and `--reset-decision` with `finalize` before confirm | the spec marks each "only valid when action is ..."; fail closed client-side rather than send a body the server rejects.
+- `control create` validates that `--external-evidence-metadata` and `--base64-files` each parse as a JSON array, then sends the flag text verbatim as the string field (`build_create_body`) | the spec types both as `string` holding a JSON array; a malformed value fails before the confirm prompt.
+- `evidence create` builders split into pure `build_create_form` (multipart, `--file`) and `build_create_body` (JSON, optional `fileKey`) over a `CreateFields` struct | the two shapes share four scalar fields; the struct keeps `create` under the clippy argument threshold.
+- Wire-level tests in `tests/commands.rs` (`vendor_update_sends_vendor_type_id`, `risk_create_and_update_send_vendor_id`, `audit_get_sends_expand`, `control_create_sends_evidence_defaults`, `security_review_update_sends_updated_at`) | those handlers build their bodies inline; dispatching through wiremock proves the flag reaches the wire without refactoring each handler.
+- `reports_curated_coverage_percentage` prints the count before asserting the floor | a run with a deleted row now prints `curated coverage: 82/308` instead of only the panic message.
+
+### Deviations
+- `evidence create --file` also requires `--filed-at`, `--owner-id` and `--renewal-schedule-type` (clap `requires`), not only `--filed-at` | the spec's `file` field says "When provided, `renewalScheduleType`, `filedAt`, and `ownerId` are required", the same rule as `fileKey`. `--file` and `--file-key` conflict (one artifact source). README's `evidence create --file` example gained `--filed-at` and `--owner-id` so it still parses.
+- `--document-type` on `create-with-file` is a required `ValueEnum` (8 spec values), not a required free-text string | same effect (clap exit 2 when missing), and the spec enumerates the values.
+- `README.md` "Development" paragraph now names the command table | not in the plan bullet; without it the README described the old hand-written floor.
+- Existing tests inverted by name: `create_with_file_omits_unset_optionals` -> `create_with_file_always_sends_document_type_and_omits_unset_optionals` (asserts `documentType` is always sent); `update_body_only_has_title_and_soc_form` and `run_action_body_uses_action_string` built their own JSON and exercised no production code, replaced by `update_body_has_only_update_fields` and the `run_action_*` builder tests.
+
+### Tradeoffs
+- Splitting `cli.rs` by noun (vendor only, now) vs a full per-noun split | only the vendor section moved: it is the largest and the one Phase 1 grows most. Later phases that add nouns can follow the same `src/cli/<noun>.rs` pattern.
+- Client-side rejection of finalize/reopen flag mixes vs passing them through for the server to judge | the spec states the rule plainly, and a rejected mutation is better caught before the confirm prompt.
+- `wire_name` uses `expect` on clap's possible value vs a hand-written match per enum | six new enums would each need a match that can drift from the clap names; no filter enum skips a variant, so the `expect` is an invariant, not a runtime path.
+
+### Open questions
+- `vendor security-review create-with-file` is still sent as multipart; the refreshed spec lists only `application/json` (with a binary `file` field) for it. The existing 415 fallback message still applies. Worth a live check during the shakedown?
+
+## Phase 2: Transport and upload URLs
+### Design decisions
+- `put_presigned` is a free function in `src/client/presigned.rs` that builds its own `reqwest::Client` per call (`redirect::Policy::none()`, 300s timeout) | it shares nothing with `DrataClient`, so no code path can attach the Bearer token or base URL. A per-call client costs nothing at one upload per invocation.
+- Signature `put_presigned(method: Method, url: &str, headers: &[(String, String)], bytes: Vec<u8>) -> Result<()>` | the caller supplies every header; SafeBase's Phase 6 will convert its response headers into the same slice.
+- Redaction is `redact_url` (split at `?`/`#`), applied to the error (`PresignedError`), the `instrument` span and every `debug!`. Transport errors go through `reqwest::Error::without_url` | reqwest's own error Display embeds the full URL, signature included; `transport_error_hides_the_query` pins it.
+- No retry and no redirect on the presigned path; a 3xx is an error | a redirect would replay a signed request to a host the caller never named.
+- `Retry429` lives in `src/client.rs` beside `send_inner`. Under `Never` a 429 falls through to the normal non-2xx branch, so it surfaces as an `ApiError` with the server's body | Phase 6 can match on `ApiError.status` for 409 vs 429 without a new error type. No public `Never` verb yet: Phase 6 adds the call site.
+- `src/data.rs`: `read_data(data, DataSource)`; `raw` and both curated `--data` flags (`vendor security-review create | update`) use `DataSource::Any`. The inline rejection message never echoes the rejected body | `FileOrStdinOnly` exists for Standard Connections' credential bodies.
+- `upload-url` resource lives in `src/resources/upload.rs` and its clap types in `src/cli/upload.rs` | `upload_url.rs` would be a compound filename; the noun's single word is `upload`.
+- `--purpose` is a `ValueEnum` `UploadPurpose` (spec `UploadPurposeEnum`, one value `evidence`) with `workspace_scoped()`; `build_request_body` fails before confirm when a workspace-scoped purpose has no `--workspace` | the spec says `workspaceId` is required for `evidence`; fail closed client-side.
+- With `--file`, the file is read before the `POST /upload-urls` (an unreadable file fails before the mutation); the response's `presignedUrl` and `objectKey` must both be strings before the PUT; on success only the bare `objectKey` is printed with `println!` | the value feeds `--file-key` directly (`$(drata upload-url create ...)`), and the presigned URL is never printed in this mode.
+- `mime_guess` was already a direct dependency (`Cargo.toml`, used by `send_multipart`) | no crate added, consistent with "No new crates".
+- Coverage floor raised to 84 in `tests/coverage.rs`; its comment no longer names a count | the count lives in the constant only.
+
+### Deviations
+- None.
+
+### Tradeoffs
+- No `--data`/`--example` on `upload-url create` vs the Overview's generic "flags plus `--data`" | API Design Phase 2 names exactly `--purpose`, `--workspace`, `--file`; the browser-flow fields (`includeWebUploadUrl`, `existingArtifactId`, `multiArtifact`, ...) stay reachable through `drata raw POST /upload-urls`.
+- No table renderer for the `/upload-urls` response vs adding `render_upload_url` | the no-`--file` response is a single object whose point is the URL; the JSON fallback prints it whole, and no existing sniff matches its keys.
+- Curated `--data` parsing still happens after the confirm prompt (as before) vs moving it ahead | moving it would read stdin (`--data -`) before the prompt reads the TTY; behavior unchanged from Phase 1.
+
+### Open questions
+- None.
+
+## Phase 3: Tickets, risk remove and search, framework requirement controls
+### Design decisions
+- One ticket implementation in `src/resources/ticket.rs`: `control_target`, `risk_target` and `monitor_target` fold each parent's ids into its `.../tickets` path and yield a `TicketOp` (`List | Link | Unlink | Create`); `ticket::handle` runs it | the three parents differ only by path, so the verbs exist once. `ControlTicketAction` has no `Create` variant, so `control ticket create` is a clap exit 2 by construction.
+- Three clap enums (`ControlTicketAction`, `RiskTicketAction`, `MonitorTicketAction`) in `src/cli/ticket.rs`, with `create`'s flags in one flattened `TicketCreateArgs` | positional names differ per parent (`<control_id>`, `<risk_id>`, `<test_id>`) and help should say so; one shared enum would print a generic "parent id".
+- `ticket create` flags: `--connection-id`, `--project-id`, `--issue-type-id`, `--list-id`, `--team-id`, `--field <field> <type> <value>` (repeatable, `num_args = 3`), `--use-rich-content`, `--data`, `--example`. `--data` conflicts with every field flag. The field `type` is checked against the spec's `TicketFieldTypePublicV2Enum` before the confirm prompt | a triple avoids a delimiter that a ticket value could contain.
+- `src/resources/search.rs` is the reusable search verb: `search::run(client, config, QueryPath, &[facet])`. No facets: `get_all`, rows. Facets: one `client.get` with `facets[]`, the whole envelope printed as JSON regardless of `--output` | the table renderer shows only `data[]` and would silently drop the facet counts. Phase 4 and Phase 7 pass their own `QueryPath`.
+- `risk search` is one verb over both ops: `--register-id` switches `/risks-search` to `/risk-registers/{id}/risks-search`. `--facet riskRegisterId` with `--register-id` fails before any request, since `RiskSearchInRegisterFacetEnum` omits it. `--facet` and `--expand` are camelCase `ValueEnum`s (`RiskSearchFacet`, `RiskSearchExpand` in `src/cli/risk.rs`) read through `wire_name`.
+- `risk remove` is `DELETE /risk-registers/{id}/risks/{riskId}` through confirm. `framework requirement controls <ws> <fw> <req>` is a new `requirement` noun under `framework`, via `get_all`.
+- `render_tickets` in `src/output/table.rs`, sniffed on `externalTicketId` and placed first | a unique key in first position cannot collide with a looser sniff.
+- `monitor::example_if_requested` and its arm in `lib.rs::example_if_requested` added | monitor had no `--example` before, and `monitor ticket create --example` must run without credentials.
+- Coverage floor raised to 99; 15 rows added to `tests/commands/table.rs`.
+
+### Deviations
+- None from the doc's command names or ops. Same effect, different seam: the ticket-create `--example` skeletons come from `spec::example_for_operation` rather than hand-written text, since the generator already tracks the spec.
+
+### Tradeoffs
+- No flags for `risk search`'s date-range params (`anticipatedCompletionDate*`, `completedDate*`), `sort`, `sortDir`, `customFields`, `customRangeFields` | the doc names no flag list and the structured custom-field filters have no obvious flag shape. They stay reachable through `drata raw GET /risks-search?...`.
+- No `--sort`/`--sort-dir` on the ticket lists | nothing in the plan needs ordering; `get_all` returns the server default.
+- `risk search` as one verb with an optional `--register-id` vs two verbs | the doc names one `risk search`; the facet rule that differs between the ops is a pre-request check.
+- Ticket `create` builds its body before the confirm prompt (Phase 1/2 handlers build after) | flag errors and unreadable `--data` files should fail before asking.
+
+### Open questions
+- None.
+
+## Phase 4: Vendor-adjacent reads, VSR notes, observations, assessments
+### Design decisions
+- Clap types in `src/cli/vendor/{search,reference,finding}.rs`, re-exported from `src/cli/vendor.rs` | `vendor.rs` was 463 lines and the new types would have nearly doubled it; the submodule dir follows the no-`mod.rs` rule.
+- Five new top-level nouns `vendor-criteria`, `vendor-criteria-creation`, `vendor-questionnaire-template`, `vendor-risk-level`, `vendor-security-review` (the cross-vendor list), implemented together in `src/resources/vendor/reference.rs` | the spec's resource names slugged per the Overview naming rule; each is a handful of `get_all` lists, so one file with one pure path builder per op.
+- Notes and observations share one implementation, `src/resources/vendor/security/finding.rs`, parameterized by `Kind` (`notes|observations`, body field `note|observation`); `note_target` / `observation_target` fold each clap enum into a common `Target` | the two collections differ only by path segment and field name. Two clap enums stay separate so help and flags say `--note` / `--observation`. Assessments are `security/assessment.rs`.
+- Security-review, note, observation and assessment ids are `u64` positionals, vendor id stays `String` | matches `vendor security-review get`, and a non-numeric id is a clap exit 2 instead of a path-injected request.
+- `create`/`update` ids are `required_unless_present = "example"` and `Option` in the enum, so `--example` runs with no ids (the existing `security-review create --example` needs dummy ids). The handler path errors if they are missing; unreachable through clap.
+- `--example` skeletons for note/observation create and update come from `spec::example_for_operation`; `vendor::example_if_requested` and `security::example_if_requested` now return `Option<Result<String>>` to carry that (the static ones are wrapped) and `lib.rs` lost its `.map(Ok)`.
+- `update` has `--clear-source` (sends `source: null`, the spec's documented clear) conflicting with `--source`; an update with no field is an error before the confirm prompt.
+- `search::fetch` split out of `search::run`: it returns the value to print (`{data: rows}` for the all-pages path, the whole envelope with facets) and `run` only prints | `vendor_search_facet_returns_envelope` can assert on the printed value, not just the request. Behavior unchanged.
+- `vendor search` flags: `--q`, `--status`, `--category`, `--vendor-type-id`, `--vendor-user-id`, `--risk`, `--impact-level`, `--sub-processor`, `--action-required`, `--renewal-from`, `--renewal-to`, `--review-deadline-status`, `--security-review-status`, `--security-review-decision`, `--expand`, `--facet`. Reuses `VendorStatus`, `VendorCategory`, `ReviewDeadlineStatus`, `SecurityReviewStatus`, `SecurityReviewDecision`. New enums: `VendorRisk`, `ImpactLevel`, `Severity`, `CriterionType`, `CriteriaExpand`, `CriteriaCreationStatus`, `TemplateStatus`, `AssessmentStatus` (`N_A` pinned with `#[value(name)]`), `VendorSearchExpand`, `VendorSearchFacet`.
+- Renderers (`src/output/table.rs`), all placed above the `recipientEmail` and vendor sniffs: `render_findings` (`securityReviewId` + `note|observation`), `render_assessments` (`criteriaName` + `currentStatus`), `render_assessment_stats` (`notMet` + `partiallyMet`), `render_criteria` (`isDraft` + `severity`), `render_templates` (`isDefault` + `title`), `render_questions` (`question` + `allowMultipleSelection`, so a control's `code` + `question` row is untouched), `render_risk_levels` (`position` + `isSystem`), `render_criteria_creations` (exactly the four keys `id, workspaceId, status, createdAt`, the only unique signal that shape has). `vendor search` rows are vendor-shaped and use `render_vendors`; the cross-vendor review list uses the existing `render_security_reviews`.
+- Renderer test feeds each op's spec response `example` values (read from the embedded spec, not hand-copied) through `pick_renderer`, plus a guard that a control, vendor and security review still pick their old renderers.
+- 22 rows added to `tests/commands/table.rs`; floor raised 99 -> 121.
+
+### Deviations
+- None from the doc's command names or ops. Same effect, different seam: the facet test asserts on `search::fetch`'s returned value (what `run` prints) because stdout is not capturable in the in-process command table.
+
+### Tradeoffs
+- No `--sort`/`--sort-dir`, `--size`, `--include-total-count` on any new list; no `renewalScheduleType`, `scheduledQuestionnaireStatus`, `customFields`, `customRangeFields` on `vendor search` | the doc names no flag list and the structured custom-field filters have no obvious flag shape; reachable through `drata raw`.
+- `vendor-security-review list` has no `--all` NDJSON stream (the per-vendor list does) | the doc names none; `get_all` rows serve the cross-vendor read.
+- Reused `VendorStatus` (includes `CURRENT`, which `/vendors-search` `status[]` omits) and `VendorCategory` (includes `NONE`, which the template `categories[]` omits) | a value the server does not accept comes back as its 400 instead of adding two near-duplicate enums.
+- No renderer for `vendor trust-overview` (`{"overview": "..."}`) | a one-key sniff would be the loosest in the file; the JSON fallback prints it whole.
+- `render_criteria_creations` sniffs on an exact key set | a new server field makes it fall back to JSON, which is harmless; a looser sniff could steal other rows.
+
+### Open questions
+- None.
+
+### Phase 4 follow-up (supersedes the enum-reuse tradeoff above)
+#### Design decisions
+- Every enum flag added in Phase 4 now accepts exactly the spec's values for its op's param. `vendor search --status` takes `VendorSearchStatus` (no `CURRENT`); `vendor-questionnaire-template list --category` takes `TemplateCategory` (no `NONE`). `vendor list` keeps `VendorStatus` with `CURRENT`, `vendor search --category` keeps `VendorCategory` with `NONE`. A value the spec omits is a clap usage error (exit 2), not a server 400.
+- The audit found two more free-string flags whose params are spec enums: `expand` on `vendor-security-review list` (now `ReviewListExpand`: user, requesterUser, vendor) and on note/observation list and get (now `FindingExpand`: user). Both were `Vec<String>`.
+- `tests/enums.rs` compares each Phase 4 enum's wire names with the `enum` of its op's param in the embedded spec (set equality, both directions), so a spec refresh that adds or drops a value fails the test. Parse tests pin the two rejections and that the sibling commands still accept those values.
+- Every other Phase 4 enum already matched its op's spec enum exactly.
+
+#### Deviations
+- None.
+
+#### Tradeoffs
+- Two near-duplicate enums (`VendorSearchStatus`, `TemplateCategory`) instead of reuse | the spec's value sets differ per op, and a flag must never accept a value the spec does not list.
+
+#### Open questions
+- None.
+
+## Phase 5: VSR agent workflow
+### Design decisions
+- 17 verbs, flat under `drata vendor security-review`. Names are the spec's `AgentReviewActionEnum` values slugged wherever the op has one, so the `availableActions` of a 422 names the verb to run next. The rest use the path's resource name. Verb map: `start-agent` (POST `agent`), `confirm-criteria` (POST `criteria-confirmations`), `start-assessment` (POST `assessment-runs`, which also re-runs; the enum's `re_run_assessment` hits the same op), `stop-assessment` (DELETE `assessment-runs/current`), `collect-public-documents` (POST `public-document-collections`), `access-request-requirements` (GET), `request-trust-center-access` (POST `access-requests`), `provide-trust-center-access-link` (POST `access-links`), `skip-trust-center-access-request` (POST `access-request-skips`), `add-documents` (multipart POST `documents`), `generate-follow-up-questionnaire` (POST `follow-up-questionnaires`), `follow-up-questionnaire` (GET), `send-follow-up-questionnaire` (POST `follow-up-questionnaire-sends`), `residual-risk` (GET), `finalize` (POST `finalizations`), `summary` (GET `summary/status`), `workflow` (GET). `workflow` and `summary` are the names the doc's Non-Goals already use.
+- Clap types in `src/cli/vendor/agent.rs` as `SecurityReviewAgentAction`, flattened into `VendorSecurityReviewAction` with `#[command(flatten)] Agent(...)` | the verbs sit directly under `security-review` while their types stay out of `vendor.rs`. Shared positionals are `ReviewIds` (`vendor_id: String`, `security_review_id: u64`, matching Phase 4) and `ExampleReviewIds` (both optional, `required_unless_present = "example"`) for the five body verbs with `--example`.
+- Implementation in `src/resources/vendor/security/agent.rs`: `plan(action) -> Call` resolves every verb to its request with no I/O beyond reading `--data`/`--fields`, and `handle` confirms, sends and prints | path and body tests run on `plan` and the pure builders. `Call` is an enum (`Get`, `Post`, `PostForm`, `Delete`) so a method can only carry the body shape it takes; no runtime method/body mismatch branch exists.
+- Every 2xx body prints through `print_value`, the 202 acceptance body included; nothing polls. The command table's new `Response::Accepted` answers the nine 202 ops with a real 202 and `{securityReviewId, workflowId, action}`, so each row proves a 202 dispatches clean.
+- The empty-bodied action ops send `{}`: the spec marks `AgentReviewActionRequestPublicV2Dto` as a required body. `stop-assessment` is a DELETE with `{}` for the same reason, through a new `DrataClient::delete_with_body` (`src/client.rs`).
+- Body verbs: `confirm-criteria --criterion-id <id>...` (omitted sends `{}`, the server's default set); `request-trust-center-access --fields <json object|@file|->` (wrapped as `{"fields": ...}`, a non-object is an error); `provide-trust-center-access-link --access-link`; `send-follow-up-questionnaire --email... --cc... --bcc... --email-subject --email-content`; `finalize --decision --note`. Each also takes `--data` (through `read_data`, conflicting with the field flags) and `--example` (from `spec::example_for_operation`). `add-documents --file <path>... [--type]` builds a `Multipart` with every file under `files`.
+- Client-side limits from the spec fail before confirm: 1 to 10 `add-documents` files, 1 to 5 `--email`, at most 5 `--cc`/`--bcc`, `--decision` required on `finalize` (the spec: no default, unlike `run-action`).
+- Enum flags reuse existing types whose values match the op exactly: `finalize --decision` is `SecurityReviewDecision` (= `SecurityReviewFinalizeDecisionEnum`), `add-documents --type` is `SecurityReviewDocumentType` (= the multipart `type` enum). `tests/enums.rs` gains `body_values` (reads a request-body field's enum, JSON or multipart) and `agent_body_enums_match_the_spec`.
+- A 422 still fails the command through `ApiError` and `format_api_error`. `format_api_error` now appends `agent_guidance`: one `Blocker <reason>: <message> [<resolution type>: <action>]` line per blocker, `Available actions: ...` and `Current step: ...`, only when the body carries those keys | the agent's 422 (`AgentActionNotAvailableResponsePublicV2Dto`) says what to do next beside `message`, and printing only `message` would hide it.
+- No new renderers. `agent_workflow_responses_print_whole_as_json` feeds every Phase 5 success response's spec shape through `pick_renderer` and asserts none claims it | none of the 17 shapes is a list of rows; a sniff stealing one would print a partial table of another resource. `spec_response_row` grew a general `spec_response_object(method, path, status, every_key)`; with `every_key` a property with no `example` is present as `null` (`summary/status` has no examples).
+- Bodies are never logged in `agent::handle`: the access link and the access-request form are secrets.
+- 17 rows added to `tests/commands/table.rs`; floor raised 121 -> 138.
+
+### Deviations
+- None from the doc's ops or rules. Same effect, different seam: the "a 422 from `finalizations` exits non-zero" criterion is proven in-process (`finalizations_422_fails_and_prints_the_servers_message` asserts `dispatch` returns `Err` with the server's message and one request); `main` returns that `Err`, which exits 1. The binary has no base-URL seam to point at wiremock, the same constraint Phase 2 and Phase 4 recorded.
+- `format_api_error` gained the blocker/actions lines (above). The plan says only "printed through `format_api_error`"; the extension stays inside that function and changes nothing for a body without those keys (`plain_errors_carry_no_agent_guidance`).
+
+### Tradeoffs
+- Flat verbs under `security-review` vs an `agent` subgroup | the doc names `vendor security-review workflow` / `summary` directly, and the enum-derived names already mark the agent verbs. The cost is a long `security-review --help` (31 entries).
+- One `start-assessment` verb for start and re-run vs two verbs | both actions are the same op; the help says it re-runs.
+- `--fields` takes the whole form as one JSON object vs a repeatable `--field <name> <value>` | form values are a string, a boolean or a list of strings, and a two-token flag cannot say which without a type token. The form's names come from `access-request-requirements`.
+- `--access-link` is a plain flag vs `@file`/stdin only | the doc's file-or-stdin rule covers Standard Connections credentials only. `--data @file` or `--data -` keeps the link out of shell history today; see Open questions.
+- Recipient and file-count limits checked client-side vs leaving them to the server's 400 | same as Phase 1's run-action rule: a mutation the spec forbids fails before the confirm prompt.
+
+### Open questions
+- Should `provide-trust-center-access-link` accept the link only from a file or stdin, like the Standard Connections credentials? The spec says to treat it as a secret ("anyone with it can read those documents"), and as a flag it lands in shell history and the process table.
+
+### Phase 5 follow-up: access link from a file or stdin only (supersedes the `--access-link` tradeoff and closes the open question above)
+#### Design decisions
+- `provide-trust-center-access-link` takes its body only as `--data <@file|->`, read through `read_data` with `DataSource::FileOrStdinOnly`; `--access-link <url>` is gone (`--access-link` is now a clap usage error, exit 2). Of the two shapes offered (`--access-link <@file|->` holding one URL, or `--data <@file|->` holding the JSON body) I chose `--data`. It reuses the one reader and rule the Standard Connections credentials get, and `--example` prints exactly the file to fill in (`{"accessLink": "..."}`) with no second format to explain.
+- Inline JSON fails in `plan`, before confirm and before any request, with the shared `read_data` message naming `@file` and `-` (stdin). `--data` is `required_unless_present = "example"`.
+- `check_access_link_body` (`src/resources/vendor/security/agent.rs`) requires an object with a non-empty string `accessLink` and its error names only the JSON kind, never the value. The confirm prompt shows method and path; `agent::handle` logs method and path only; `read_data` logs the file path, never the body.
+- The command-table row now passes `--data @tests/fixtures/access-link.json` (`ACCESS_LINK_DATA` in `tests/commands/table.rs`). The fixture is a test input under `tests/`, not `docs/`.
+- Tests: `access_link_inline_data_is_rejected_before_any_request` (wiremock sees zero requests, the error never contains the link), `access_link_file_data_sends_the_access_link_body`, and unit tests `access_link_rejects_inline_data_without_echoing_it`, `access_link_reads_its_body_from_a_file`, `access_link_body_needs_a_non_empty_link_and_never_quotes_it`, `access_link_has_no_inline_flag`. Each was run against its reverted change and failed.
+
+#### Deviations
+- None.
+
+#### Tradeoffs
+- `--data` holding JSON vs `--access-link` holding a bare URL | one reader and one rule for every secret body, at the cost of wrapping one URL in JSON; `--example` prints that wrapper.
+
+#### Open questions
+- None. The Phase 5 open question is closed: yes, file or stdin only.
+
+## Phase 6: Monitoring tests
+### Design decisions
+- Verb map (all under `drata monitor`): `create` (POST `monitoring-tests`), `validate-recipe` (POST `action-validate-recipe`), `recipe` (PUT `{testId}/recipe`), `retest` (POST `{testId}/action-retest`), `exclusion create` (POST `exclusions`), `exclusion remove` (POST `exclusions/action-delete`), `codebase-exclusion list | create | remove` (GET/POST `codebase-exclusions`, POST `codebase-exclusions/action-delete`). `remove` is the house verb for a delete (`risk remove`, `evidence remove`); the spec's `action-delete` is a POST, not a DELETE.
+- The monitor clap types moved from `src/cli.rs` to `src/cli/monitor.rs` (re-exported) | the new verbs would have taken `cli.rs` to about 1400 lines; same pattern as Phase 1's vendor split. New shared positionals `MonitorTestIds` and `ExampleMonitorTestIds` (optional, `required_unless_present = "example"`).
+- `src/resources/monitor.rs` `plan(action) -> Option<Call>` resolves every Phase 6 verb to a `Call` (`Get | Post | Validate | Put | Retest | Bulk`) with no I/O beyond reading `--recipe`/`--data`; `run` confirms, sends and applies the verb's exit rule. Pure builders live in `src/resources/monitor/custom.rs` (create, validate, recipe bodies, `check_validation`, `retest_error`) and `src/resources/monitor/exclusion.rs` (exclusion bodies, codebase list path) | same shape as Phase 5's `agent::plan`, so path and body tests run without a server.
+- Recipes: `create`, `validate-recipe` and `recipe` take `--recipe <json|@file|->` (checked to be a JSON object) beside `--name`, `--description`, `--connection-id`, plus `--data <json|@file|->` for the whole body (conflicts with every field flag) and `--example`. Bodies and `--data` are read before the confirm prompt, as in Phases 3 and 5.
+- `--example` for the three recipe verbs splices a full recipe into the op's skeleton: the generic skeleton stops at `MAX_DEPTH` and printed `providers: [null]`. `recipe_example` assembles it from three component schemas through a new `spec::example_for_schema(name)`, so the recipe keeps the spec's own provider, resource and evaluator examples. `MAX_DEPTH` is unchanged (raising it would change every other op's skeleton).
+- `retest` sends one bodiless POST through a new `DrataClient::post_once` (`Retry429::Never`; the spec gives the op no request body). `custom::retest_error` wraps a 409 as "already has a run in flight" and a 429 as "in the cooldown that follows a completed run"; the wrapped `ApiError` still carries the server's message, so `{:#}` prints both. Every other error passes through unchanged.
+- `validate-recipe` takes no confirm (it saves nothing) but still goes through the write guard in `send_inner` | the guard covers every non-GET by design; the spec also needs the Create Custom Monitor permission. The op answers 200 for valid and invalid recipes: the response prints, then `check_validation` fails the command when `isValid` is false (or missing), so a script can gate on the exit code.
+- New `src/resources/bulk.rs` holds the per-item rule for any bulk op: `bulk::post` prints every row, then `check` fails with `<n> of <m> items failed`. The exclusion ops answer 409/422/500 with every row when no item succeeded; `bulk::post` reads those rows out of the `ApiError` body, prints them, and fails with `HTTP <status>: <n> of <m> items failed`. A body without a `data` array is an error, never an empty pass. The failure predicate is a parameter (`bulk::status_code_failed` here) so Phases 7 and 13 can pass their own.
+- A row fails when its per-item `statusCode` is 400 or above (or missing). That counts `SKIPPED_ALREADY_EXCLUDED` (409) and `SKIPPED_NO_EXCLUSION` (422) as failures | the spec types them as 4xx per-item statuses, and the server answers the whole request 409/422 when every item is skipped.
+- `exclusion create --failure <id> <connection-id>` (repeatable, `num_args = 2`); `null` sends JSON null, since the spec makes `connectionId` required and nullable. Client-side limits from the spec fail before confirm: 1 to 300 failures, finding IDs and exclusion IDs; at most 300 `--connection-id`.
+- Test ids go into the path through a new `client::encode_path_segment` (the query set plus `/`, `?`, `%`; `:` stays literal) | `recipe` takes `name:<exact draft name>` per the spec, and a draft name with a space or slash must stay one segment.
+- `codebase-exclusion list` uses `get_all` (the op has a cursor) with `--repository-name` and `--expand` (`CodebaseExclusionExpand`, the spec's one value `exclusionDesignator`; added to `tests/enums.rs`).
+- Renderers in `src/output/table.rs`: `render_item_results` (`statusCode` + `outcome`: STATUS, OUTCOME, ITEM, EXCLUSION_IDS, ERROR), `render_codebase_exclusions` (`findingId` + `repositoryName`), `render_retests` (exactly `{testId, checkStatus}`, above the monitor sniff that would otherwise show an empty ID and NAME). A monitoring test (create and recipe responses) still picks `render_monitors`; the validation response matches no sniff and prints as JSON.
+- Command table: `Response::Json(status, body)` added for rows whose exit rule reads the body (`ITEM_RESULTS`, `RECIPE_VALID`). 9 rows added; floor raised 138 -> 147.
+
+### Deviations
+- Same effect, different seam: the 409/429 criterion is proven in-process (`retest_409_is_sent_once_fails_and_prints_the_servers_message`, `retest_429_is_sent_once_fails_and_prints_the_servers_message`): `dispatch` returns `Err` carrying the server's message after exactly one request; `main` returns that `Err`, which exits 1. The binary has no base-URL seam, as Phases 2, 4 and 5 recorded.
+- `src/spec.rs` gained `example_for_schema` and `src/client.rs` gained `post_once` and `encode_path_segment`; the plan names none of them. Each is the narrowest seam for a Phase 6 need (a full recipe example, `Retry429::Never` on a public call, a `name:` test id).
+
+### Tradeoffs
+- `--recipe` flag beside `--data` vs `--data` only | the recipe is the field that changes; `--recipe @recipe.json --name ...` keeps it in a file without hand-writing the envelope. `--example` prints the whole body, which is the `--data` shape.
+- Skips counted as failures (exit 1) vs only `FAILED_*` outcomes | the per-item `statusCode` is the server's own success signal; an exclusion that already existed did not do what the caller asked.
+- `exclusion remove` and `codebase-exclusion remove` take only `--exclusion-id` (no `--data`/`--example`) | the body is just the ID list, which the flag covers whole.
+- No `--sort`, `--sort-dir`, `--include-total-count` on `codebase-exclusion list` | same as Phases 3 and 4; reachable through `drata raw`.
+
+### Open questions
+- `monitor exclusions` (the June-era list, `GET .../exclusions`) now sits beside the new `monitor exclusion create | remove` group. I left the existing verb unrenamed (Non-Goals: no renames) and gave the list no second row, since the command table allows one row per op. Should `monitor exclusions` move to `monitor exclusion list` so it matches `codebase-exclusion list`? That is a breaking rename.
+- The Phase 0 open question still stands: the retest cooldown is unprobed live. `monitor create` now exists to make a `zzz-clitest` custom test for the shakedown, but it needs the Custom Connections and Tests feature and a Custom Connection, and creating a test is a write the doc's shakedown list does not include.
+
+## Phase 7: Personnel, groups, compliance-check exclusions, custom fields, custom-connection attributes
+### Design decisions
+- Verb map (15 ops, 15 rows added to the command table, floor 147 -> 162): `personnel search [--workspace-id <id>]` (omitted: `/personnel-search`; given: the per-workspace op), `personnel group list | counts | add | replace | remove` (the five beta scoped-personnel-group ops plus `scoped-personnel-counts`; every help ends `(beta)`), `group list`, `compliance-check-exclusion list | create | remove` (`remove` is the POST `action-delete`, the house verb for a delete as in Phase 6), `custom-field list | get | create`, `custom-connection resource-attribute <ws> <connection> <resource>`. `personnel` already existed and was extended; `custom-connection` and `group` are new nouns. Nothing was renamed.
+- Clap types: `PersonnelAction` and `EmploymentStatus` moved from `src/cli.rs` to `src/cli/personnel.rs` (re-exported), new `src/cli/exclusion.rs` and `src/cli/custom.rs` | `cli.rs` stood at 1143 lines and this phase adds about 400 lines of clap types; same pattern as Phases 1 and 6. `PersonnelAction::Search` holds `Box<PersonnelSearchArgs>` | clippy `large_enum_variant` fired on the 30-flag struct.
+- Resources: `src/resources/personnel/{search,scope,group}.rs`, `src/resources/compliance.rs` + `compliance/exclusion.rs`, `src/resources/custom.rs` + `custom/{field,connection}.rs`. Pure builders (paths, bodies, query) carry the unit tests; `compliance::plan` resolves a verb to a `Call` the way Phases 5 and 6 do.
+- `bulk` now takes a `Rule { rows_key, failed }` instead of a bare predicate: `bulk::STATUS_CODE` (rows under `data`, a per-item `statusCode` of 400 or above fails; the Phase 6 behavior, unchanged) and `bulk::OUTCOME` (rows under `results`, an `outcome` starting `FAILED_` fails). The compliance-check exclusion ops answer `{results, successCount, skippedCount}`, not `{data}`, so Phase 6's `data`-only reader would have called every success "expected per-item results under `data`". A body without the rule's rows array is still a loud error.
+- A row fails on `FAILED_INVALID_TARGET` / `FAILED_NOT_DELETED` (or a missing `outcome`). `SKIPPED_*` does not fail the command: the spec says an already-excluded, no-exclusion or out-of-scope id "does not fail the batch", and these ops answer 2xx for it. Every row prints either way (the whole body, JSON, since a `results` object matches no table sniff and `successCount` / `skippedCount` belong beside the rows). A non-2xx whose body carries `results` prints its rows and fails naming the status, like Phase 6; any other non-2xx is the plain API error.
+- `personnel group replace` is the full-replace PUT. Its confirm prompt reads `PUT /workspaces/1/scoped-personnel-groups (replaces the whole scope with exactly groups 3, 4; groups not listed are removed)`. The confirm function takes `(method, path)`, so the sentence rides in the path argument, the same way `verify` describes its mutation. `--group-id` and `--clear` are mutually exclusive and one is required: the spec clears the scope on an empty list, and an accidental bare `replace` must be a usage error, not a wipe.
+- `personnel search` filters: every param of both ops is a flag. 14 compliance-status filters take `ComplianceCheckStatus`; `--employment-status` reuses `EmploymentStatus` (its values equal `EmploymentStatusEnum`, asserted in `tests/enums.rs`). The two object-array params go through compact flags: `--custom-field <id|name>=<value>...` (a numeric left side is `customFieldId`, anything else `name`) and `--custom-range-field <id|name>=<gte>..<lte>...` (either bound may be empty, one required). Both encode as the spec's bracketed-index form (`customFields[0][customFieldId]=42&customFields[0][value]=...`). The range separator is `..` and not `:` because ISO timestamps contain `:`. Default is every page as rows through `search::run`; `--facet` is one page and the whole envelope, as in Phases 3 and 4.
+- `custom-field create`: `--name`, `--description`, `--field-type`, `--hidden`, `--required`, `--option <value>...` (OPTIONS fields only: 2 to 100, positions from 1, none hidden), plus `--data` and `--example`. `isHidden` and `isRequired` are required by the spec, so flags always send them (default false). `CustomFieldType` has no `FORMULA` (the spec's `fieldType` enum omits it); clap rejects it with exit 2. Placements (`location`), numeric options and currency go through `--data`; `--example` prints the spec skeleton.
+- Ids that can be names (`custom-field get name:Regulatory Owner`, `custom-connection resource-attribute ... name:HR System name:Employees`) go through `encode_path_segment`, so a space or slash stays inside one segment while `name:` stays literal.
+- Renderers (`src/output/table.rs`): `render_compliance_exclusions` (`targetId` + `targetType`), `render_custom_fields` (`customFieldId`), `render_scoped_groups` (`connectionProvider` + `name`), `render_groups` (`externalId` + `name`), all placed above the codebase-exclusion sniff and the looser `name`/`id` sniffs. Personnel search rows already pick `render_personnel` (`employmentStatus`). Counts, resource attributes, exclusion results and a created custom field print as JSON or through the existing sniffs (`phase_seven_single_objects_print_whole_as_json` feeds the spec shapes of the first three through `pick_renderer`).
+- `tests/enums.rs` gains `personnel_search_enums_match_the_spec` (all 17 enum params on both ops), `compliance_check_and_custom_field_enums_match_the_spec` (query params and the array/`fieldType` body enums) and a parse test pinning one rejection each.
+
+### Deviations
+- Same effect, different seam: the exit-1 criterion is proven in-process (`exclusion_action_with_one_failed_item_in_a_2xx_body_exits_1`: a 201 with one `FAILED_INVALID_TARGET` row; `dispatch` returns `Err("1 of 2 items failed")` after exactly one request, and the test's captured stdout shows both rows printed). `main` returns that `Err`, which exits 1. The binary has no base-URL seam, as Phases 2 to 6 recorded.
+- `bulk::post`'s signature changed from `failed: FailedFn` to `rule: Rule` (the one Phase 6 call site updated). Phase 6 left the predicate as the parameter for exactly this; the rows key had to join it because the two exclusion families name their rows differently.
+- The doc's `personnel search` text names no flag for choosing the per-workspace op; `--workspace-id` is the choice, matching `risk search --register-id`.
+
+### Tradeoffs
+- `SKIPPED_*` is not a failure vs counting it one (Phase 6 does, because its rows carry a 4xx per-item `statusCode`) | the compliance-check spec types a skip as an outcome, not an error, and says it does not fail the batch. The cost: a script that wants "every id actually excluded" reads `skippedCount` or the rows.
+- Compact `--custom-field` / `--custom-range-field` strings vs a repeatable multi-token flag | a three-token (`id value`) flag cannot say whether the first is an id or a name; the numeric-means-id rule is the one stated convention, and a field whose name is all digits cannot be addressed by name (use its id).
+- No `--sort`, `--sort-dir`, `--include-total-count` on any Phase 7 list or search | same as Phases 3, 4 and 6; reachable through `drata raw`. `compliance-check-exclusion list` and `custom-field list` also do not expose `size` (the client pages at 500).
+- `custom-field create --option` only builds a plain OPTIONS list vs flags for every option shape | the other shapes (numeric options, currency, placements) are structured, and `--data` with the spec skeleton is the complete route.
+
+### Open questions
+- Should a `SKIPPED_OUT_OF_SCOPE` target (the id is outside the workspace's personnel scope, so nothing was excluded) also exit 1? The spec treats it as a non-failure, so I did not; a caller who needs it can read the printed rows.
+- `custom-field create` is a write the doc's shakedown list names (`custom-field create | remove`), but there is no `custom-field remove` command and the spec has no DELETE for a definition, so a shakedown create would leave a permanent field. Confirm that is acceptable, or drop `custom-field create` from the shakedown.
+
+## Orchestrator: after Phase 7
+
+### Design decisions
+- Per-item failure rule follows each op's own spec (`src/resources/bulk.rs` `Rule`): monitoring-test exclusions count a 4xx `statusCode` row as failed, because that spec answers 409/422 when nothing is excluded; compliance-check exclusions fail only on `FAILED_*`, because that spec says `SKIPPED_*` does not fail the batch.
+
+### Deviations
+- Rollout shakedown: `custom-field create | remove` moved from the write list to the excluded list. The spec has no DELETE op for a custom field definition, so a create contradicts the list's own rule ("only where the object is deletable by the CLI").
+
+### Tradeoffs
+None.
+
+### Open questions
+None.
+
+## Phase 8: Infrastructure and Version Control identities
+### Design decisions
+- Verb map (8 ops, 8 rows added to the command table, floor 162 -> 170): `infrastructure-identity` and `version-control-identity`, each `list <ws> | get <ws> <id> | actions <ws> <id> | run-action <ws> <id>`. `actions` and `run-action` are the existing verb names from `vendor security-review`.
+- One implementation: `src/resources/identity.rs` holds `Kind { Infrastructure, VersionControl }` (path segment, noun for errors, spec template for `--example`), the pure path and body builders, and one `handle`. `handle_infrastructure` and `handle_version_control` only map their clap enum onto a kind-independent `Verb`. Test `identity_paths_for_each_kind` drives both kinds through the same builders.
+- Clap types (`src/cli/identity.rs`): the argument structs (`IdentityListArgs`, `IdentityGetArgs`, `IdentityRef`, `ExampleIdentityRef`, `IdentityBodyArgs`) are shared; the two subcommand enums differ only in the `--action` enum (4 values for Infrastructure, 8 for Version Control, each exactly its spec enum).
+- `run-action` body: `--action`, `--user-id` (linkUser), `--reason` (markServiceAccount, max 30000), plus `--data` and `--example`. `--user-id` and `--reason` are rejected with any other action and required with their own, before the confirm and the request. The other 6 actions take no payload. Confirm and the write guard apply as for every POST.
+- `--client-type` is parsed against the spec's `ClientTypeEnum` (case-insensitive, normalized to the spec value) through `spec::enum_values`, not a clap `ValueEnum`: the enum has hundreds of values and grows each release, so a hand copy would drift. `tests/enums.rs` asserts every spec value parses and a bogus one is rejected.
+- `spec::enum_values(name)` added: the values of a string enum component schema.
+- Renderers (`src/output/table.rs`): `render_identities` (sniff `identityId`) and `render_identity_actions` (`action` + `label` + `description`), above the codebase-exclusion sniff. `identity_phase_eight_spec_rows_pick_their_own_renderer` feeds both kinds' spec list and actions rows through `pick_renderer`.
+- `tests/enums.rs`: `identity_enums_match_the_spec_for_both_kinds` (expand on list and get for both kinds, both action enums) and `identity_action_is_per_kind_and_client_type_is_the_spec_enum`.
+
+### Deviations
+- Same effect, correct seam: the doc says "both backed by one shared implementation parameterized by kind". The two clap subcommand enums stay separate because the specs' `--action` value sets differ and a flag must take exactly its op's values; they converge on one `Verb` at the first line of dispatch.
+- `--client-type` is not a `ValueEnum`, so it is not in `same::<>` form in `tests/enums.rs`; it has its own spec-driven assertion.
+
+### Tradeoffs
+- Spec-driven `--client-type` parser vs a 330-variant clap enum | no drift and no 330-line enum; the cost is that clap's error does not list the possible values (it names the enum and three examples).
+- No `--sort`, `--sort-dir`, `--include-total-count`, `--size` on `list` | same as Phases 3, 4, 6 and 7; reachable through `drata raw`.
+- `render_identities` sniffs `identityId` alone vs also `connectionId` | the spec marks neither required, and `identityId` is unique to these rows; requiring both would drop the table on a row without a connection.
+
+### Open questions
+None.
+
+## Phase 9: Policies and policy languages
+### Design decisions
+- Verb map (6 ops, 6 rows added to the command table, floor 170 -> 176): `policy version create <policy>`, `policy version replace-file <policy> <version> --file [--language]`, `policy-language list <policy> <version>`, `policy-language settings`, `policy-language versions`, `policy-language get <id>`.
+- `policy version` keeps its existing meaning (`policy version <policy> <version>` is a get) and gains subcommands beside it: `args_conflicts_with_subcommands` + `subcommand_negates_reqs`, with the two positionals `required = true` so clap still demands both for the get form. Nothing was renamed. `tests/enums.rs` pins both forms (`policy version 1 2` parses, `policy version 1` does not) and `policy_version_with_two_ids_still_gets_the_version` proves the get on the wire.
+- `create` is multipart when `--file` is present (UPLOADED) and typed JSON otherwise (EXTERNAL, `--external-file-id`), because the spec accepts both content types and an EXTERNAL version has no file. Multipart field names are the spec's property names verbatim (`sourceType`, `ownerId`, `isMaterialChange`, `renewalDate`, `requiresApproval`, `externalFileId`, `fileName`, `description`, `changeSummary`, `changesExplanation`, `requiresAcknowledgement`, `file`); `replace-file` sends `file` and optional `language`. Flags of the wrong source type (`--file` with EXTERNAL, `--external-file-id` with UPLOADED, UPLOADED without `--file`, EXTERNAL without `--external-file-id`) are rejected before the confirm and the request (`build_create`).
+- The four spec-required fields (`sourceType`, `ownerId`, `isMaterialChange`, `renewalDate`) are clap-required unless `--data` or `--example`. Booleans take a value (`--material-change true|false`), like `--sub-processor` and `--done` elsewhere, so `false` is sendable. `--data` is the whole body sent as JSON (no file part); `--example` prints the spec skeleton.
+- `--language` is spec-driven (`policy_language` over `PolicyLanguageEnum`, case-insensitive, normalized to the spec value), same approach as `--client-type`. `tests/enums.rs` asserts every spec value parses and a bogus one is rejected.
+- Value enums: `PolicyVersionStatus`, `PolicyLanguageVersionListExpand`, `PolicyLanguageVersionExpand`; `PolicySourceType` is reused (its values equal `CreatePolicySourceTypeEnum`, asserted). `policy_language_enums_match_the_spec` covers them.
+- `policy-language get` sends the client's `Accept: application/json`; the `text/html` representation stays out (Non-Goals).
+- Renderers (`src/output/table.rs`): `render_policy_languages` (sniff `language` + `hasPdf` + `hasHtml`, used by the version-languages list and the language-versions list) and `render_policy_language_settings` (exactly `{language, default}`), above the identity sniffs. `policy_language_spec_rows_pick_their_own_renderer` feeds the three spec response examples through `pick_renderer`.
+- New code in `src/cli/policy.rs`, `src/resources/policy/version.rs`, `src/resources/policy/language.rs`. The wiremock tests are in `tests/policy.rs`, because adding them to `tests/commands.rs` took it past the 1500-line bloat check.
+
+### Deviations
+- The doc names no verbs for `policy-language`; `list | settings | versions | get` is my choice, following the repo's `list`/`get` and the spec's own names.
+- `policy version` is no longer a leaf, so `every_curated_leaf_has_a_row` does not demand a row for the get form. The existing row stays and still proves `GET .../policy-versions/{id}`.
+
+### Tradeoffs
+- Positionals plus subcommands on `policy version` vs an explicit `policy version get` | the task says do not rename; the cost is that a policy id literally named `create` or `replace-file` cannot use the get form (ids are numeric).
+- No `--sort`, `--sort-dir`, `--include-total-count`, `--size` on the list verbs | same as Phases 3, 4, 6, 7 and 8; reachable through `drata raw`.
+- Optional booleans take a value vs a presence flag | a presence flag cannot send `false`.
+
+### Open questions
+None.
+
+## Phase 10: Evidence items
+### Design decisions
+- Verb map (10 ops, 10 rows added to the command table, floor 176 -> 186), all under the new noun `drata evidence-item`: `list <ws>`, `get <ws> <id>`, `create <ws>`, `update <ws> <id>`, `remove <ws> <id>`, `upload <ws> --file` (POST `evidence-files`), `artifact list <ws> <id>`, `artifact update <ws> <id> <artifact>`, `artifact remove <ws> <id> <artifact>`, `artifact run-action <ws> <id> <artifact> --action archive|restore` (POST `.../actions`). `drata evidence` is untouched and still the Evidence Library.
+- Clap types in `src/cli/evidence.rs` (re-exported), resource in `src/resources/evidence/item.rs` (`evidence::item`, beside the library's `evidence.rs`) | the module path says which evidence resource; the library's clap types stay in `src/cli.rs` (no rename, Non-Goals).
+- Evidence and artifact ids are `u64` positionals, the workspace id a `String` through `encode_path_segment` | the spec types both ids as numbers, so a non-numeric id is a clap exit 2, not a request (same as Phase 4).
+- Artifacts as flags: `--url <url>...`, `--file-key <key>...`, `--ticket-url <url>...`, all filed on one `--filed-at` (clap `requires`; a stray `--filed-at` with no artifact is rejected in `build_new_artifacts`). `create` sends them as `artifacts` with a `type` key; `update` sends `newArtifacts` with an `artifactType` key; the spec names the field differently in the two DTOs, and `build_new_artifacts(args, type_key)` takes the key. `--file-key` reuses the Phase 1 `evidence create --file-key` name.
+- `create` always sends `artifacts` (empty when no artifact flag): the spec marks it required. `update` is a partial update: only flagged fields go out; `--archive-artifact` -> `pastArtifacts`, `--restore-artifact` -> `currentArtifacts`. Rejected before confirm: nothing to change, an id in both lists, and a `--renewal-schedule-type` other than `NONE` without `--renewal-date` (the update DTO: "required if renewalScheduleType is not NONE"). `replaceArtifacts` and `base64File` go through `--data`.
+- `artifact update`: `--name` / `--filed-at` set, `--clear-name` / `--clear-filed-at` send `null` (the spec's documented clear), conflicting pairwise; an empty update is an error before confirm.
+- `upload` checks `--file` is a readable file before confirm, sends one multipart `file` part, and prints only the response's `fileKey` (a body without one is an error) | the same contract as `upload-url create --file` printing `objectKey`: the output feeds `--file-key` directly. The other response fields are logged at debug.
+- Partial artifact failure: `create` and `update` print the response, then fail the command when `artifactsCreated < artifactsRequested` (`check_artifacts_created`): the spec says the item is still saved when some artifact uploads fail, and the Overview's per-item rule is exit 1 on any failed row.
+- Confirm prompts: `remove` reads `DELETE /workspaces/1/evidence/2 (permanently deletes the evidence item and all of its artifacts)`; `artifact remove` names the version history and points at `run-action --action archive` as the reversible alternative. The sentence rides in the path argument, as Phase 7's `personnel group replace` does. Every mutating verb goes through confirm and the client's write guard (`mutations_are_blocked_without_a_write_credential`).
+- Value enums: `EvidenceItemExpand`, `ComputedEvidenceStatus`, `ArtifactType` (one enum for the item list's `ArtifactTypeEnum` and the artifact list's `ArtifactType`; same values, asserted for both), `ArtifactActionKind` (not ending in `Action`, per the Overview); `RenewalScheduleType` is reused and asserted equal to the create body's `RenewalScheduleTypeEnum`. All in `tests/enums.rs`.
+- `--example` on `create`, `update`, `artifact update`, `artifact run-action` from `spec::example_for_operation`.
+- Renderers (`src/output/table.rs`), above the Evidence Library sniff: `render_evidence_item_mutations` (`artifactsRequested` + `artifactsCreated`, the create/update response), `render_evidence_items` (`evidenceTemplateCode` + `renewalScheduleType`; a library row carries `renewalSchema` instead), `render_evidence_artifacts` (`artifactVersion` + `artifactType`). `evidence_item_rows_pick_the_item_table_and_library_rows_keep_the_library_table` feeds the spec examples of the item list, item get, create response, artifact list, and the library list and get through `pick_renderer`.
+- Wiremock tests in a new `tests/evidence.rs` (`tests/commands.rs` is near the 1500-line limit). Each builder, path, prompt, partial-artifact and renderer change was reverted once and its test failed, then restored.
+
+### Deviations
+- The doc names no verb for the `evidence-files` op; it is `evidence-item upload`, at the item noun rather than under `artifact`, because the op is workspace-scoped and takes no evidence id.
+- The partial-artifact exit rule is not in the Phase 10 bullet; it applies the Overview's per-item rule to the `artifactsCreated` / `artifactsRequested` counts the spec returns.
+
+### Tradeoffs
+- One `--filed-at` for every new artifact and no per-artifact `artifactName` vs a multi-token flag per artifact | the common case is one artifact; mixed dates or names go through `--data` with the `--example` skeleton.
+- `check_artifacts_created` passes a body without both counts vs failing it | the spec marks both required, but failing a saved create on a missing count would report a write as failed; the response is printed whole either way.
+- `create` sends an empty `artifacts` array when no artifact flag is given vs requiring one client-side | the schema has no `minItems` and `NEEDS_ARTIFACT` is a real item status; the server judges.
+- `upload` prints only `fileKey` vs the whole response | matches `upload-url create --file`; `originalFilename`, `mimeType` and `fileSize` echo the input.
+- No `--sort`, `--sort-dir`, `--size` on either list | same as Phases 3 to 9; reachable through `drata raw`.
+
+### Open questions
+- None.
+
+## Phase 11: Access reviews
+### Design decisions
+- Verb map (16 ops, 16 rows added to the command table, floor 186 -> 202), under the new noun `drata access-review`: `app list | get <a> | create | update <a> | remove <a>`, `app users list <a>`, `app users set <a>`, `period list | get <p> | create`, `period run-action <p>` (POST `.../actions`), `period app get | update | run-action | users <p> <r>`, `period evidence-package <p>`. Application, period and review-app ids are `u64` positionals (the spec types all three as numbers).
+- Clap types in `src/cli/access.rs`; resource code in `src/resources/access.rs` (routing, `--example`, `--data` and id helpers), `src/resources/access/app.rs` and `src/resources/access/period.rs`, each with a `tests.rs`.
+- `app users set` takes `--user IDENTITY_ID:USERNAME:EMAIL[:ROLE,ROLE...]` (space-separated, one per user), parsed by the clap value parser `review_user`, so a missing or empty part is a clap exit 2. `build_users_body` sends `{"identities": [...]}` with exactly the users passed, `roles` only when given (the spec: "Omit for an empty list"), and rejects a repeated identity id before the confirm (the spec makes it unique within the application). Test `users_body_carries_every_user_passed_and_nothing_else` (unit) and `app_users_set_body_carries_every_user_passed_and_nothing_else` (wire).
+- The `users set` confirm prompt reads `PUT /access-review-applications/7/users (replaces the application's full user list with N users; users omitted from it are removed from the application and its open review)`. The count comes from the body about to be sent, so `--data` gets it too. The sentence rides in the path argument, as Phases 7 and 10 do.
+- `/actions` body builders: `period::build_action_body` (`{"action"}`) and `period::build_app_action_body` (`{"action"}` plus `markUnreviewedUsersOutOfScope: true` only with `--mark-unreviewed-out-of-scope`). Tests `period_action_body_is_the_action_alone` and `app_action_body_sends_the_sweep_flag_only_when_set`, plus the wire tests `period_run_action_posts_the_action` and `period_app_run_action_posts_the_action_and_the_sweep_flag`. With the flag set, the confirm prompt says every NOT_REVIEWED user goes OUT_OF_SCOPE as this API key's user.
+- `period create` takes `--starting-date`, `--ending-date` and `--application APPLICATION_ID:REVIEWER_ID[,REVIEWER_ID...]` (value parser `reviewed_application`; a bare id is a clap exit 2, since the spec requires `reviewersIds` per application). An application given twice is rejected before the confirm. The confirm prompt says only one period may be active on the account at a time.
+- `app update` is a partial update: `--name`, `--website-url` / `--clear-website-url` (sends `null`, the spec's documented clear), `--reviewer-id`; an empty update is rejected before the confirm. `app remove`'s prompt says the application also leaves every review period it has not completed in. `period app update` requires `--reviewer-id` unless `--data`/`--example`.
+- `period evidence-package` is a plain GET whose `{signedUrl, fileBuffer, fileName}` body is printed whole; nothing is downloaded. It gets no table renderer, so the signed URL is never truncated in table output (`access_review_spec_rows_pick_their_own_renderer` asserts no renderer picks it). The URL is not logged.
+- Lists (`app list`, `app users list`, `period list`, `period app users`) use `get_all`: all four ops take `cursor`.
+- Value enums: `AccessReviewPeriodStatus` (`period list --status`) and `AccessReviewActionKind` (one enum for both `/actions` ops, whose spec enums both carry exactly `complete`; asserted against each op's body schema in `tests/enums.rs`). Case-insensitive.
+- `--example` on `app create | update`, `app users set`, `period create | run-action`, `period app update | run-action`, from `spec::example_for_operation`.
+- Renderers (`src/output/table.rs`): `render_access_review_users` (`identityId` + `hasAdminAccess`) and `render_access_review_decisions` (`identityId` + `lastRejectedAt`) sit above the identity sniff, which would otherwise claim both on `identityId`; then `render_access_review_period_apps` (`applicationId` + `status`, the detail and the action response), `render_access_review_periods` (`startingDate` + `endingDate`), `render_access_review_apps` (`source` + `reviewers`). Each key pair belongs to Access Review schemas alone in the spec. New helper `joined_field` (one string field across an array of objects, for reviewer emails). `access_review_spec_rows_pick_their_own_renderer` feeds every response schema through `pick_renderer` with every key present (`every_key`), because the required `reviewers`, `applications` and dates carry no spec example.
+- Wiremock tests in a new `tests/access.rs`. Each body builder, prompt, path, sniff, parser and enum change was reverted once and its test failed; the files were then restored and touched.
+
+### Deviations
+- `tests/commands/table.rs` passed 1500 lines with the 16 new rows. The vendor rows (`vendor`, `vendor-*`, `vendor security-review`) moved to `tests/commands/vendor.rs` as `VENDOR_ROWS`; `table.rs` keeps the types and `NON_VENDOR_ROWS`, and `ROWS` became `rows()`, which chains the two. `tests/commands.rs` and `tests/coverage.rs` call `rows()`. No row changed.
+- The doc names the verbs only as `access-review app | period` with `users`, `actions`, `evidence-package`. Following the Overview's naming rule, the `/actions` ops are `run-action` (there is no list-actions op here, so no `actions` verb), and the period-scoped application is `period app`.
+
+### Tradeoffs
+- `--user ID:USERNAME:EMAIL[:ROLES]` as one delimited value vs three parallel multi-value flags | parallel lists misalign silently when one is short; one value per user cannot. A role containing a comma, or an identity id containing a colon, goes through `--data` with the `--example` skeleton.
+- `--mark-unreviewed-out-of-scope` as a presence flag vs a `true|false` value (the Phase 9 pattern) | sending `false` means the same as leaving the field out (the server answers 409 while unreviewed users remain), so no value needs to be sendable.
+- Duplicate identity ids and duplicate applications rejected client-side vs letting the server judge | each would send an ambiguous body to a write that replaces or scopes everything at once; failing before the confirm is cheaper than a half-applied replace.
+- No `--sort`, `--sort-dir`, `--size`, `--include-total-count` on the lists | same as Phases 3 to 10; reachable through `drata raw`.
+
+### Open questions
+- None.
+
+## Phase 11 follow-up: no comma-separated values
+Supersedes the Phase 11 entries for `--user` and `--application`. The house CLI rule (`~/repos/.claude/refs/cli.md`) forbids comma-separated list values, and Phase 11 split roles and reviewer ids on commas.
+
+### Design decisions
+- `app users set` now takes `--user IDENTITY_ID:USERNAME:EMAIL` (exactly three `:`-separated parts) plus `--role IDENTITY_ID:ROLE`, one role per value, space-separated or repeated. `build_users_body(users, roles)` attaches each role to the user whose identity id it names, in the order given. Rejected before the confirm: a role naming an identity id that no `--user` gives, and the same role given twice to one user. A fourth part in `--user` is rejected with a pointer to `--role`, so the old `...:EMAIL:Admin` form fails loudly instead of landing in the email.
+- Why not shape (a), `IDENTITY_ID:USERNAME:EMAIL[:ROLE[:ROLE...]]`: the spec has no role enum. `AccessReviewUserIdentityRequestPublicV2Dto.roles` is `array<string>`, described as "Free-form strings, not a fixed enum", so a role can contain `:`. Under `--role`, everything after the first `:` is the role, taken literally: `--role 1a2b:org:admin` sends `org:admin`, and `--role 1a2b:Admin,ReadOnly` sends the one role `Admin,ReadOnly`. No value is ever split on a comma.
+- `period create --application APPLICATION_ID:REVIEWER_ID[:REVIEWER_ID...]`: reviewer ids are numeric, so `:` is safe as the repeat separator. A comma is never a separator: `1:10,11` fails clap parsing (exit 2) with "`10,11` is not a numeric reviewer id; expected APPLICATION_ID:REVIEWER_ID[:REVIEWER_ID...]".
+- Tests:
+  - `role_flag_takes_everything_after_the_first_colon_literally` and `application_flag_never_splits_on_a_comma` (unit)
+  - `a_comma_is_never_a_list_separator` (wire, plus clap exit 2)
+  - `a_role_for_a_user_not_in_the_set_fails_before_any_request`
+  - `users_body_rejects_a_role_for_an_unknown_user_or_given_twice`
+  - `user_flag_rejects_a_missing_empty_or_fourth_part`
+  - Each was reverted once: comma splitting reintroduced in both parsers, a fourth `--user` part accepted, both role checks removed, roles attached to the wrong user, and roles dropped. Each targeted test failed, then the files were restored and touched.
+- `--example` output is unchanged; it comes from the spec. The README has no `access-review` entry yet (Phase 13 updates it). The command-table rows already used comma-free values.
+
+### Deviations
+- None.
+
+### Tradeoffs
+- A separate `--role` flag keyed by identity id vs roles inside `--user` | roles are free-form and may hold `:`, so they cannot share `--user`'s separator. The cost is repeating the identity id once per role.
+
+### Open questions
+- None.
+
+## Phase 13: Audit DCF suggestions
+### Design decisions
+- `audit request dcf-suggestion generate | accept | list | get | run-action` extends the existing `audit` noun; `AuditAction` moved from `src/cli.rs` to `src/cli/audit.rs` with a new `Request` variant, nothing renamed. Every help text for the 5 verbs ends `(beta)` (`DcfSuggestionAction` in `src/cli/audit.rs`).
+- Handler in `src/resources/audit/dcf.rs`, routed from `src/resources/audit.rs`; `audit::handle` gained the `confirm` argument and `audit::example_if_requested` is wired in `src/lib.rs`. Mutating verbs confirm; the client's write guard applies as for every non-GET.
+- `generate` and `accept` go through `resources::bulk::post` with two new rules in `src/resources/bulk.rs`: `GENERATE_STATUS` (a row fails when `status` is `FAILED` or missing; `SKIPPED` is not a failure) and `ACCEPT_ERROR` (a row fails when `error` is non-null or missing). Every row prints, then the command exits 1 on any failure. The 202 is not polled.
+- Body builders are pure and fail before any request: `build_generate_body` (1..=100 unique ids), `build_accept_body` (`requestIds` xor `allRequests`, 1..=500 unique ids, `confidenceLevels` only when given and de-duplicated), `build_action_body`. `accept_prompt` adds "accepts pending suggestions on EVERY matching request" to the confirm text when the body sent has `allRequests: true`, so `--data` gets it too.
+- `list` uses `client.get_all` (the op has a `cursor` param) with repeated `status[]` and `confidenceLevel[]` plus `--sort` / `--sort-dir`; `get` uses `client.get`. Enums `DcfConfidenceLevel`, `DcfSuggestionStatus`, `DcfSuggestionSort`, `DcfSortDirection`, `DcfSuggestionDecision` are case-insensitive and are pinned to the spec's values in `tests/enums.rs` (`dcf_suggestion_enums_match_the_spec`).
+- `src/output/table.rs`: `render_dcf_suggestions`, picked on `dcfCode` + `confidenceLevel`; renderer test feeds the op's spec response row through `pick_renderer`.
+- Command table: 5 rows in `tests/commands/table.rs`; `CURATED_FLOOR` in `tests/coverage.rs` raised to 227. Wiremock tests are in the new `tests/audit.rs`.
+- README: rewrote the command reference for every noun and verb in Phases 1-13 and the raw-only list. Enumerated from the clap tree (`--help` walked recursively), not from the doc.
+- Tests, each reverted once and failing: `GENERATE_STATUS` matcher (`generate_failed_...` unit and `generate_with_one_failed_row_exits_1_after_printing_every_row` wire), `ACCEPT_ERROR` matcher, `status[]` key, `allRequests` body value, `run-action` body, `accept_prompt`, renderer sniff, the max-ids guard. Files restored and touched after each.
+
+### Deviations
+- The design doc's API Design names `evidence-item ... evidence-files upload`; the shipped verb (Phase 10) is `evidence-item upload`. README documents the verb that exists.
+- The doc's Phase 13 text says "`audit request dcf-suggestion` verbs" without names; `/actions` is `run-action` per the Overview naming rule, and `/actions` takes `--action accept|reject` (spec `AuditRequestDcfSuggestionActionEnum`).
+- README keeps `Audit Requests` in the raw-only list, reworded: only the DCF suggestion ops are curated, the other audit request ops stay raw. `Custom Connections` is reworded the same way (only `resource-attribute` is curated).
+
+### Tradeoffs
+- `accept` row failure = non-null `error` vs also counting `unresolvedCount > 0`: the spec says unresolved suggestions are left PENDING on purpose and returned by later calls, which is not a failed request, so only `error` fails.
+- README examples use `--example` for body-heavy verbs vs spelling every body flag: the flags change per phase and `--example` is derived from the spec, so it cannot drift.
+
+### Open questions
+- None.
+
+## Phase 12: Standard connections
+Written after the fact, during the implementation audit (`/home/saidler/.cache/review-panel/runs/rNcsu5Zs/synthesis.md`, F3): the Phase 12 commit 798d4bd did not touch these notes. The content is the Phase 12 worker's report, recorded as given.
+
+### Design decisions
+- One `Provider`-parameterized implementation for AWS, Azure, GCP and GitLab (`src/resources/connection.rs`), not four copies.
+- `create` and `update` read the body through `DataSource::FileOrStdinOnly` and require a JSON object. Inline `--data` is refused before any request, so a credential never sits in shell history.
+- `list` uses `client.get_all`: all four list ops take a `cursor`.
+- One renderer, `render_connections` (`src/output/table.rs`), sniffed on `clientAlias` + `state`.
+- `--expand workspaces` is checked against `StandardConnectionExpandEnum`.
+- Spec check: no response schema carries a credential. `applicationSecret`, `serviceAccountKey` and `personalAccessToken` are documented "Never returned in any response". AWS `externalId` (the trust-policy value) prints as returned. GitLab returns `tokenExpiresAt` only.
+
+### Deviations
+- None.
+
+### Tradeoffs
+- No `--sort` or `--sort-dir` on the list ops vs exposing them now: they stay reachable through `raw`.
+- The shared client's existing `debug!` of non-2xx response bodies is left unchanged vs redacting it: the body is the server's text, and a validation message could quote a submitted value. Recorded so the choice is visible, not settled.
+
+### Open questions
+- None.
+
+## Implementation audit fixes
+Fixes for the round 1 implementation audit, `/home/saidler/.cache/review-panel/runs/rNcsu5Zs/synthesis.md` (probes in `probes.md` beside it). F3 is the Phase 12 section above.
+
+### Design decisions
+- F1, renderer regressions: the parity test `src/output/table/parity.rs` (`every_v015_curated_op_keeps_its_v015_renderer`) takes the 83 ops the v0.1.5 tree curated (command table rows minus Appendix A), builds each op's 2xx row from the spec, and asserts `pick_renderer` renders it exactly as `v015_pick_renderer` does. `v015_pick_renderer` is a verbatim copy of the v0.1.5 sniff order (`git show 165c6cf:src/output/table.rs`), so the expectation comes from v0.1.5's logic, not today's output. Each row is checked twice: every property present (null where the spec has no example) and only the example-bearing properties, since a server can send a null field or omit it. 79 ops have a JSON 2xx body (the 4 DELETEs answer 204), so 158 rows.
+- F1, sniff changes in `pick_renderer` (`src/output/table.rs`):
+  - Groups: `externalId` + `name` -> `externalId` + `source` + `name`. An asset (`AssetResponsePublicV2Dto`) and a control requirement (`ControlRequirementResponsePublicV2Dto`) carry `externalId` + `name` but no `source`. `asset list|get|create|update` print `TYPE PROVIDER CREATED` again; `control requirements` prints JSON again.
+  - Codebase exclusions: `findingId` + `repositoryName` -> `findingId` + `exclusionDesignatorId`. A codebase monitor failure (`MonitorTestFailureResponsePublicV2Dto`) carries `findingId` + `repositoryName`; `exclusionDesignatorId` is required on the exclusion and absent from the failure. `monitor failures` prints JSON again.
+  - Identity actions: sniff removed. `UserIdentityActionItemResponsePublicV2Dto` and `PolicyActionItemResponsePublicV2Dto` have the same four keys (`identity_and_policy_action_rows_share_their_keys` pins this), so no key sniff can separate them. The identity `actions` verb names its table instead: `output::print_value_as(value, format, Table::IdentityActions)`, backed by `table::render_as`. `policy actions` prints JSON again; identity actions keep their table.
+- F2, secrets in the debug log: `run` and `dispatch` (`src/lib.rs`) record `command = %command_path(&cli.command)` instead of `?cli.command`. `command_path` walks the parsed command's `Debug` text for variant identifiers and keeps only those that name a child of the clap command reached so far, so the field is built from clap subcommand names and nothing else. Re-running the audit's probe (`drata -l debug connection aws create --data '{"secretAccessKey":"PROBESECRET-AWS"}' --yes`) now logs `run{command=connection aws create}` and 0 hits for the secret.
+- F2, the other value-recording fields found: `ticket::handle` recorded `?op` in its span and a `debug!` (a `TicketOp::Create` carries `--data`); `finding::handle` recorded `target` in its span and `?op` in a `debug!` (a note or observation create/update carries the text and `--data`). Both now log `verb = op.verb()`, and the finding span records `kind` and `collection` only. `vendor questionnaire`, the five `vendor/reference.rs` handlers and `vendor security-review assessment` recorded their whole action struct; they now `skip_all`.
+- F2 tests: `tests/logging.rs` runs `drata_cli::run` under a DEBUG fmt layer writing to a buffer (`tracing::subscriber::set_default`, no process env) for an inline `--data` on `connection aws create` and `provide-trust-center-access-link`, and asserts the secret is absent while `command=<path>` is present. `command_path_matches_the_argv_of_every_command_table_row` checks `command_path` against the subcommand tokens of all 227 command table argvs, read off the clap tree.
+- F4: `tests/enums.rs` gains `vendor_list_and_control_list_enums_match_the_spec` (`VendorStatus` vs `GET /vendors statuses[]`, `VendorType` vs `types[]`, `RequiredApprovals` vs `GET .../controls requiredApprovals`), `risk_search_enums_match_the_spec` (`RiskSearchExpand` on both search ops, `RiskSearchFacet` on `/risks-search`, and the one-register op takes every facet but `riskRegisterId`) and `upload_purpose_matches_the_spec` (`UploadPurpose` vs the `POST /upload-urls` body). No mismatch found.
+- Bite proofs: with the three v0.1.5-era sniffs restored, the parity test fails on 7 ops x 2 key sets (`asset` x4, `control requirements`, `policy actions`, `monitor failures`). With `?cli.command` restored on the spans, `a_rejected_inline_credential_never_reaches_the_log` fails on the secret assertion. Files restored and touched after each.
+
+### Deviations
+- The audit's fix shape said "tighten or reorder" `render_identity_actions`. Neither can work: the identity and policy action rows have identical keys. The identity table moved from a sniff to a table the command names (`Table::IdentityActions`). Same effect for identity actions, v0.1.5 output for `policy actions`.
+
+### Tradeoffs
+- `command_path` reads the `Debug` text vs threading clap's `ArgMatches` from `main` into `run`: `ArgMatches` would change the `run` and `dispatch` signatures used by the command-table and connection tests. The `Debug` walk can only emit names that exist in the clap tree, so a mis-walk gives a short path, never a value; the command-table test pins every curated path.
+- The typed handlers that record named arguments (`vendor create --name`, `risk create --title`, ids) still record them at DEBUG vs skipping every argument: those are explicit, non-credential fields that predate this branch and help diagnose a failed call. Only whole structs that can carry a `--data` body or free text were dropped.
+- A named table (`Table`, one variant) vs a per-command renderer argument on every `print_value` call: only one shape collides today, and `Table` takes the next one without touching other call sites.
+
+### Open questions
+- None.
+
+## Implementation audit round 2 fixes
+Fixes for the round 2 implementation audit, `/home/saidler/.cache/review-panel/runs/rNcsu5Zs/synthesis.md` (round 2 section; probes R2-A..R2-E in `probes.md`). D1 (create-with-file content type) is left for the shakedown, as directed.
+
+### Design decisions
+- M1, request bodies on spans: `raw::handle` (`src/raw.rs`) is `skip_all` and records only `method` and `path`; `RawArgs` carried the inline `--data` body and the `--field` values. `control::create` (`src/resources/control.rs`) skips `external_evidence_metadata` and `base64_files` (request-body JSON, base64 file contents). `evidence::create` (`src/resources/evidence.rs`) skips `fields` (`CreateFields`, free-text description), folding in D3.
+- M1 sweep: every `#[instrument` in `src/` without `skip_all` was listed with its recorded argument types. After the three fixes, no recorded argument carries a request body, `--data`, file contents or a credential: the rest are ids, paths, flags, enum values and the named single fields the round 1 tradeoff kept (`--name`, `--title`, `--description`, `--notes`). Client spans record method and path, never the body. `tests/logging.rs` `a_rejected_inline_credential_never_reaches_the_log` gains three cases: `raw POST ... --data` (rejected on a malformed `--query` after the span opens), `control create --external-evidence-metadata/--base64-files` (rejected on the missing `--code`), and `evidence create --description` (rejected on the missing `--name`). Each asserts the secret is absent and the handler's own span is present. The audit's R2-A probe, re-run offline against `target/debug/drata -l debug raw POST /connections --query noeq --data '{"secretAccessKey":"PROBESECRET-RAW"}' --yes`, writes 0 secret hits to drata.log and 6 `handle{method=POST path=/connections}` lines.
+- M2, connection ids: `connection <provider> get|update|remove` take the id as a `String`. `connection::check_connection_id` (`src/resources/connection.rs`) accepts a numeric id for every provider, and `roleArn:<ARN>` (AWS), `subscriptionId:<ID>` (Azure), `projectId:<ID>` (GCP) per the spec's `oneOf number | string` on those 9 ops (`Provider::id_prefix`). GitLab is number only, as in the spec. A wrong form for the provider, an empty key, or a `%` is refused before any request: no accepted form contains `%`, so it can only be a pre-encoded `/` that `encode_path_segment` would double-encode. `item_path` checks, then encodes, so an ARN's `/` goes out as `%2F` in one segment, which is what the spec asks for. Help text and the README name the forms.
+- C1, enum guards (`tests/enums.rs`): `risk_search_filter_enums_match_the_spec_on_both_ops` (`RiskStatus` `status[]`, `RiskTreatmentPlan` `treatmentPlan[]`, `RiskKind` `type[]` on `/risks-search` and the one-register op); `ticket_field_types_match_the_spec_on_every_create_op` (`ticket::FIELD_TYPES`, now `pub`, against `fields[].type` on both `tickets/action-create` ops); `pre_existing_enum_flags_match_the_spec` (`SecurityReviewAction`, `DeviceDocumentType` on both content types, `AssetType` and `AssetClassType` on `POST /assets` and `PUT /assets/{assetId}`). Every one matches the spec, so no allow-list entry was needed.
+- C2, raw-path renderer parity: the identity sniff in `pick_renderer` (`src/output/table.rs`) needs `identityId` + `serviceAccount`. Infrastructure and version-control identities carry `serviceAccount`; a custom connection's HRIS identity (`CustomUserIdentityResponsePublicV2Dto`) does not, and renders the v0.1.5 users table again. `src/output/table/parity.rs` gains `V015_SPEC_OPS` (all 167 ops of the v0.1.5 spec, every one reachable through `drata raw`) and `every_v015_spec_op_keeps_its_v015_renderer_through_raw`: 148 ops have a JSON 2xx body in today's spec, each sniffed with both key sets (296 rows). The 3 `control-library` ops are gone from today's spec (`V015_SPEC_OPS_GONE`, asserted absent). The curated test shares the drift loop (`drift_from_v015`).
+- C3: correction to the Phase 10 Design decisions line "`replaceArtifacts` and `base64File` go through `--data`". Only `replaceArtifacts` goes through `--data` (on `evidence-item update`). `base64File` is a field of `POST evidence-files`, which `evidence-item upload` reaches with `--file` only and no `--data`. `--file` covers the function; no input was added.
+- C4: `risk search --risk-register-id <id>...` (space-separated `u64`s, `num_args = 1..`) sends `riskRegisterId[]` through `QueryPath::push_each` on `/risks-search`. It conflicts with `--register-id` at clap level: the one-register op has no `riskRegisterId[]` param. This supersedes the Phase 3 tradeoff's omitted-param list for that param; the rest of the list stands.
+- D2: `policy actions` uses `client.get`, not `get_all`, so `GET /policies/{policyId}/actions` goes out with no query string (the spec gives it no query params; `get_all` added `size=500`). The response is one `{data}` envelope, so the printed output keeps its shape.
+- Bite proofs (each reverted, the named test watched fail, then restored): M1, the three spans back to their old skips -> `a_rejected_inline_credential_never_reaches_the_log` fails on the raw, the control and the evidence case in turn. M2, `encode_path_segment` dropped from `item_path` -> `get_update_and_remove_send_a_numeric_or_prefixed_id_as_one_path_segment` fails; `check_connection_id` dropped -> `an_id_outside_the_providers_forms_is_refused_before_any_request` fails; with the old `u64` type the prefixed argv does not parse. C1, a `Bogus` `RiskKind`, a `bogus` field type and a renamed `SecurityReviewAction` value -> the three new enum tests fail. C2, the identity sniff back to `identityId` alone -> the raw parity test fails on both hris-user-identities ops x 2 key sets. C4, the `riskRegisterId[]` push dropped -> `risk_search_takes_a_chosen_set_of_registers_space_separated` fails. D2, `policy.rs` from HEAD -> `policy_actions_sends_no_query_string` fails.
+
+### Deviations
+- None from the audit's fix shapes. M2 adds one refusal the audit did not name (a `%` in the id), recorded above.
+
+### Tradeoffs
+- One `String` id checked per provider in the handler vs a separate clap type per provider: the four providers share `ConnectionVerb`, and splitting it to make GitLab's id a `u64` again would duplicate the verb set for one rule. The check runs before the body is read and before any request, so a wrong form fails as early as a clap error would, with exit 1 instead of 2.
+- C2 extends parity to the 167 v0.1.5 spec ops vs every op in today's spec: an op new in this branch had no v0.1.5 output to keep, and the new renderers are meant to change it.
+- M1 leaves the named free-text fields other handlers record (`--description`, `--notes`) as round 1 decided; only whole bodies, `--data`, file contents and the evidence `CreateFields` struct were dropped.
+
+### Open questions
+- None.

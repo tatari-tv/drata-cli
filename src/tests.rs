@@ -30,7 +30,15 @@ fn is_auth_command_detects_onboarding() {
         action: VendorAction::List {
             patterns: vec![],
             all: false,
-            expand: vec![]
+            expand: vec![],
+            status: vec![],
+            category: vec![],
+            vendor_type: vec![],
+            vendor_type_id: vec![],
+            vendor_user_id: vec![],
+            sub_processor: None,
+            action_required: None,
+            review_deadline_status: vec![],
         }
     })));
 }
@@ -58,6 +66,14 @@ fn example_if_requested_none_for_list() {
             patterns: vec![],
             all: false,
             expand: vec![],
+            status: vec![],
+            category: vec![],
+            vendor_type: vec![],
+            vendor_type_id: vec![],
+            vendor_user_id: vec![],
+            sub_processor: None,
+            action_required: None,
+            review_deadline_status: vec![],
         },
     });
     assert!(example_if_requested(&cli).is_none());
@@ -98,4 +114,35 @@ fn log_level_parses_case_insensitively() {
     assert_eq!(cli.log_level.map(|l| l.as_str()), Some("debug"));
     // An invalid level is rejected.
     assert!(Cli::try_parse_from(["drata", "--log-level", "bogus", "company", "get"]).is_err());
+}
+
+#[test]
+fn variant_identifiers_skip_string_and_char_literals() {
+    let debug = r#"Vendor { action: Create { name: Some("Evil \"Quoted\" Name"), c: 'X' } }"#;
+    assert_eq!(variant_identifiers(debug), vec!["Vendor", "Create", "Some"]);
+}
+
+#[test]
+fn kebab_matches_the_clap_derive_names() {
+    assert_eq!(kebab("CreateWithFile"), "create-with-file");
+    assert_eq!(kebab("Vendor"), "vendor");
+    assert_eq!(kebab("Base64Files"), "base64-files");
+}
+
+#[test]
+fn command_path_stops_at_the_leaf_and_drops_values() {
+    use cli::VendorAction;
+    let command = Commands::Vendor {
+        action: VendorAction::Get {
+            id: "Raw".to_string(),
+            expand: vec![],
+        },
+    };
+    assert_eq!(command_path(&command), "vendor get");
+    assert_eq!(
+        command_path(&Commands::Company {
+            action: cli::CompanyAction::Get
+        }),
+        "company get"
+    );
 }

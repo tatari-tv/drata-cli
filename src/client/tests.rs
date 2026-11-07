@@ -55,6 +55,13 @@ fn test_encode_query_escapes_reserved() {
 }
 
 #[test]
+fn encode_path_segment_keeps_one_segment() {
+    assert_eq!(encode_path_segment("name:MFA check"), "name:MFA%20check");
+    assert_eq!(encode_path_segment("a/b?c#d%"), "a%2Fb%3Fc%23d%25");
+    assert_eq!(encode_path_segment("42"), "42");
+}
+
+#[test]
 fn test_format_api_error_structured() {
     let body = r#"{"message":"Invalid Input","errors":["name is required"]}"#;
     let url = "https://public-api.drata.com/public/v2/vendors";
@@ -258,4 +265,136 @@ fn multipart_builder_collects_files_and_fields() {
     );
     assert!(form.fields.iter().any(|(k, v)| k == "description" && v == "d"));
     assert!(!form.is_empty());
+}
+
+fn cooldown_429() -> ResponseTemplate {
+    // Retry-After: 0 keeps a retrying client fast; the count is what matters.
+    ResponseTemplate::new(429)
+        .insert_header("Retry-After", "0")
+        .set_body_json(serde_json::json!({"message": "test is cooling down"}))
+}
+
+#[tokio::test]
+async fn retry_never_sends_once() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/retest"))
+        .respond_with(cooldown_429())
+        .mount(&server)
+        .await;
+
+    let client = rw_client(&server).await;
+    let err = client
+        .send_inner(Method::POST, "/retest", Some(serde_json::json!({})), Retry429::Never)
+        .await
+        .unwrap_err();
+
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+    let api = err.downcast_ref::<ApiError>().expect("429 surfaces as ApiError");
+    assert_eq!(api.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(err.to_string().contains("test is cooling down"), "{err}");
+}
+
+#[tokio::test]
+async fn post_once_sends_one_bodiless_post_on_429() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/retest"))
+        .respond_with(cooldown_429())
+        .mount(&server)
+        .await;
+
+    let client = rw_client(&server).await;
+    let err = client.post_once("/retest").await.unwrap_err();
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1, "a 429 is not retried");
+    assert!(requests[0].body.is_empty(), "no body is sent");
+    let api = err.downcast_ref::<ApiError>().expect("429 surfaces as ApiError");
+    assert_eq!(api.status, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn post_once_is_write_guarded() {
+    let server = MockServer::start().await;
+    let client = ro_client_for_stream(&server).await;
+    let err = client.post_once("/retest").await.unwrap_err();
+    assert!(err.downcast_ref::<WriteGuardError>().is_some(), "{err}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn retry_default_retries_429() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/vendors"))
+        .respond_with(cooldown_429())
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/vendors"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": 1})))
+        .mount(&server)
+        .await;
+
+    let client = rw_client(&server).await;
+    let v = client
+        .send_inner(Method::GET, "/vendors", None, Retry429::Default)
+        .await
+        .unwrap();
+
+    assert_eq!(v["id"], 1);
+    assert_eq!(server.received_requests().await.unwrap().len(), 2);
+}
+
+#[test]
+fn agent_422_prints_message_blockers_and_available_actions() {
+    let body = r#"{
+        "name": "AgentActionNotAvailable", "statusCode": 422, "code": 422,
+        "message": "The agent does not offer the finalize action right now.",
+        "requestedAction": "finalize",
+        "blockers": [
+            {"reason": "RESIDUAL_RISK_NOT_REVIEWED", "message": "Review the residual risk first.",
+             "resolution": {"type": "UI_ONLY", "action": "Review residual risk"}},
+            {"reason": "ASSESSMENT_IN_PROGRESS", "message": "An assessment is running.",
+             "resolution": {"type": "WAIT"}}
+        ],
+        "availableActions": ["stop_assessment"],
+        "currentStep": "ASSESS"
+    }"#;
+    let msg = format_api_error(
+        &Method::POST,
+        "https://x/vendors/1/security-reviews/2/finalizations",
+        StatusCode::UNPROCESSABLE_ENTITY,
+        body,
+    );
+    assert!(msg.contains("422"), "{msg}");
+    assert!(
+        msg.contains("The agent does not offer the finalize action right now."),
+        "{msg}"
+    );
+    assert!(
+        msg.contains(
+            "Blocker RESIDUAL_RISK_NOT_REVIEWED: Review the residual risk first. [UI_ONLY: Review residual risk]"
+        ),
+        "{msg}"
+    );
+    assert!(
+        msg.contains("Blocker ASSESSMENT_IN_PROGRESS: An assessment is running. [WAIT]"),
+        "{msg}"
+    );
+    assert!(msg.contains("Available actions: stop_assessment"), "{msg}");
+    assert!(msg.contains("Current step: ASSESS"), "{msg}");
+}
+
+#[test]
+fn plain_errors_carry_no_agent_guidance() {
+    let msg = format_api_error(
+        &Method::GET,
+        "https://x/vendors",
+        StatusCode::BAD_REQUEST,
+        r#"{"message":"bad"}"#,
+    );
+    assert!(!msg.contains("Blocker") && !msg.contains("Available actions"), "{msg}");
 }

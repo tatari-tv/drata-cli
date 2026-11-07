@@ -1,0 +1,5119 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "description": "SafeBase API documentation.",
+    "version": "1.4.1",
+    "title": "SafeBase API documentation",
+    "contact": {
+      "email": "support@safebase.io"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://app.safebase.io/api/ext/v1/rest"
+    }
+  ],
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "x-readme": {
+    "explorer-enabled": true,
+    "proxy-enabled": true
+  },
+  "_id": {
+    "buffer": {
+      "0": 105,
+      "1": 75,
+      "2": 227,
+      "3": 21,
+      "4": 103,
+      "5": 58,
+      "6": 7,
+      "7": 211,
+      "8": 230,
+      "9": 163,
+      "10": 193,
+      "11": 95
+    }
+  },
+  "paths": {
+    "/accounts/{id}/members/notify": {
+      "post": {
+        "tags": [
+          "Account Members"
+        ],
+        "summary": "Notify a member",
+        "description": "Sends an email invitation to an account member. \n\n**email**: This parameter can be a single email (string) to notify one member, or an array of emails (string[]) to notify multiple members. \n\n**message** (optional): This parameter allows you to send a custom message in an invitation email.",
+        "operationId": "accountMemberNotify",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountMemberNotifyPayload"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/accountId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/accounts": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Create account",
+        "description": "Adds a new account to SafeBase",
+        "operationId": "addAccount",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "input"
+                ],
+                "properties": {
+                  "input": {
+                    "type": "object",
+                    "required": [
+                      "name"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "example": "SafeBase Inc"
+                      },
+                      "description": {
+                        "type": "string",
+                        "example": "Customer #3",
+                        "description": "A description of the account. Set to null to remove the current value."
+                      },
+                      "domains": {
+                        "type": "array",
+                        "description": "An array of domains associated with the account.",
+                        "maxItems": 100,
+                        "example": [
+                          "example.com"
+                        ],
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "sfdcAccountId": {
+                        "type": "string",
+                        "description": "The Salesforce Account Id this SafeBase Account is associated with. Set to null to remove the current value."
+                      },
+                      "permissionProfileId": {
+                        "description": "Id of the permission profile applicable to this account, mutually exclusive with permissionProfileIds",
+                        "type": "string",
+                        "deprecated": true
+                      },
+                      "permissionProfileIds": {
+                        "description": "Array of permission profile ids applicable to this account, mutually exclusive with permissionProfileId",
+                        "type": "array",
+                        "example": [
+                          "80c6ae03-27a6-4fa0-8c53-be854ad9b402",
+                          "2f1fc9a1-3cb2-4380-82ee-8d286e71c25c"
+                        ],
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "reviewStatus": {
+                        "description": "Status of the where the account is in the review process",
+                        "type": "string",
+                        "enum": [
+                          "not_started",
+                          "in_progress",
+                          "completed",
+                          "other",
+                          "inactive"
+                        ]
+                      },
+                      "accessExpiresAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "example": "2023-01-01T00:00:00.000Z",
+                        "description": "Set an expiration date for the account. If omitted, the organization default setting will be used.",
+                        "oneOf": [
+                          {
+                            "type": "string",
+                            "description": "A date-time in ISO-8601 format. If provided, this date must be in the future."
+                          },
+                          {
+                            "type": "null",
+                            "description": "If null is provided, the account will never expire."
+                          }
+                        ]
+                      },
+                      "ndaProvider": {
+                        "$ref": "#/components/schemas/NdaProvider"
+                      },
+                      "ndaDocusign": {
+                        "description": "This field is only required and should only be used if the ndaProvider field is set to 'docusign'",
+                        "type": "object",
+                        "required": [
+                          "ndaRecipientFirstName",
+                          "ndaRecipientLastName",
+                          "ndaRecipientEmail"
+                        ],
+                        "properties": {
+                          "ndaRecipientFirstName": {
+                            "type": "string",
+                            "example": "Safe"
+                          },
+                          "ndaRecipientLastName": {
+                            "type": "string",
+                            "example": "Base"
+                          },
+                          "ndaRecipientEmail": {
+                            "type": "string",
+                            "example": "user@safebase.io"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/AccountOutput"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:edit"
+            ]
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Get accounts",
+        "description": "Gets all accounts that match the given criteria. \n\nFive filter query parameters can be sent and they work with an 'AND' relationship:\n 1. Account name\n 2. Member email\n 3. Domain name\n 4. Sfdc Account Id\n 5. Review Status\n \nThe following query parameters are optional and can be used to control the sorting and pagination of the results:\n - Sort Field\n - Sort Direction\n - Page Number\n - Page Size\n",
+        "operationId": "getAccounts",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "description": "This parameter will search for an account that has the given name.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "member",
+            "description": "This parameter will search for all accounts that contain a given member email.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "domain",
+            "description": "This parameter will search for all accounts that contain at least one member email with the given domain name.\n\n Domain examples: safebase.io, example.com",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sfdcAccountId",
+            "description": "Salesforce Account Id to verify and get account",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reviewStatus",
+            "description": "One or more review statuses to filter accounts by.",
+            "schema": {
+              "type": "string",
+              "examples": {
+                "singleStatus": {
+                  "value": "in_progress",
+                  "summary": "Single status"
+                },
+                "multipleStatuses": {
+                  "value": "in_progress,completed",
+                  "summary": "This will allow any account with any status here to be returned"
+                }
+              }
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortField",
+            "description": "The field to sort the results by.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "lastSeen"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "sortDirection",
+            "description": "The direction to sort the results by.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageNumber",
+            "description": "The page number to retrieve.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "example": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "description": "The number of results to return per page.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "example": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "$ref": "#/components/schemas/AccountOutput"
+                      }
+                    },
+                    "pagination": {
+                      "type": "object",
+                      "properties": {
+                        "pageNumber": {
+                          "type": "number",
+                          "description": "Current page number"
+                        },
+                        "pageSize": {
+                          "type": "number",
+                          "description": "Number of items returned"
+                        },
+                        "totalCount": {
+                          "type": "number",
+                          "description": "The total number of items"
+                        },
+                        "totalPages": {
+                          "type": "number",
+                          "description": "The total number of pages"
+                        },
+                        "maxPages": {
+                          "type": "number",
+                          "description": "Max number of pages"
+                        },
+                        "maxSizes": {
+                          "type": "number",
+                          "description": "Max number of items returned"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/kb/entries": {
+      "post": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Create Knowledge Base Entry",
+        "description": "Adds a new entry to your Knowledge Base.",
+        "operationId": "addKbEntry",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "question"
+                ],
+                "properties": {
+                  "question": {
+                    "type": "string"
+                  },
+                  "answer": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "comment": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "accessLevel": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "private",
+                      "internal"
+                    ],
+                    "description": "Note: defaults to `internal`"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "result": {
+                      "description": "The created Knowledge Base item.",
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "description": "The ID for the created item. The ID is guaranteed to be unique only among Knowledge Base search items."
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "manual"
+                          ]
+                        },
+                        "subtype": {
+                          "type": "object",
+                          "properties": {
+                            "raw": {
+                              "type": "array",
+                              "description": "Raw form of the item subtype's values. Note that product ID and product name are the same, but this is subject to change.",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "Custom"
+                                ]
+                              }
+                            },
+                            "pretty": {
+                              "type": "array",
+                              "description": "Pretty form of the item subtype's values. May begin with the product name when source is portal.",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "Custom"
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "content": {
+                          "type": "string"
+                        },
+                        "product": {
+                          "type": "null"
+                        },
+                        "answer": {
+                          "oneOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "comment": {
+                          "oneOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "pageNumber": {
+                          "type": "null"
+                        },
+                        "questionNumber": {
+                          "type": "null"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "ISO8601 format creation date."
+                        },
+                        "modifiedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "ISO8601 format last-modified date. Defaults to creation date."
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "knowledgebase:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/accounts/{id}/members": {
+      "post": {
+        "tags": [
+          "Account Members"
+        ],
+        "summary": "Add a member",
+        "description": "Adds a member to an account",
+        "operationId": "addMemberToAccount",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountMemberPayloadArray"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/accountId"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/AccountMemberArrayResponse"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:edit"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Account Members"
+        ],
+        "summary": "Delete a member",
+        "description": "Deletes a member from an account",
+        "operationId": "deleteMemberFromAccount",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountMemberEmails"
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/accountId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/requests/{requestId}/approve": {
+      "post": {
+        "tags": [
+          "Requests"
+        ],
+        "summary": "Approve access request",
+        "description": "Approve access request\n\n Takes as input an object that must have one of two keys (not both):\n\n \n\n1. accountId - The account ID under which to approve the request \n\n2. account - Account information. The account will be created and the request will be approved under it \n\n**Idempotent Operation**: If the request has already been approved or declined, this endpoint will return a 409 Conflict response instead of an error. This allows for safe retries without side effects.",
+        "operationId": "approveRequest",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "description": "ID of the request to approve",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accountId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "account": {
+                    "type": "object",
+                    "$ref": "#/components/schemas/CreateAccountPayload"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/AccountOutput"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:edt"
+            ]
+          }
+        ]
+      }
+    },
+    "/tcu/topics": {
+      "post": {
+        "tags": [
+          "Trust Center Updates"
+        ],
+        "summary": "Create topic",
+        "description": "Create a top-level Trust Center Update topic",
+        "operationId": "createTopic",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "subject",
+                  "category"
+                ],
+                "properties": {
+                  "subject": {
+                    "type": "string",
+                    "example": "New topic"
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "compliance",
+                      "vulnerabilities",
+                      "incidents",
+                      "subprocessors",
+                      "general"
+                    ],
+                    "example": "compliance"
+                  },
+                  "hidden": {
+                    "type": "boolean",
+                    "default": false,
+                    "example": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/TrustCenterTopicResponse"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "tcupdates:edit"
+            ]
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Trust Center Updates"
+        ],
+        "summary": "List topics",
+        "description": "List top-level Trust Center Update topics",
+        "operationId": "listTopics",
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TrustCenterTopicResponse"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "tcupdates:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/tcu/topics/{topicId}/updates": {
+      "post": {
+        "tags": [
+          "Trust Center Updates"
+        ],
+        "summary": "Create update",
+        "description": "Create a Trust Center Update",
+        "operationId": "createTrustCenterUpdate",
+        "parameters": [
+          {
+            "name": "topicId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The parent topic id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "message",
+                  "channels"
+                ],
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "example": "We are investigating any potential effects of the MegaCorp breach on our systems."
+                  },
+                  "channels": {
+                    "type": "object",
+                    "description": "The channel(s) to publish the update to. At least one channel must be specified. You must provide either statusPage OR email (with subscribers or audience).",
+                    "properties": {
+                      "statusPage": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Publish the update on the Trust Center Updates Card. This is considered a channel."
+                      },
+                      "statusPageAudience": {
+                        "type": "string",
+                        "enum": [
+                          "public",
+                          "private"
+                        ],
+                        "default": "public",
+                        "example": "public",
+                        "description": "If statusPage is true, this is the audience to publish the update to. Choose \"public\" for all users or \"private\" for account members only."
+                      },
+                      "email": {
+                        "type": "object",
+                        "description": "Email channel configuration. Must specify at least one of: subscribers or audience. Both can be provided together.",
+                        "properties": {
+                          "subscribers": {
+                            "type": "boolean",
+                            "example": true,
+                            "description": "Whether to send the update to the subscribers channel. This is considered a channel."
+                          },
+                          "audience": {
+                            "type": "object",
+                            "description": "A list of emails the update should be sent to. This is considered a channel.",
+                            "properties": {
+                              "emails": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "format": "email"
+                                },
+                                "minItems": 1
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "anyOf": [
+                      {
+                        "required": [
+                          "statusPage"
+                        ],
+                        "properties": {
+                          "statusPage": {
+                            "const": true
+                          }
+                        }
+                      },
+                      {
+                        "required": [
+                          "email"
+                        ],
+                        "properties": {
+                          "email": {
+                            "anyOf": [
+                              {
+                                "required": [
+                                  "subscribers"
+                                ],
+                                "properties": {
+                                  "subscribers": {
+                                    "const": true
+                                  }
+                                }
+                              },
+                              {
+                                "required": [
+                                  "audience"
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/TrustCenterUpdateResponse"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "tcupdates:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/webpages": {
+      "post": {
+        "tags": [
+          "Webpages"
+        ],
+        "summary": "Create webpage",
+        "description": "Create a webpage to be scraped and indexed. The URL is immutable — to change it, delete the \\\nwebpage and create a new one. A webpage must either apply to every product \\\n(`isGlobalProduct: true`) or name at least one product.\n",
+        "operationId": "createWebpage",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "url",
+                  "isGlobalProduct"
+                ],
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "isGlobalProduct": {
+                    "type": "boolean"
+                  },
+                  "productIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "url",
+                        "orgId",
+                        "enabled",
+                        "isGlobalProduct",
+                        "productIds",
+                        "createdAt",
+                        "lastCrawlResult",
+                        "lastCrawlAttemptedAt",
+                        "lastSuccessfulCrawl"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "url": {
+                          "type": "string"
+                        },
+                        "orgId": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "isGlobalProduct": {
+                          "type": "boolean"
+                        },
+                        "productIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "lastCrawlResult": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "lastCrawlAttemptedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        },
+                        "lastSuccessfulCrawl": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "webpages:edit"
+            ]
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Webpages"
+        ],
+        "summary": "List webpages",
+        "description": "List all webpages for the organization, ordered by creation date (newest first).",
+        "operationId": "getWebpages",
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/paths/~1webpages/post/responses/201/content/application~1json/schema/properties/result"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "webpages:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/requests/{requestId}/decline": {
+      "post": {
+        "tags": [
+          "Requests"
+        ],
+        "summary": "Decline access request",
+        "description": "Decline access request \\n\\n**Idempotent Operation**: If the request has already been approved or declined, this endpoint will return a 409 Conflict response instead of an error. This allows for safe retries without side effects.",
+        "operationId": "declineRequest",
+        "parameters": [
+          {
+            "name": "requestId",
+            "in": "path",
+            "description": "ID of the request to decline",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "description": "This parameter allows you to send a custom message. It can be set to one of the following options: \n\n1. string - Sends a Safebase email with a custom message attached \n\n2. boolean - Set this parameter to 'true' to send a SafeBase email without any custom message \n\n3. undefined - If you do not wish to send a Safebase email, simply do not send this property as part of your request",
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "description": "Enter the 'string' option here"
+                      },
+                      {
+                        "type": "boolean",
+                        "description": "Enter the 'boolean' option here"
+                      }
+                    ],
+                    "example": "This is a custom message"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/AccountOutput"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/accounts/{id}": {
+      "delete": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Delete account by ID",
+        "description": "Deletes an account by ID",
+        "operationId": "deleteAccount",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/accountId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:edit"
+            ]
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Get account by ID",
+        "description": "Gets an account by ID",
+        "operationId": "getAccount",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/accountId"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/AccountOutput"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:view"
+            ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Edit account",
+        "description": "Edits an existing account on SafeBase \n\nOne query parameter must be sent\n 1. accountId\n \n\nFive parameters can be sent in the body\n 1. name\n 2. description\n 2. sfdcAccountId\n 3. ndaProvider\n 4. ndaDocusign\n",
+        "operationId": "",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/accountId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Account object that needs to be sent to SafeBase to update",
+                "properties": {
+                  "$ref": "#/paths/~1accounts/post/requestBody/content/application~1json/schema/properties/input/properties",
+                  "accessExpiresAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "example": "2023-01-01T00:00:00.000Z",
+                    "description": "Set an expiration date for the account. Provide a current or past date to revoke access for the account. If omitted, the expiration date will remain unchanged.",
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "description": "A date-time in ISO-8601 format."
+                      },
+                      {
+                        "type": "null",
+                        "description": "If null is provided, the account will never expire."
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/AccountOutput"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/document/{id}": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Get a document by ID or external ID",
+        "description": "Fetch a single document by its ID or external ID, using a query parameter to indicate which",
+        "operationId": "getDocument",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "A unique document ID",
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "description": "Enum indicating whether to use the document ID or external ID to reference a document. \\\nWhen querying for documents by external ID you can only retrieve documents that have been \\\ncreated with this endpoint. When querying by document ID you can retrieve documents from \\\nany source.\n",
+              "type": "string",
+              "enum": [
+                "document",
+                "external"
+              ],
+              "default": "document"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/paths/~1documents~1upload/put/responses/200/content/application~1json/schema/properties/result"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "documents:view"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Delete a document by ID",
+        "description": "Delete a single document by its ID",
+        "operationId": "deleteDocument",
+        "parameters": [
+          {
+            "$ref": "#/paths/~1document~1{id}/get/parameters/0"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "documents:edit"
+            ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Update document by ID",
+        "description": "Patch update a document by ID",
+        "operationId": "patchDocument",
+        "parameters": [
+          {
+            "$ref": "#/paths/~1document~1{id}/get/parameters/0"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "aiOptOut": {
+                    "type": "boolean"
+                  },
+                  "expiresAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "tagIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "productIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "type": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "documents:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/tcu/topics/{topicId}": {
+      "delete": {
+        "tags": [
+          "Trust Center Updates"
+        ],
+        "summary": "Delete topic",
+        "description": "Delete a Trust Center topic",
+        "operationId": "deleteTrustCenterTopic",
+        "parameters": [
+          {
+            "name": "topicId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The parent topic id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "tcupdates:edit"
+            ]
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Trust Center Updates"
+        ],
+        "summary": "Get topic by ID",
+        "description": "Get a Trust Center topic",
+        "operationId": "getTrustCenterTopic",
+        "parameters": [
+          {
+            "name": "topicId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The topic id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/TrustCenterTopicResponse"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "tcupdates:view"
+            ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Trust Center Updates"
+        ],
+        "summary": "Update topic",
+        "description": "Update a Trust Center topic",
+        "operationId": "updateTrustCenterTopic",
+        "parameters": [
+          {
+            "name": "topicId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The id of the topic to update",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "$ref": "#/paths/~1tcu~1topics/post/requestBody/content/application~1json/schema/properties"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/TrustCenterTopicResponse"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "tcupdates:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/tcu/topics/{topicId}/updates/{updateId}": {
+      "delete": {
+        "tags": [
+          "Trust Center Updates"
+        ],
+        "summary": "Delete update",
+        "description": "Delete a Trust Center Update",
+        "operationId": "deleteTrustCenterUpdate",
+        "parameters": [
+          {
+            "name": "topicId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The parent topic id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "updateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The update id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "tcupdates:edit"
+            ]
+          }
+        ]
+      },
+      "get": {
+        "tags": [
+          "Trust Center Updates"
+        ],
+        "summary": "Get update by ID",
+        "description": "Get a Trust Center Update by ID",
+        "operationId": "getTrustCenterUpdateById",
+        "parameters": [
+          {
+            "name": "topicId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The parent topic id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "updateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The update id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/TrustCenterUpdateResponse"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "tcupdates:read"
+            ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Trust Center Updates"
+        ],
+        "summary": "Edit update",
+        "description": "Edit a Trust Center Update",
+        "operationId": "updateTrustCenterUpdate",
+        "parameters": [
+          {
+            "name": "topicId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The parent topic id",
+              "type": "string"
+            }
+          },
+          {
+            "name": "updateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The update id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "message": {
+                    "type": "string",
+                    "description": "The new message for the Trust Center Update"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/components/schemas/TrustCenterUpdateResponse"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "tcupdates:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/webpage/{id}": {
+      "get": {
+        "tags": [
+          "Webpages"
+        ],
+        "summary": "Get a webpage by ID",
+        "description": "Fetch a single webpage by its ID",
+        "operationId": "getWebpage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "A unique webpage ID",
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/paths/~1webpages/post/responses/201/content/application~1json/schema/properties/result"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "webpages:view"
+            ]
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Webpages"
+        ],
+        "summary": "Delete a webpage by ID",
+        "description": "Delete a single webpage by its ID and remove it from the search index",
+        "operationId": "deleteWebpage",
+        "parameters": [
+          {
+            "$ref": "#/paths/~1webpage~1{id}/get/parameters/0"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "webpages:edit"
+            ]
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Webpages"
+        ],
+        "summary": "Update a webpage by ID",
+        "description": "Update a webpage's mutable fields. The URL cannot be changed. Product associations are replaced \\\nwholesale when `productIds` or `isGlobalProduct` is provided.\n",
+        "operationId": "updateWebpage",
+        "parameters": [
+          {
+            "$ref": "#/paths/~1webpage~1{id}/get/parameters/0"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "isGlobalProduct": {
+                    "type": "boolean"
+                  },
+                  "productIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "$ref": "#/paths/~1webpages/post/responses/201/content/application~1json/schema/properties/result"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "webpages:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/accounts/{id}/url": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Get account page URL",
+        "description": "Gets an account's private page URL",
+        "operationId": "getAccountPageUrl",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/accountId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "string",
+                      "example": "https://safebase.io/accounts/{id}/share"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/questionnaires/{id}": {
+      "get": {
+        "tags": [
+          "Questionnaires"
+        ],
+        "summary": "Get completed questionnaire",
+        "description": "Gets a signed URL for a completed questionnaire by ID.\n\nThe URL can be used to download the completed questionnaire file.\n\nThe URL is valid for 60 minutes.",
+        "operationId": "getCompletedQuestionnaireUrl",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The target questionnaire ID",
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "example": "https://FILE_URL.com",
+                          "description": "Signed URL for the completed questionnaire"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "automated-questionnaires:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/documents/upload": {
+      "put": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Create document",
+        "description": "Creates a new Document or replaces a file backing an existing Document.\n",
+        "operationId": "putDocumentUpload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "fileId",
+                  "mimeType"
+                ],
+                "properties": {
+                  "aiOptOut": {
+                    "type": "boolean"
+                  },
+                  "expiresAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "format": "date-time"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "tagIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "uuid"
+                    },
+                    "example": []
+                  },
+                  "productIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "example": []
+                  },
+                  "type": {
+                    "description": "Call GET /document-types to retrieve the current list of allowed document types",
+                    "type": "string"
+                  },
+                  "fileId": {
+                    "description": "The id value returned from POST /documents/upload",
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "externalId": {
+                    "description": "A field to store your own unique identifier in",
+                    "type": "string"
+                  },
+                  "replacementDocumentId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The id of an existing Document whose file you want to replace. \nWhen this field is not provided a new Document will be created.\n"
+                  },
+                  "mimeType": {
+                    "description": "The mime type of the file you want to upload",
+                    "type": "string",
+                    "enum": [
+                      "text/csv",
+                      "application/vnd.ms-excel",
+                      "application/vnd.ms-excel.sheet.macroenabled.12",
+                      "application/vnd.ms-excel.sheet.macroEnabled.12",
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                      "application/vnd.ms-excel.sheet.binary.macroenabled.12",
+                      "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+                      "application/json",
+                      "text/markdown",
+                      "application/msword",
+                      "application/pdf",
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                      "text/plain",
+                      "application/zip",
+                      "application/x-zip-compressed",
+                      "image/apng",
+                      "image/avif",
+                      "image/gif",
+                      "image/jpeg",
+                      "image/png",
+                      "image/svg+xml",
+                      "image/tiff",
+                      "image/webp"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "required": [
+                        "aiOptOut",
+                        "checksum",
+                        "createdAt",
+                        "expiresAt",
+                        "externalId",
+                        "id",
+                        "mimeType",
+                        "name",
+                        "sha256Hash",
+                        "size",
+                        "source",
+                        "type",
+                        "updatedAt",
+                        "tags",
+                        "uploadStatus"
+                      ],
+                      "properties": {
+                        "aiOptOut": {
+                          "type": "boolean"
+                        },
+                        "checksum": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "externalId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "sha256Hash": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "size": {
+                          "type": "integer"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        },
+                        "uploadStatus": {
+                          "type": "string"
+                        },
+                        "tags": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "tagName": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "products": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "documents:edit"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Request file upload",
+        "description": "Request a presigned url to upload a file. This file can then be used to create a new\nDocument in Safebase or to replace a file for an existing Document.\n\nOnce granted a presigned url, you should POST your file to that url, and then call\nPUT /documents/upload in order to create the Document.\n",
+        "operationId": "postDocumentUpload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fileName",
+                  "mimeType",
+                  "md5b64",
+                  "fileSize"
+                ],
+                "properties": {
+                  "fileName": {
+                    "description": "Name of a file, including the file extension",
+                    "type": "string"
+                  },
+                  "mimeType": {
+                    "description": "The mime type of the file you want to upload",
+                    "type": "string",
+                    "enum": [
+                      "text/csv",
+                      "application/vnd.ms-excel",
+                      "application/vnd.ms-excel.sheet.macroenabled.12",
+                      "application/vnd.ms-excel.sheet.macroEnabled.12",
+                      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                      "application/vnd.ms-excel.sheet.binary.macroenabled.12",
+                      "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
+                      "application/json",
+                      "text/markdown",
+                      "application/msword",
+                      "application/pdf",
+                      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                      "text/plain",
+                      "application/zip",
+                      "application/x-zip-compressed",
+                      "image/apng",
+                      "image/avif",
+                      "image/gif",
+                      "image/jpeg",
+                      "image/png",
+                      "image/svg+xml",
+                      "image/tiff",
+                      "image/webp"
+                    ]
+                  },
+                  "md5b64": {
+                    "description": "A base64-encoded MD5 hash of the file",
+                    "type": "string"
+                  },
+                  "fileSize": {
+                    "description": "The file size in bytes",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 78643200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "required": [
+                        "fileId",
+                        "signedUrl",
+                        "headers"
+                      ],
+                      "properties": {
+                        "fileId": {
+                          "description": "A unique fileId used to reference the uploaded file",
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "signedUrl": {
+                          "description": "A presigned url that can be used to POST a file to",
+                          "type": "string",
+                          "format": "url"
+                        },
+                        "headers": {
+                          "description": "An object of string keys to string values that should be included\nas headers in the request to upload the file to the signedUrl\n",
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "documents:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/documents": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Get all documents",
+        "description": "Get all documents, with optional filtering",
+        "operationId": "getDocuments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orderBy",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "createdAt:asc",
+                "createdAt:desc",
+                "updatedAt:asc",
+                "updatedAt:desc",
+                "name:asc",
+                "name:desc",
+                "expiresAt:asc",
+                "expiresAt:desc"
+              ]
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mimeTypes",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "productIds",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tags",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "usedForAi",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "count": {
+                          "type": "integer"
+                        },
+                        "documents": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/paths/~1documents~1upload/put/responses/200/content/application~1json/schema/properties/result"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "documents:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/document-types": {
+      "get": {
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Get document types",
+        "description": "Get all document types",
+        "operationId": "getDocumentTypes",
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "example": "privacy_policy"
+                              },
+                              "name": {
+                                "type": "string",
+                                "example": "Privacy Policy"
+                              }
+                            }
+                          }
+                        },
+                        "count": {
+                          "type": "number",
+                          "description": "Number of Document Types in the list"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "documents:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/organizations": {
+      "get": {
+        "tags": [
+          "Organization"
+        ],
+        "summary": "Get current Organization",
+        "description": "Gets current Organization",
+        "operationId": "getOrganization",
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "description": "Internal identifier for the Organization",
+                          "type": "string",
+                          "example": "a1b2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6"
+                        },
+                        "name": {
+                          "description": "Organization name",
+                          "type": "string",
+                          "example": "Acme Corp."
+                        },
+                        "primaryDomain": {
+                          "description": "Primary (email) domain of the organization",
+                          "type": "string",
+                          "example": "acme.com"
+                        },
+                        "spCustomDomain": {
+                          "description": "Custom TC domain of the organization",
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "example": "trust.acme.com"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "organization:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/organizations/members/me": {
+      "get": {
+        "tags": [
+          "Organization"
+        ],
+        "summary": "Get current Organization Member",
+        "description": "Gets current Organization Member",
+        "operationId": "getOrganizationMemberMe",
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "required": [
+                        "userId",
+                        "picture"
+                      ],
+                      "properties": {
+                        "userId": {
+                          "description": "Internal identifier for the Organization Member",
+                          "type": "string",
+                          "example": "samlp|saml-connection-name|user-identifier"
+                        },
+                        "familyName": {
+                          "description": "The Organization Member's family name (surname)",
+                          "type": "string",
+                          "example": "Doe"
+                        },
+                        "givenName": {
+                          "description": "The Organization Member's given name (first name)",
+                          "type": "string",
+                          "example": "John"
+                        },
+                        "picture": {
+                          "description": "The Organization Member profile picture",
+                          "type": "string",
+                          "example": "https://some.url.com/picture.jpg"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "organization:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/organizations/nda": {
+      "get": {
+        "tags": [
+          "Organization"
+        ],
+        "summary": "Get Organization NDA settings",
+        "description": "Gets Organization NDA settings",
+        "operationId": "getOrganizationNDASettings",
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "$ref": "#/paths/~1organizations~1settings/get/responses/200/content/application~1json/schema/properties/result/items/properties/nda"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "organization:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/organizations/settings": {
+      "get": {
+        "tags": [
+          "Organization"
+        ],
+        "summary": "Get Organization settings",
+        "description": "Gets Organization settings",
+        "operationId": "getOrganizationSettings",
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "nda": {
+                            "type": "object",
+                            "properties": {
+                              "memberRequiredForDefaultNda": {
+                                "description": "Indicates whether the default provider requires a member to be created simultaneously",
+                                "type": "boolean"
+                              },
+                              "defaultNdaProvider": {
+                                "description": "The NDA option the organization uses by default",
+                                "$ref": "#/components/schemas/NdaProvider"
+                              },
+                              "enabledNdaProviders": {
+                                "description": "List of all enabled NDA Providers for an org",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "memberRequiredForNda": {
+                                      "description": "Indicates whether the default provider requires a member to be created simultaneously",
+                                      "type": "boolean"
+                                    },
+                                    "provider": {
+                                      "description": "The NDA provider",
+                                      "$ref": "#/components/schemas/NdaProvider"
+                                    },
+                                    "label": {
+                                      "description": "The user facing label for a given provider",
+                                      "type": "string"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "permissionProfiles": {
+                            "type": "object",
+                            "properties": {
+                              "defaultProfileId": {
+                                "type": "string",
+                                "format": "uuid",
+                                "deprecated": true
+                              },
+                              "defaultProfileIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "format": "uuid"
+                                }
+                              },
+                              "profiles": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "format": "uuid"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "description": {
+                                      "type": "string"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "accessExpiration": {
+                            "type": "object",
+                            "properties": {
+                              "defaultExpiration": {
+                                "type": "number",
+                                "description": "This is the length of expiration in minutes"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "organization:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/portals/default/products": {
+      "get": {
+        "tags": [
+          "Portals"
+        ],
+        "summary": "Get All Products",
+        "description": "Gets all the products that make up a given portal. This endpoint will default to only pulling in the data that has been made public",
+        "operationId": "getPortal",
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "allOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "example": "default",
+                              "description": "The ID of the product"
+                            },
+                            "name": {
+                              "type": "string",
+                              "example": "default",
+                              "description": "The name of the product"
+                            },
+                            "show": {
+                              "type": "boolean",
+                              "example": true,
+                              "description": "Shows whether the product is visible in the portal or not"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "cards": {
+                              "type": "object",
+                              "description": "Object that contains data on the meta data of a specific card",
+                              "properties": {
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "cardType": {
+                                        "type": "string",
+                                        "description": "The type of card that data is grouped under"
+                                      },
+                                      "title": {
+                                        "type": "string",
+                                        "description": "The display text for that card type"
+                                      }
+                                    }
+                                  },
+                                  "description": "List of cards"
+                                },
+                                "count": {
+                                  "type": "number",
+                                  "description": "Number of cards in the list"
+                                }
+                              }
+                            },
+                            "data": {
+                              "type": "object",
+                              "description": "Data about the specfic items that make up the product",
+                              "properties": {
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string",
+                                        "format": "uuid",
+                                        "description": "The unique id corresponding to that piece of data"
+                                      },
+                                      "explanation": {
+                                        "type": "string",
+                                        "description": "Text describing the data item"
+                                      },
+                                      "maturity": {
+                                        "type": "string",
+                                        "description": "Field to communicate if the state of the items",
+                                        "enum": [
+                                          "na",
+                                          "in_progress",
+                                          "full"
+                                        ]
+                                      },
+                                      "href": {
+                                        "type": "string",
+                                        "format": "url",
+                                        "description": "A link out to an external resource if necessary"
+                                      },
+                                      "choice": {
+                                        "type": "string",
+                                        "description": "A string for risk profile items to communicate out the risk",
+                                        "enum": [
+                                          "public",
+                                          "internal",
+                                          "restricted",
+                                          "low",
+                                          "moderate",
+                                          "substantial",
+                                          "severe",
+                                          "yes",
+                                          "no",
+                                          "hours_12",
+                                          "hours_24",
+                                          "hours_24_48",
+                                          "hours_48_72",
+                                          "days_4_7",
+                                          "days_8",
+                                          "major_cloud",
+                                          "on_premise",
+                                          "combination"
+                                        ]
+                                      },
+                                      "recurrence": {
+                                        "type": "string",
+                                        "description": "How often the these are review/assessed",
+                                        "enum": [
+                                          "na",
+                                          "months_3",
+                                          "months_6",
+                                          "years_1"
+                                        ]
+                                      },
+                                      "publicAccess": {
+                                        "type": "boolean"
+                                      },
+                                      "cardType": {
+                                        "type": "string",
+                                        "description": "The cardType it is associated with from the cards array"
+                                      },
+                                      "title": {
+                                        "type": "string",
+                                        "description": "Headline to explain what the data is quickly"
+                                      },
+                                      "listOfEntries": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "logo": {
+                                              "type": "string"
+                                            },
+                                            "domain": {
+                                              "type": "string"
+                                            },
+                                            "name": {
+                                              "type": "string"
+                                            },
+                                            "url": {
+                                              "type": "string"
+                                            },
+                                            "grade": {
+                                              "type": "string"
+                                            },
+                                            "label": {
+                                              "type": "string"
+                                            },
+                                            "description": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        },
+                                        "description": "Used to communicate out subprocessors and the company they are"
+                                      },
+                                      "hasFiles": {
+                                        "type": "boolean"
+                                      },
+                                      "bridgeLetter": {
+                                        "type": "object"
+                                      }
+                                    }
+                                  },
+                                  "description": "List of data that make up the product"
+                                },
+                                "count": {
+                                  "type": "number",
+                                  "description": "Number of data entries"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      ],
+                      "example": [
+                        {
+                          "id": "default",
+                          "name": "default",
+                          "show": true,
+                          "cards": {
+                            "items": [
+                              {
+                                "cardType": "product_features",
+                                "title": "Product Security"
+                              },
+                              {
+                                "cardType": "security_grades",
+                                "title": "Security Grades"
+                              },
+                              {
+                                "cardType": "reports",
+                                "title": "Reports"
+                              },
+                              {
+                                "cardType": "overview",
+                                "title": "Overview"
+                              },
+                              {
+                                "cardType": "legal",
+                                "title": "Legal"
+                              },
+                              {
+                                "cardType": "risk_profile",
+                                "title": "Risk Profile"
+                              },
+                              {
+                                "cardType": "data_security",
+                                "title": "Data Security"
+                              }
+                            ],
+                            "count": 7
+                          },
+                          "data": {
+                            "items": [
+                              {
+                                "maturity": "na",
+                                "explanation": "We are working on setting up role based control",
+                                "id": "26715457-a875-4de9-a848-a586aa08e8d9",
+                                "title": "Role-Based Access Control",
+                                "cardType": "product_features"
+                              },
+                              {
+                                "listEntries": [
+                                  {
+                                    "url": "https://www.ssllabs.com/ssltest/analyze.html?d=app.safebase.io",
+                                    "grade": "A",
+                                    "label": "API Endpoint",
+                                    "description": "Great API"
+                                  }
+                                ],
+                                "id": "2a8c3762-0970-4a72-88cd-a86b29f9ef12",
+                                "title": "Qualys SSL Labs",
+                                "cardType": "security_grades"
+                              },
+                              {
+                                "maturity": "in_progress",
+                                "recurrence": "months_6",
+                                "id": "382f924d-54f3-43a8-a9df-c39e6c959958",
+                                "title": "Security Whitepaper",
+                                "cardType": "reports"
+                              },
+                              {
+                                "explanation": "We\nhave\nreally\nvery\ngood\nsecurity\n\nYour security is our #1 priority and we take it seriously. At our company, we handle critical financial data of your business. These include information about your processes, revenue, payment gateway information and merchant information. During these processes, we know the security of our system should be air-tight to provide you with a hassle-free experience. Our teams take preventive measures, adheres and keep up with the latest security and compliance practices across the globe.",
+                                "id": "4f5e1d9d-df3a-4fe4-9642-30ecbd6de704",
+                                "title": "Body",
+                                "cardType": "overview"
+                              },
+                              {
+                                "href": "https://drata.com/privacy",
+                                "id": "63f59def-eb18-4135-95a1-addeb7463801",
+                                "title": "Privacy Notice",
+                                "cardType": "legal"
+                              },
+                              {
+                                "choice": "internal",
+                                "id": "68637b86-1e8f-4f90-bc0a-16c57d4894ca",
+                                "title": "Data Access Level",
+                                "cardType": "risk_profile"
+                              },
+                              {
+                                "maturity": "na",
+                                "explanation": "We set up dashboards to track who is running db queries",
+                                "id": "92ff33fd-666e-49f9-8cc7-c8a3ba9fd4d7",
+                                "title": "Access Monitoring",
+                                "cardType": "data_security"
+                              },
+                              {
+                                "maturity": "na",
+                                "explanation": "We have detailed audit logs",
+                                "id": "a5bb6b4d-c23b-4d4f-9da1-bedf5dc74ff5",
+                                "title": "Audit Logging",
+                                "cardType": "product_features"
+                              },
+                              {
+                                "maturity": "full",
+                                "explanation": "We do weekly backups",
+                                "id": "b05bcec1-da7e-4885-9603-a39fd73a1cdc",
+                                "title": "Backups Enabled",
+                                "cardType": "data_security"
+                              },
+                              {
+                                "listEntries": [
+                                  {
+                                    "company": {
+                                      "logo": "https://logo.clearbit.com/safebase.io",
+                                      "name": "SafeBase",
+                                      "domain": "safebase.io"
+                                    },
+                                    "createdAt": "2022-08-15T13:40:54.458Z"
+                                  },
+                                  {
+                                    "company": {
+                                      "logo": "https://logo.clearbit.com/amazon.com",
+                                      "name": "Amazon",
+                                      "domain": "amazon.com"
+                                    },
+                                    "createdAt": "2022-08-15T13:40:54.458Z"
+                                  }
+                                ],
+                                "id": "e3fae2ca-94a9-416b-b577-5c90e382df57",
+                                "title": "Subprocessors",
+                                "cardType": "legal"
+                              },
+                              {
+                                "explanation": "We are working on our SOC 2",
+                                "id": "f4951085-df2e-4fac-9d43-60b796478b2e",
+                                "title": "SOC 2 Report",
+                                "cardType": "reports"
+                              }
+                            ],
+                            "count": 11
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "organization:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/products": {
+      "get": {
+        "tags": [
+          "Products"
+        ],
+        "summary": "Get products",
+        "description": "Gets all products",
+        "operationId": "getProducts",
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/paths/~1portals~1default~1products/get/responses/200/content/application~1json/schema/properties/result/allOf/0",
+                            "description": "List of Products that are a part of your organization"
+                          }
+                        },
+                        "count": {
+                          "type": "number",
+                          "description": "Number of Products in the list",
+                          "example": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "products:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/requests": {
+      "get": {
+        "tags": [
+          "Requests"
+        ],
+        "summary": "Get access requests",
+        "description": "Gets all access requests",
+        "operationId": "getRequests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "description": "The status matching the requests to fetch",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "declined"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "example": "fe732619-4e7a-469b-b34a-d8bc4aaabfa9"
+                          },
+                          "firstName": {
+                            "type": "string",
+                            "example": "Sally"
+                          },
+                          "lastName": {
+                            "type": "string",
+                            "example": "Smith"
+                          },
+                          "email": {
+                            "type": "string",
+                            "example": "user@safebase.io"
+                          },
+                          "companyName": {
+                            "type": "string",
+                            "example": "SafeBase"
+                          },
+                          "status": {
+                            "type": "string",
+                            "example": "Pending"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "example": "2017-07-21T17:32:28Z"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/tags": {
+      "get": {
+        "tags": [
+          "Tags"
+        ],
+        "summary": "Get tags",
+        "description": "Gets all tags",
+        "operationId": "getTags",
+        "responses": {
+          "200": {
+            "description": "Successful operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "tagName": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "count": {
+                          "type": "number",
+                          "description": "Number of Tags in the list",
+                          "example": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "organization:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/webpage/{id}/refresh": {
+      "post": {
+        "tags": [
+          "Webpages"
+        ],
+        "summary": "Refresh a webpage",
+        "description": "Trigger an on-demand re-scrape of the webpage. Requests are de-duplicated within a short window, \\\nso rapid repeat calls collapse to a single scrape.\n",
+        "operationId": "refreshWebpage",
+        "parameters": [
+          {
+            "$ref": "#/paths/~1webpage~1{id}/get/parameters/0"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "webpages:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/accounts/members": {
+      "get": {
+        "tags": [
+          "Account Members"
+        ],
+        "summary": "Search for members",
+        "description": "Search for a member based on account criteria and member criteria",
+        "operationId": "searchForAccountMembers",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "email",
+            "description": "This parameter will search for all accounts that contain a given member email.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sfdcAccountId",
+            "description": "Salesforce Account Id to verify and get account",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AccountMemberResponse"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/kb/search": {
+      "get": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Search Knowledge Base",
+        "description": "Search Knowledge Base by a given search text and receive the first page of results",
+        "operationId": "searchKnowledgeBase",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "query",
+            "description": "The search text. May be empty, and must not exceed 512 characters.",
+            "allowEmptyValue": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "products",
+            "description": "The products to search in. Comma separated product ids. If empty, all products will be searched.",
+            "allowEmptyValue": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageNumber",
+            "description": "The number of the page to request data from",
+            "allowEmptyValue": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "description": "The number of items returned per page",
+            "allowEmptyValue": true,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "count": {
+                          "type": "number",
+                          "description": "Number of data entries"
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "description": "The ID for the searched item. The ID is guaranteed to be unique only among Knowledge Base search items."
+                              },
+                              "isFavorite": {
+                                "type": "boolean"
+                              },
+                              "accessLevel": {
+                                "type": "string",
+                                "enum": [
+                                  "private",
+                                  "internal",
+                                  "public"
+                                ]
+                              },
+                              "source": {
+                                "type": "string",
+                                "example": "policy",
+                                "enum": [
+                                  "policy",
+                                  "questionnaire",
+                                  "report",
+                                  "portal",
+                                  "manual"
+                                ]
+                              },
+                              "subtype": {
+                                "type": "object",
+                                "properties": {
+                                  "raw": {
+                                    "type": "array",
+                                    "description": "Raw form of the item subtype's values. May begin with the product ID when source is portal. Note that product ID and product name are the same, but this is subject to change.",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "pretty": {
+                                    "type": "array",
+                                    "description": "Pretty form of the item subtype's values. May begin with the product name when source is portal.",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                }
+                              },
+                              "content": {
+                                "type": "string",
+                                "description": "The item's content, which varies based on the source."
+                              },
+                              "product": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "description": "When the source is portal, the product to which the item belongs.",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "pretty": {
+                                        "type": "string",
+                                        "description": "The name of the product as it appears in Knowledge Base."
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "type": "null",
+                                    "description": "When the source is not portal."
+                                  }
+                                ]
+                              },
+                              "products": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "description": "An array containing the product(s) for which this entry applies to.",
+                                  "properties": {
+                                    "id": {
+                                      "oneOf": [
+                                        {
+                                          "type": "string",
+                                          "example": "default",
+                                          "description": "When the entry applies to a specific product, this will be the product ID."
+                                        },
+                                        {
+                                          "type": "string",
+                                          "enum": [
+                                            "--global--"
+                                          ],
+                                          "description": "When the entry applies to the entire organization or all products, it is considered a global item and this will be the only product in the array."
+                                        }
+                                      ]
+                                    }
+                                  }
+                                }
+                              },
+                              "answer": {
+                                "oneOf": [
+                                  {
+                                    "type": "string",
+                                    "description": "When the source is questionnaire, the answer to the content's question."
+                                  },
+                                  {
+                                    "type": "null",
+                                    "description": "When the source is not questionnaire."
+                                  }
+                                ]
+                              },
+                              "comment": {
+                                "oneOf": [
+                                  {
+                                    "type": "string",
+                                    "description": "When the source is questionnaire, a comment on the content's question, if it exists."
+                                  },
+                                  {
+                                    "type": "null",
+                                    "description": "When the source is is questionnaire and the comment does not exist, or the source is not questionnaire."
+                                  }
+                                ]
+                              },
+                              "pageNumber": {
+                                "oneOf": [
+                                  {
+                                    "type": "integer",
+                                    "description": "When the source is report, the 1-indexed page number of the report."
+                                  },
+                                  {
+                                    "type": "null",
+                                    "description": "When the source is not report."
+                                  }
+                                ]
+                              },
+                              "questionNumber": {
+                                "oneOf": [
+                                  {
+                                    "type": "integer",
+                                    "description": "When the source is questionnaire, the 1-indexed number of the question."
+                                  },
+                                  {
+                                    "type": "null",
+                                    "description": "When the source is not questionnaire."
+                                  }
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "description": "ISO8601 format creation date."
+                              },
+                              "modifiedAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "description": "ISO8601 format last-modified date. Defaults to creation date."
+                              }
+                            }
+                          },
+                          "description": "Items searched from Knowledge Base"
+                        }
+                      }
+                    },
+                    "pagination": {
+                      "type": "object",
+                      "$ref": "#/paths/~1accounts/get/responses/200/content/application~1json/schema/properties/pagination"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "knowledgebase:view"
+            ]
+          }
+        ]
+      }
+    },
+    "/questionnaires": {
+      "post": {
+        "tags": [
+          "Questionnaires"
+        ],
+        "summary": "Upload Questionnaire",
+        "description": "Submits a new questionnaire file to SafeBase\n\n The following params must be sent as **form data** key pair values: \n\n- qnr \n\n- accountId \n\n- productId (optional for single-product orgs, required for multi-product orgs) \n\n The following form data fields are optional: \n\n- dueDate \n\n- notes \n\n\n\n **Supported file formats**: xlsx, .pdf, .docx, .csv, .json and plain text (not exhaustive, please check latest support docs) ",
+        "operationId": "submitQnrFile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "qnr",
+                  "accountId"
+                ],
+                "properties": {
+                  "qnr": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "The questionnaire file to upload. Supported format include .xlsx, .pdf, .docx, .csv, .json and plain text."
+                  },
+                  "accountId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The accountId to associate the questionnaire file with."
+                  },
+                  "productId": {
+                    "type": "string",
+                    "description": "The productId to associate the QNR file with. Product ID is strictly required for multi product organizations."
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO 8601 datetime string, e.g., '2024-12-31T23:59:59Z'."
+                  },
+                  "notes": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Internal notes about the questionnaire, visible only to your organization. Up to 500 characters."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {
+                        "qnrId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "fileId": {
+                          "type": "string"
+                        },
+                        "accountId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "productId": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "accounts:edit"
+            ]
+          }
+        ]
+      }
+    },
+    "/kb/entries/{id}": {
+      "patch": {
+        "tags": [
+          "Knowledge Base"
+        ],
+        "summary": "Update Knowledge Base Entry",
+        "description": "Updates a Knowledge Base entry by ID.",
+        "operationId": "updateKbEntry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "The id of the KB entry to update.",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "question": {
+                    "type": "string"
+                  },
+                  "answer": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null",
+                        "description": "When null is provided, the answer will be removed from the item."
+                      }
+                    ]
+                  },
+                  "comment": {
+                    "oneOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null",
+                        "description": "When null is provided, the comment will be removed from the item."
+                      }
+                    ]
+                  },
+                  "accessLevel": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "private",
+                      "internal"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "result": {
+                      "description": "The updated Knowledge Base item.",
+                      "$ref": "#/paths/~1kb~1entries/post/responses/201/content/application~1json/schema/properties/result"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "405": {
+            "$ref": "#/components/responses/405"
+          }
+        },
+        "security": [
+          {
+            "apiKey": [
+              "knowledgebase:edit"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "accountId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "description": "The target account ID",
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "schemas": {
+      "AccountMemberEmail": {
+        "type": "string",
+        "example": "user1@safebase.io"
+      },
+      "AccountMemberEmails": {
+        "type": "object",
+        "required": [
+          "members"
+        ],
+        "properties": {
+          "members": {
+            "type": "array",
+            "description": "Array of member emails to delete",
+            "minItems": 1,
+            "uniqueItems": true,
+            "example": [
+              "user1@safebase.io",
+              "user2@safebase.io"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ApiResponseInvalidRequest": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "example": 400
+          },
+          "error": {
+            "type": "string",
+            "example": "bad_request"
+          },
+          "message": {
+            "type": "string",
+            "example": "Invalid request."
+          }
+        }
+      },
+      "ApiResponseInvalidApiKeyOrMissingScope": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "example": 403
+          },
+          "error": {
+            "type": "string",
+            "example": "forbidden"
+          },
+          "message": {
+            "type": "string",
+            "example": "Invalid API key / Missing required scope(s): (missing scopes here)"
+          }
+        }
+      },
+      "ApiResponseNotFound": {
+        "type": "object",
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "example": 404
+          },
+          "error": {
+            "type": "string",
+            "example": "not_found"
+          },
+          "message": {
+            "type": "string",
+            "example": "Not found"
+          }
+        }
+      },
+      "AccountMemberNotifyPayload": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AccountMemberEmail",
+                "description": "One single email address can be entered here"
+              },
+              {
+                "$ref": "#/components/schemas/AccountMemberEmails",
+                "description": "An array of email addresses can be entered here"
+              }
+            ]
+          },
+          "message": {
+            "description": "This parameter allows you to send a custom message. It can be set to one of the following options: \n\n1. string - Sends a Safebase email with a custom message attached \n\n2. boolean - Set this parameter to 'true' to send a SafeBase email without any custom message \n\n3. undefined - If you do not wish to send a Safebase email, simply do not send this property as part of your request",
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Enter the 'string' option here"
+              },
+              {
+                "type": "boolean",
+                "description": "Enter the 'boolean' option here"
+              }
+            ],
+            "example": "This is a custom message"
+          },
+          "notify": {
+            "type": "object",
+            "itemUid": {
+              "description": "This is a parameter to be able to send a link directly to a specific Item on the Portal",
+              "type": "string",
+              "format": "uuid"
+            },
+            "productId": {
+              "description": "The specific product to link to",
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AccountOutput": {
+        "type": "object",
+        "properties": {
+          "$ref": "#/paths/~1accounts/post/requestBody/content/application~1json/schema/properties/input/properties",
+          "id": {
+            "type": "string",
+            "example": "fe732619-4e7a-469b-b34a-d8bc4aaabfa9"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2017-07-21T17:32:28Z"
+          },
+          "numMembers": {
+            "type": "integer",
+            "example": 4
+          },
+          "isNdaDone": {
+            "description": "Whether the NDA has been agreed to or not",
+            "type": "boolean"
+          },
+          "lastSeen": {
+            "description": "The last time an account member has interacted with the Trust Center",
+            "type": "string | null",
+            "format": "date-time",
+            "example": "2022-01-01T12:00:00Z"
+          }
+        }
+      },
+      "NdaProvider": {
+        "type": "string",
+        "description": "One of the available NDA options. If the ndaProvider field is not set, NDA provider will be set to the organization's default NDA provider.",
+        "enum": [
+          "none",
+          "clickwrap",
+          "docusign",
+          "override"
+        ]
+      },
+      "AccountMemberPayload": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "example": "Safe",
+            "description": "Required if name is not set."
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Base",
+            "description": "Required if name is not set."
+          },
+          "name": {
+            "type": "string",
+            "example": "Safe Base",
+            "description": "Either firstName and lastName, or name must be supplied, but never all three.",
+            "deprecated": true
+          },
+          "email": {
+            "type": "string",
+            "example": "user@safebase.io"
+          }
+        }
+      },
+      "AccountMemberResponse": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "example": "88f54931-f4c6-454e-8c3d-1462df981b4d"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Safe"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Base"
+          },
+          "name": {
+            "type": "string",
+            "example": "Safe Base",
+            "deprecated": true
+          },
+          "email": {
+            "type": "string",
+            "example": "user@safebase.io"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2017-07-21T17:32:28Z"
+          },
+          "lastSeen": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "format": "date-time"
+              }
+            ],
+            "example": "2017-07-21T17:32:28Z"
+          }
+        }
+      },
+      "AccountMemberArrayResponse": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "$ref": "#/components/schemas/AccountMemberResponse"
+        }
+      },
+      "AccountMemberPayloadArray": {
+        "type": "object",
+        "required": [
+          "members"
+        ],
+        "properties": {
+          "members": {
+            "description": "An array of objects, each representing a member to add to an account",
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "$ref": "#/components/schemas/AccountMemberPayload"
+            }
+          },
+          "message": {
+            "description": "This parameter allows you to send a custom message. It can be set to one of the following options: \n\n1. string - Sends a Safebase email with a custom message attached \n\n2. boolean - Set this parameter to 'true' to send a SafeBase email without any custom message \n\n3. undefined - If you do not wish to send a Safebase email, simply do not send this property as part of your request",
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Enter the 'string' option here"
+              },
+              {
+                "type": "boolean",
+                "description": "Enter the 'boolean' option here"
+              }
+            ],
+            "example": "This is a custom message"
+          }
+        }
+      },
+      "CreateAccountPayload": {
+        "type": "object",
+        "description": "Account object that needs to be added to SafeBase",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "$ref": "#/paths/~1accounts/post/requestBody/content/application~1json/schema/properties/input/properties"
+        }
+      },
+      "ApiResponseConflict": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "example": false
+          },
+          "errorCode": {
+            "type": "string",
+            "example": "request_already_handled"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "Request has already been handled."
+            ]
+          }
+        }
+      },
+      "TrustCenterTopicResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "d9692768-cdbd-4fa9-988b-b33f37286f1b"
+          },
+          "subject": {
+            "type": "string",
+            "example": "New topic"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "compliance",
+              "vulnerabilities",
+              "incidents",
+              "subprocessors",
+              "general"
+            ],
+            "example": "compliance"
+          },
+          "hidden": {
+            "type": "boolean",
+            "example": false
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2020-01-01T00:00:00.000Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2020-01-01T00:00:00.000Z"
+          },
+          "updates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "message": {
+                  "type": "string",
+                  "example": "Trust center updated"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "example": "2020-01-01T00:00:00.000Z"
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "example": "2020-01-01T00:00:00.000Z"
+                },
+                "topicId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          }
+        }
+      },
+      "TrustCenterUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string",
+            "example": "Trust center updated"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2020-01-01T00:00:00.000Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2020-01-01T00:00:00.000Z"
+          },
+          "topicId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      }
+    },
+    "responses": {
+      "400": {
+        "description": "Invalid request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiResponseInvalidRequest"
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "Invalid api key / missing scope",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiResponseInvalidApiKeyOrMissingScope"
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Not found or no access",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiResponseNotFound"
+            }
+          }
+        }
+      },
+      "405": {
+        "description": "Method not allowed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiResponseNotFound"
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Conflict - Resource already handled",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ApiResponseConflict"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "apiKey": {
+        "type": "apiKey",
+        "name": "x-sb-api-key",
+        "in": "header"
+      }
+    }
+  },
+  "tags": []
+}

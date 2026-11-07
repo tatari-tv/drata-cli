@@ -1,6 +1,5 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
-use std::io::Write;
 
 #[test]
 fn build_path_no_query_is_unchanged() {
@@ -37,35 +36,6 @@ fn build_path_rejects_entry_without_equals() {
     let q = vec!["bogus".to_string()];
     let err = build_path("/v", &q).unwrap_err();
     assert!(err.to_string().contains("expected key=value"));
-}
-
-#[test]
-fn read_data_parses_inline_json() {
-    let v = read_data(r#"{"name":"x"}"#).unwrap();
-    assert_eq!(v["name"], "x");
-}
-
-#[test]
-fn read_data_rejects_invalid_json() {
-    let err = read_data("not json").unwrap_err();
-    assert!(err.to_string().contains("not valid JSON"));
-}
-
-#[test]
-fn read_data_reads_from_at_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("body.json");
-    let mut f = std::fs::File::create(&path).unwrap();
-    write!(f, r#"{{"k":42}}"#).unwrap();
-    let arg = format!("@{}", path.display());
-    let v = read_data(&arg).unwrap();
-    assert_eq!(v["k"], 42);
-}
-
-#[test]
-fn read_data_missing_file_errors() {
-    let err = read_data("@/no/such/file.json").unwrap_err();
-    assert!(err.to_string().contains("Failed to read --data file"));
 }
 
 #[test]

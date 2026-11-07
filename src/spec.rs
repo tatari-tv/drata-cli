@@ -6,11 +6,11 @@
 //!
 //! - **`--example` skeletons** generated from an operation's request schema
 //!   (`example_for_operation`). This generalizes the hand-written vendors
-//!   skeleton from Phase 1 to any of the 167 operations.
+//!   skeleton from Phase 1 to any spec operation.
 //! - **Coverage**: `operations()` enumerates every operation (method + path +
 //!   operationId + tags), sourcing tags from the *operation-level* `tags`
-//!   array, NOT the 33-entry top-level `tags` list (which omits
-//!   `Audit Requests` and `Procurement Connection Mappings`).
+//!   array, NOT the top-level `tags` list (which has omitted operation tags
+//!   before: `Audit Requests` and `Procurement Connection Mappings`).
 //!
 //! `serde_json::Value` is the wire currency here too: the spec is parsed once
 //! into a `Value` and walked, rather than modeled as 434 typed structs.
@@ -74,8 +74,8 @@ const HTTP_METHODS: &[&str] = &["get", "post", "put", "patch", "delete", "head",
 
 /// Enumerate every operation in the spec: method + path + operationId + tags.
 ///
-/// Tags come from each operation's own `tags` array (35 distinct values), not
-/// the top-level `tags` list (33). This is the authoritative set the coverage
+/// Tags come from each operation's own `tags` array, not the top-level `tags`
+/// list, which has drifted from it before. This is the authoritative set the coverage
 /// test asserts against.
 #[instrument(skip_all)]
 pub fn operations() -> Result<Vec<Operation>> {
@@ -161,6 +161,42 @@ pub fn example_for_operation(method: &str, path: &str) -> Result<Option<String>>
     let pretty = serde_json::to_string_pretty(&skeleton).context("Failed to render example skeleton")?;
     debug!(bytes = pretty.len(), "generated example skeleton");
     Ok(Some(format!("{}\n", pretty)))
+}
+
+/// The skeleton of one named component schema (`#/components/schemas/<name>`),
+/// built the same way as an operation's. For bodies nested deeper than
+/// `MAX_DEPTH`, a caller assembles the skeleton from its component parts.
+/// `Err` when the spec has no such schema.
+#[instrument(skip_all, fields(%name))]
+pub fn example_for_schema(name: &str) -> Result<Value> {
+    let spec = spec()?;
+    let schema = spec
+        .get("components")
+        .and_then(|c| c.get("schemas"))
+        .and_then(|s| s.get(name))
+        .ok_or_else(|| eyre!("the spec has no schema `{}`", name))?;
+    Ok(build_skeleton(spec, schema, 0))
+}
+
+/// The values of a string enum component schema (`#/components/schemas/<name>`).
+/// `Err` when the spec has no such schema or it is not a string enum.
+pub fn enum_values(name: &str) -> Result<Vec<String>> {
+    let schema = spec()?
+        .get("components")
+        .and_then(|c| c.get("schemas"))
+        .and_then(|s| s.get(name))
+        .ok_or_else(|| eyre!("the spec has no schema `{}`", name))?;
+    schema
+        .get("enum")
+        .and_then(Value::as_array)
+        .ok_or_else(|| eyre!("schema `{}` is not an enum", name))?
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| eyre!("schema `{}` has a non-string value", name))
+        })
+        .collect()
 }
 
 /// Resolve the `application/json` request-body schema for an operation, if any.
