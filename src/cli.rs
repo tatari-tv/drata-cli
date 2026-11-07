@@ -135,7 +135,7 @@ pub enum Commands {
         #[arg(long = "allow-writes")]
         allow_writes: bool,
     },
-    /// Remove a stored credential profile
+    /// Remove only the Drata credential from the profile (a SafeBase credential stays)
     Logout,
     /// Show the active credential, region, and where the key resolved from
     Whoami,

@@ -55,7 +55,8 @@ pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
         Commands::Raw(args) => raw::example_if_requested(Backend::Drata, args),
         Commands::Safebase {
             action: SafebaseAction::Raw(args),
-        } => raw::example_if_requested(Backend::Safebase, args),
+        } => raw::example_if_requested(Backend::Safebase, args)
+            .map(|skeleton| config::check_region_scope(cli, Backend::Safebase).and(skeleton)),
         _ => None,
     }
 }

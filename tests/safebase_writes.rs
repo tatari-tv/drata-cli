@@ -330,6 +330,25 @@ async fn upload_step3_timeout_with_no_document_is_outcome_unknown() {
 }
 
 #[tokio::test]
+async fn upload_step3_timeout_lookup_429_is_sent_once() {
+    // Retry-After 0 keeps a regressed (retrying) lookup fast; the count catches it.
+    let (up, result) = timed_out_upload(
+        ResponseTemplate::new(429)
+            .insert_header("Retry-After", "0")
+            .set_body_json(json!({"statusCode": 429, "message": "Too many requests"})),
+    )
+    .await;
+    let err = result.expect_err("a rate-limited lookup is not success");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("outcome unknown"), "{msg}");
+    assert!(
+        matches!(err.downcast_ref::<UploadError>(), Some(UploadError::Unknown { .. })),
+        "{err:?}"
+    );
+    assert_one_put_one_lookup(&up).await;
+}
+
+#[tokio::test]
 async fn upload_step3_http_error_is_definite_and_skips_the_lookup() {
     let up = Upload::start(ResponseTemplate::new(200)).await;
     up.create_responds(
@@ -387,6 +406,34 @@ async fn upload_step1_failure_sends_nothing_to_storage() {
         .await
         .expect_err("403 fails");
     assert!(err.to_string().contains("documents:edit"), "{err}");
+    assert!(requests(&up.storage).await.is_empty());
+}
+
+#[tokio::test]
+async fn upload_step1_envelope_error_withholds_the_signed_url() {
+    let up = Upload {
+        api: MockServer::start().await,
+        storage: MockServer::start().await,
+    };
+    let signed = format!("{}/org/documents/{FILE_ID}?{SIGNED_QUERY}", up.storage.uri());
+    Mock::given(method("POST"))
+        .and(path("/documents/upload"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": false, "result": {
+            "fileId": FILE_ID, "signedUrl": signed, "headers": {}}})))
+        .mount(&up.api)
+        .await;
+    let file = fixture();
+    let err = run(&up.api, &upload_argv(file.to_str().expect("utf-8"), &[]))
+        .await
+        .expect_err("ok:false fails");
+    assert!(
+        matches!(err.downcast_ref::<UploadError>(), Some(UploadError::Request { .. })),
+        "{err:?}"
+    );
+    let msg = format!("{err:#}");
+    assert!(!msg.contains("X-Goog-Signature"), "signed query leaked: {msg}");
+    assert!(!msg.contains(&signed), "signed URL leaked: {msg}");
+    assert!(msg.contains("envelope") && msg.contains("200"), "{msg}");
     assert!(requests(&up.storage).await.is_empty());
 }
 

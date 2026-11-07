@@ -381,17 +381,43 @@ async fn kb_search_all_streams_ndjson() {
     assert_eq!(ndjson, "{\"id\":\"k-1\"}\n");
 }
 
-#[tokio::test]
-async fn ok_only_response_prints_ok() {
+/// `GET /requests` and `GET /accounts/members` both answer a `result` array.
+/// A 2xx without one is a broken response: an error, never `ok`.
+async fn list_without_result_is_an_error(route: &str, argv: &[&str]) {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/requests"))
+        .and(path(route))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
         .mount(&server)
         .await;
 
-    let (reply, _) = run(&server, &["request", "list"]).await.expect("ok");
-    assert!(matches!(reply, Reply::Ok), "{reply:?}");
+    let err = run(&server, argv).await.expect_err("no `result` array is an error");
+    assert!(err.to_string().contains("no `result` array"), "{err}");
+}
+
+#[tokio::test]
+async fn request_list_without_result_is_an_error() {
+    list_without_result_is_an_error("/requests", &["request", "list"]).await;
+}
+
+#[tokio::test]
+async fn member_list_without_result_is_an_error() {
+    list_without_result_is_an_error("/accounts/members", &["member", "list"]).await;
+}
+
+#[tokio::test]
+async fn member_list_with_an_object_result_is_an_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/accounts/members"))
+        .respond_with(ok(json!({"email": "a@b.co"})))
+        .mount(&server)
+        .await;
+
+    let err = run(&server, &["member", "list"])
+        .await
+        .expect_err("one object is not a list");
+    assert!(err.to_string().contains("no `result` array"), "{err}");
 }
 
 #[tokio::test]

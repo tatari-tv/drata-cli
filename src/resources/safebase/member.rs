@@ -1,6 +1,6 @@
 //! `drata safebase member list | add | remove`.
 
-use super::{Reply, confirmed, notice_message, reply_from};
+use super::{Reply, confirmed, items_at, notice_message, reply_from};
 use crate::cli::{EmailNotice, SafebaseMemberAction};
 use crate::client::{DrataClient, encode_path_segment};
 use crate::confirm::ConfirmFn;
@@ -17,7 +17,10 @@ pub async fn execute(action: &SafebaseMemberAction, client: &DrataClient, confir
             let path = list_path(email.as_deref(), sfdc_account_id.as_deref());
             debug!(path, "safebase member list");
             let resp = client.get(&path).await?;
-            Ok(reply_from(&resp, Table::SafebaseMembers))
+            Ok(Reply::Rows {
+                table: Table::SafebaseMembers,
+                rows: items_at(&resp, "", "member list")?.clone(),
+            })
         }
         SafebaseMemberAction::Add {
             account_id,

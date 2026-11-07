@@ -192,3 +192,26 @@ Design doc: `docs/plan/2026-11-05-safebase-api.md`
 
 ### Open questions
 - None.
+
+## Audit fixes
+
+Folds the implementation-audit findings (review-panel round 1). Each code fix has a test that was run once against a deliberately broken build and failed.
+
+### Design decisions
+- The upload recovery lookup goes through a new `DrataClient::try_get_once` (`Retry429::Never`), beside `put_once` (`src/client.rs:try_get_once`, `src/resources/safebase/document/upload.rs:settle`). A 429 on the lookup now ends in `outcome unknown` after exactly one GET, as the doc's "once" requires. `try_get` and `try_get_once` share `not_found_as_none`, so 404 stays "not found" on both. Test: `upload_step3_timeout_lookup_429_is_sent_once`
+- A step 1 envelope error (2xx with `ok: false` or no boolean `ok`) names only the status and withholds the body, which can carry `result.signedUrl` (`upload.rs:step1_cause`). Test: `upload_step1_envelope_error_withholds_the_signed_url`
+- `drata safebase raw --example ... --region x` is now an error: the SafeBase arm of `example_if_requested` runs `config::check_region_scope` on the skeleton (`src/lib.rs:example_if_requested`), since `--example` returns before `Config::load`. Test: `safebase_raw_example_rejects_region`
+- `member list` and `request list` read their rows through `items_at`, like the paged lists and `document types`, so a 2xx with no `result` array is an error, never `ok` or a single row (`member.rs`, `request.rs`). Tests: `request_list_without_result_is_an_error`, `member_list_without_result_is_an_error`, `member_list_with_an_object_result_is_an_error`. The Phase 5 test `ok_only_response_prints_ok`, which pinned the old `{ok}` -> `ok` behavior on `request list`, is replaced by the first of these
+- `drata logout` help now reads "Remove only the Drata credential from the profile (a SafeBase credential stays)" (`src/cli.rs:Commands::Logout`). Test: `logout_help_says_it_removes_only_the_drata_credential`
+- Design doc: the step 2 bullet now names the presigned 300 s bound; the step 3 lookup bullet says it is never retried, not even on a 429; Goals "Zero behavior change" lists the three exceptions (both `drata logout` lines and the `drata auth` SafeBase help)
+
+### Deviations
+- Phase 7's `drata logout` not-found wording change was undisclosed: `No profile named "x" to remove.` became `No Drata credential in profile "x" to remove.` It follows from per-block logout and is now in the doc's Goals exceptions. No code change
+- Phase 6's note "Step 1 failure errors never echo the response body" overstated what shipped and still overstates it: only an envelope error (a 2xx, the response that carries the ticket) withholds its body. A non-2xx step 1 error still shows SafeBase's error body, which carries no signed URL and is how a missing scope (`documents:edit`) reaches the user; `upload_step1_failure_sends_nothing_to_storage` pins that
+
+### Tradeoffs
+- Redacting the envelope error at the upload's step 1 vs dropping the body from every `EnvelopeError`: the signed URL only rides the step 1 response, and every other SafeBase op keeps the body that explains a broken envelope
+- `items_at(resp, "", op)` for the two flat lists vs a separate helper: one error shape for every SafeBase list
+
+### Open questions
+- Phase 6's step 2 timeout question is resolved: kept at the presigned transport's 300 s, and the doc now says so

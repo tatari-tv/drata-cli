@@ -1,7 +1,7 @@
 //! `drata safebase raw`: the shared raw implementation routed to SafeBase.
 //! Wiremock tests drive `raw::handle` from parsed argv, the way `main` does.
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use drata_cli::backend::Backend;
 use drata_cli::cli::{Cli, Commands, OutputFormat, SafebaseAction};
 use drata_cli::client::{DrataClient, WriteGuardError};
@@ -179,6 +179,49 @@ fn safebase_raw_example_needs_no_key_and_reads_the_safebase_spec() {
     let out = drata_cli::example_if_requested(&cli).unwrap().unwrap();
     let value: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert!(value.get("fileName").is_some(), "{value}");
+}
+
+#[test]
+fn safebase_raw_example_rejects_region() {
+    // --example returns before Config::load, so it must check --region itself.
+    let cli = Cli::try_parse_from([
+        "drata",
+        "safebase",
+        "raw",
+        "--example",
+        "PATCH",
+        "/document/{id}",
+        "--region",
+        "eu",
+    ])
+    .unwrap();
+    let err = drata_cli::example_if_requested(&cli)
+        .expect("example requested")
+        .expect_err("--region on a safebase command is an error");
+    assert!(
+        err.to_string().contains("--region applies to Drata commands only"),
+        "{err}"
+    );
+
+    // Drata raw --example still takes --region.
+    let cli = Cli::try_parse_from(["drata", "raw", "--example", "POST", "/vendors", "--region", "eu"]).unwrap();
+    assert!(
+        drata_cli::example_if_requested(&cli)
+            .expect("example requested")
+            .is_ok()
+    );
+}
+
+#[test]
+fn logout_help_says_it_removes_only_the_drata_credential() {
+    let cmd = Cli::command();
+    let logout = cmd.find_subcommand("logout").expect("logout subcommand");
+    let about = logout.get_about().expect("logout help").to_string();
+    assert!(about.contains("only the Drata credential"), "{about}");
+    assert!(
+        !about.contains("credential profile"),
+        "logout no longer removes the whole profile: {about}"
+    );
 }
 
 #[test]

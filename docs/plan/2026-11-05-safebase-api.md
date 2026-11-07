@@ -40,7 +40,10 @@ Extend `drata` into one CLI for both Drata products: the Drata GRC API it covers
 - Curated SafeBase verbs for the trust-center workflows Security runs (see API Design)
 - Same safety model as Drata: per-credential write flag, fail closed, confirm before mutate
 - A SafeBase-only user (no Drata key) can use every `drata safebase` command
-- Zero behavior change for existing Drata commands, and an existing `credentials.json` is never rewritten by a read
+- Zero behavior change for existing Drata commands, and an existing `credentials.json` is never rewritten by a read. Three exceptions, all forced by this design:
+  - `drata logout` removes only the Drata block (Data Model), so its output now reads `Removed the Drata credential from profile "x".` (or `... and profile "x".` when it was the last block), not `Removed profile "x".`
+  - `drata logout` with nothing to remove now reads `No Drata credential in profile "x" to remove.`, not `No profile named "x" to remove.`
+  - `drata auth` shows the SafeBase setup help under the `safebase:` block, even for a Drata-only user. The Drata lines are unchanged
 
 ### Non-Goals
 
@@ -112,11 +115,11 @@ Amended after Phase 0 Observed: `/documents` is zero-based, and `/kb/search` `re
   - outcomes:
     - step 1 or 2 fails: definite, no document. Exit non-zero, print the `fileId` (SafeBase has no op to delete an upload)
     - step 3 returns an HTTP error: definite, no document. Exit non-zero
-    - step 3 times out or the connection drops: the CLI runs `GET /document/<externalId>?type=external` once
+    - step 3 times out or the connection drops: the CLI runs `GET /document/<externalId>?type=external` once, never retried, not even on a 429
       - found, and its `size` and checksum match the local file: print it, exit 0 with a warning. SafeBase does not enforce `externalId` uniqueness, so a mismatch is treated as not found
       - not found: exit non-zero with `outcome unknown` (one GET cannot prove a timed-out PUT never lands), printing `fileId` and `externalId`
       - never retries the PUT on its own
-  - step 2 uses the API client's timeout and no retry. 429 on the presigned host is an error like any other
+  - step 2 uses the existing presigned transport's 300 s timeout (`PRESIGNED_TIMEOUT_SECS`, sized for a whole file body, not the API client's 30 s) and no retry. 429 on the presigned host is an error like any other
   - `--replace`: Phase 0 observes which fields (tags, products, expiry, type, usedForAi) survive a replacement; the verb's help text states the observed behavior
   - the signed URL takes PUT (Phase 0 Observed); the spec text says POST and is wrong
 

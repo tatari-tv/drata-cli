@@ -1,6 +1,6 @@
 //! `drata safebase request list | approve | decline`.
 
-use super::{Reply, confirmed, notice_message, reply_from};
+use super::{Reply, confirmed, items_at, notice_message, reply_from};
 use crate::cli::{EmailNotice, SafebaseRequestAction, SafebaseRequestStatus};
 use crate::client::{DrataClient, encode_path_segment};
 use crate::confirm::ConfirmFn;
@@ -17,7 +17,10 @@ pub async fn execute(action: &SafebaseRequestAction, client: &DrataClient, confi
             let path = list_path(status.as_ref());
             debug!(path, "safebase request list");
             let resp = client.get(&path).await?;
-            Ok(reply_from(&resp, Table::SafebaseRequests))
+            Ok(Reply::Rows {
+                table: Table::SafebaseRequests,
+                rows: items_at(&resp, "", "request list")?.clone(),
+            })
         }
         SafebaseRequestAction::Approve { request_id, account_id } => {
             let path = decision_path(request_id, "approve");

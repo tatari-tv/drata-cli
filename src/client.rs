@@ -505,13 +505,15 @@ impl DrataClient {
     /// legitimate signal.
     #[instrument(skip(self))]
     pub async fn try_get(&self, path: &str) -> Result<Option<Value>> {
-        match self.send_inner(Method::GET, path, None, Retry429::Default).await {
-            Ok(v) => Ok(Some(v)),
-            Err(e) => match e.downcast_ref::<ApiError>() {
-                Some(api_err) if api_err.status == StatusCode::NOT_FOUND => Ok(None),
-                _ => Err(e),
-            },
-        }
+        not_found_as_none(self.send_inner(Method::GET, path, None, Retry429::Default).await)
+    }
+
+    /// `try_get` sent exactly once: a 429 comes back as an `ApiError` instead
+    /// of being retried. For a lookup that must not repeat (the SafeBase
+    /// upload's recovery GET after an unanswered step 3).
+    #[instrument(skip(self))]
+    pub async fn try_get_once(&self, path: &str) -> Result<Option<Value>> {
+        not_found_as_none(self.send_inner(Method::GET, path, None, Retry429::Never).await)
     }
 
     #[instrument(skip(self, body))]
@@ -727,6 +729,18 @@ impl DrataClient {
             body,
         }
         .into())
+    }
+}
+
+/// A GET's result with HTTP 404 turned into `Ok(None)`; every other error
+/// propagates.
+fn not_found_as_none(result: Result<Value>) -> Result<Option<Value>> {
+    match result {
+        Ok(v) => Ok(Some(v)),
+        Err(e) => match e.downcast_ref::<ApiError>() {
+            Some(api_err) if api_err.status == StatusCode::NOT_FOUND => Ok(None),
+            _ => Err(e),
+        },
     }
 }
 

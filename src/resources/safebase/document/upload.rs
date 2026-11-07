@@ -21,8 +21,8 @@
 use super::{Reply, get_path};
 use crate::backend::Backend;
 use crate::cli::UploadArgs;
-use crate::client::DrataClient;
 use crate::client::presigned::put_presigned;
+use crate::client::{DrataClient, EnvelopeError};
 use crate::confirm::ConfirmFn;
 use crate::output::Table;
 use crate::resources::safebase::confirmed;
@@ -252,6 +252,21 @@ fn parse_ticket(resp: &Value) -> std::result::Result<Ticket, UploadError> {
     })
 }
 
+/// A step 1 failure as error text. A 2xx that broke the envelope may still
+/// carry `result.signedUrl`, whose query is a credential, so its body is
+/// withheld: only the status is named. Any other failure (an HTTP error
+/// status, a transport error) is shown whole; a non-2xx carries no ticket.
+fn step1_cause(err: &eyre::Report) -> String {
+    match err.downcast_ref::<EnvelopeError>() {
+        Some(env) => format!(
+            "{} answered {} but broke the {{ok, result}} envelope; body withheld, it can carry the signed URL",
+            Backend::Safebase,
+            env.status
+        ),
+        None => format!("{err:#}"),
+    }
+}
+
 /// True when a step 3 failure leaves the outcome open: the request may have
 /// reached SafeBase but no answer came back (timeout, dropped connection, an
 /// unreadable body). A connect failure never sent the request, and an HTTP
@@ -286,7 +301,7 @@ pub async fn run(args: &UploadArgs, client: &DrataClient, confirm: &ConfirmFn) -
         .await
         .map_err(|e| UploadError::Request {
             file_id: None,
-            cause: format!("{e:#}"),
+            cause: step1_cause(&e),
         })?;
     let ticket = parse_ticket(&resp)?;
     debug!(file_id = %ticket.file_id, "upload step 1 done");
@@ -323,7 +338,8 @@ pub async fn run(args: &UploadArgs, client: &DrataClient, confirm: &ConfirmFn) -
 }
 
 /// The one lookup after an unanswered step 3: `GET /document/<externalId>
-/// ?type=external`. Never resends the PUT.
+/// ?type=external`, sent once (not even a 429 repeats it). Never resends the
+/// PUT.
 async fn settle(
     client: &DrataClient,
     file_id: &str,
@@ -341,7 +357,7 @@ async fn settle(
         }
         .into()
     };
-    let found = match client.try_get(&get_path(external_id, true)).await {
+    let found = match client.try_get_once(&get_path(external_id, true)).await {
         Ok(found) => found,
         Err(e) => return Err(unknown(format!("failed: {e:#}"))),
     };
