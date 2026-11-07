@@ -24,9 +24,9 @@ use tracing::{debug, instrument};
 pub fn example_if_requested(action: &CustomFieldAction) -> Option<Result<String>> {
     match action {
         CustomFieldAction::Create { example: true, .. } => Some(
-            spec::example_for_operation("POST", "/custom-field-definitions").and_then(|s| {
-                s.ok_or_else(|| eyre::eyre!("operation `POST /custom-field-definitions` has no JSON request body"))
-            }),
+            spec::example_for_operation(crate::backend::Backend::Drata, "POST", "/custom-field-definitions").and_then(
+                |s| s.ok_or_else(|| eyre::eyre!("operation `POST /custom-field-definitions` has no JSON request body")),
+            ),
         ),
         _ => None,
     }

@@ -24,7 +24,7 @@ pub fn example_if_requested(action: &RegisterAction) -> Option<Result<String>> {
 }
 
 fn example_skeleton(method: &str, path: &str) -> Result<String> {
-    spec::example_for_operation(method, path)?
+    spec::example_for_operation(crate::backend::Backend::Drata, method, path)?
         .ok_or_else(|| eyre::eyre!("operation `{} {}` has no JSON request body", method, path))
 }
 
@@ -166,7 +166,7 @@ async fn remove(client: &DrataClient, config: &Config, confirm: &ConfirmFn, regi
     if !confirm("DELETE", &format!("/risk-registers/{}", register_id))? {
         bail!("aborted");
     }
-    let result = client.delete(&format!("/risk-registers/{}", register_id)).await?;
+    let result = client.delete(&format!("/risk-registers/{}", register_id), None).await?;
     print_value(&result, &config.output_format);
     Ok(())
 }

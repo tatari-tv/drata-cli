@@ -3,6 +3,7 @@
 //! Two-level command tree: `Commands` (one variant per tag/area) -> per-tag
 //! `*Action` subcommand enum -> verbs. Auth onboarding (`login`/`logout`/
 //! `whoami`/`auth`) sits at the top level since it gates everything else.
+//! SafeBase commands nest under `safebase`.
 
 use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
@@ -18,6 +19,7 @@ mod monitor;
 mod personnel;
 mod policy;
 mod risk;
+mod safebase;
 mod ticket;
 mod upload;
 mod vendor;
@@ -32,6 +34,7 @@ pub use monitor::*;
 pub use personnel::*;
 pub use policy::*;
 pub use risk::*;
+pub use safebase::*;
 pub use ticket::*;
 pub use upload::*;
 pub use vendor::*;
@@ -39,10 +42,11 @@ pub use vendor::*;
 #[derive(Parser, Debug)]
 #[command(
     name = "drata",
-    about = "Drata compliance CLI",
+    about = "Drata and SafeBase CLI: the Drata GRC API and the SafeBase Trust Center API",
     version = env!("GIT_DESCRIBE"),
     after_help = "Credentials: ~/.config/drata/credentials.json (profiles), \
                   or DRATA_API_KEY / DRATA_REGION / DRATA_PROFILE env vars, or --api-key.\n\
+                  SafeBase has its own credential: `drata safebase login`, or SAFEBASE_API_KEY.\n\
                   Logs: ~/.local/share/drata/logs/drata.log"
 )]
 pub struct Cli {
@@ -50,11 +54,12 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub config: Option<PathBuf>,
 
-    /// Drata API key (overrides env and credentials file)
+    /// API key for the backend the command calls (overrides env and
+    /// credentials file). On auth/whoami, the Drata key
     #[arg(long, global = true)]
     pub api_key: Option<String>,
 
-    /// Drata region (us, eu, apac)
+    /// Drata region (us, eu, apac). Drata commands only
     #[arg(long, global = true)]
     pub region: Option<String>,
 
@@ -62,7 +67,8 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub profile: Option<String>,
 
-    /// Allow mutating (non-GET) requests for this invocation
+    /// Allow mutating (non-GET) requests for this invocation, on the
+    /// backend the command calls. On auth/whoami, the Drata credential
     #[arg(long = "allow-writes", global = true)]
     pub allow_writes: bool,
 
@@ -129,7 +135,7 @@ pub enum Commands {
         #[arg(long = "allow-writes")]
         allow_writes: bool,
     },
-    /// Remove a stored credential profile
+    /// Remove only the Drata credential from the profile (a SafeBase credential stays)
     Logout,
     /// Show the active credential, region, and where the key resolved from
     Whoami,
@@ -297,6 +303,17 @@ pub enum Commands {
     },
     /// Generic passthrough to any operation: `raw <METHOD> <path> ...`
     Raw(RawArgs),
+    /// SafeBase Trust Center API (its own credential: `drata safebase login`)
+    #[command(
+        after_help = "Credential: `drata safebase login --api-key <key>`, or SAFEBASE_API_KEY, or --api-key.\n\
+                  Writes: a SafeBase credential is read-only unless it was saved with --allow-writes\n\
+                  (or --allow-writes is passed). --region applies to Drata only.\n\
+                  Any operation without a curated verb: `drata safebase raw --example <METHOD> <path>`."
+    )]
+    Safebase {
+        #[command(subcommand)]
+        action: SafebaseAction,
+    },
     /// Live write-path check: create, verify, then delete a throwaway
     /// `zzz-clitest-` vendor against the real tenant. Requires a write-enabled
     /// credential and confirms before mutating (bypass with --yes).
@@ -308,7 +325,7 @@ pub enum Commands {
 /// guardrail enforced in the client.
 #[derive(clap::Args, Debug)]
 pub struct RawArgs {
-    /// HTTP method (GET, POST, PUT, DELETE; case-insensitive)
+    /// HTTP method (GET, POST, PUT, PATCH, DELETE; case-insensitive)
     pub method: String,
     /// Path template under the API base, e.g. /vendors or /vendors/123
     pub path: String,

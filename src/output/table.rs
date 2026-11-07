@@ -15,6 +15,8 @@
 use serde_json::Value;
 use std::fmt::Write;
 
+mod safebase;
+
 /// Default width used when the terminal size can't be detected.
 pub const DEFAULT_WIDTH: usize = 120;
 
@@ -34,6 +36,12 @@ pub fn render(value: &Value, width: usize) -> Option<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Table {
     IdentityActions,
+    SafebaseAccounts,
+    SafebaseMembers,
+    SafebaseDocuments,
+    SafebaseDocumentTypes,
+    SafebaseRequests,
+    SafebaseKbEntries,
 }
 
 /// Render `value` with the named table: the same envelope handling as
@@ -41,6 +49,12 @@ pub enum Table {
 pub fn render_as(value: &Value, width: usize, table: Table) -> Option<String> {
     let renderer: RowRenderer = match table {
         Table::IdentityActions => render_identity_actions,
+        Table::SafebaseAccounts => safebase::render_accounts,
+        Table::SafebaseMembers => safebase::render_members,
+        Table::SafebaseDocuments => safebase::render_documents,
+        Table::SafebaseDocumentTypes => safebase::render_document_types,
+        Table::SafebaseRequests => safebase::render_requests,
+        Table::SafebaseKbEntries => safebase::render_kb_entries,
     };
     render_with(value, width, |_| Some(renderer))
 }

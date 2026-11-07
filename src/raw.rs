@@ -1,4 +1,6 @@
-//! `drata raw <METHOD> <path> ...` - the gated generic passthrough namespace.
+//! `drata raw <METHOD> <path> ...` and `drata safebase raw ...` - the gated generic
+//! passthrough namespace. One implementation serves both: the backend comes from
+//! the `Config` (and, for `--example`, from the caller).
 //!
 //! Reaches any spec operation by HTTP method + path template, for the
 //! long tail and power users. Non-GET requests flow through the same write
@@ -15,6 +17,7 @@
 //!
 //! Phase 4: confirm-on-mutation gate (all non-GET through `raw` now prompts).
 
+use crate::backend::Backend;
 use crate::cli::RawArgs;
 use crate::client::{DrataClient, Multipart, encode_query};
 use crate::config::Config;
@@ -31,28 +34,29 @@ use tracing::{debug, instrument, warn};
 /// Unlike a curated `--example` (which is infallible), this can fail if the
 /// method/path pair is unknown or has no JSON body; the caller surfaces that as
 /// a plain message and exits.
-pub fn example_if_requested(args: &RawArgs) -> Option<Result<String>> {
+pub fn example_if_requested(backend: Backend, args: &RawArgs) -> Option<Result<String>> {
     if !args.example {
         return None;
     }
-    Some(example_skeleton(&args.method, &args.path))
+    Some(example_skeleton(backend, &args.method, &args.path))
 }
 
-/// Resolve the `--example` skeleton for `method`+`path`, erroring with a clear
-/// message when the operation is unknown or carries no JSON request body.
-fn example_skeleton(method: &str, path: &str) -> Result<String> {
-    match spec::example_for_operation(method, path)? {
+/// Resolve the `--example` skeleton for `method`+`path` from `backend`'s spec,
+/// erroring with a clear message when the operation is unknown or carries no
+/// JSON request body.
+fn example_skeleton(backend: Backend, method: &str, path: &str) -> Result<String> {
+    match spec::example_for_operation(backend, method, path)? {
         Some(skeleton) => Ok(skeleton),
         None => {
             // Distinguish "no such operation" from "operation has no JSON body".
-            match spec::find_by_method_path(method, path)? {
+            match spec::find_by_method_path(backend, method, path)? {
                 Some(_) => Err(eyre!(
                     "`{} {}` has no JSON request body (it may be a GET or a multipart upload)",
                     method.to_uppercase(),
                     path
                 )),
                 None => Err(eyre!(
-                    "no operation `{} {}` in the spec; check the method and path template (e.g. /vendors/{{id}})",
+                    "no operation `{} {}` in the {backend} spec; check the method and path template (e.g. /vendors/{{id}})",
                     method.to_uppercase(),
                     path
                 )),
@@ -80,8 +84,8 @@ pub async fn handle(args: &RawArgs, client: &DrataClient, config: &Config, confi
     // Validate against the spec when possible. An unknown method+path is a warn,
     // not a hard error: the spec is an aid, and a power user may legitimately hit
     // a path the committed snapshot does not yet describe.
-    if spec::find_by_method_path(&args.method, &args.path)?.is_none() {
-        warn!(method = %args.method, path = %args.path, "method+path not found in spec; sending anyway");
+    if spec::find_by_method_path(config.backend, &args.method, &args.path)?.is_none() {
+        warn!(backend = %config.backend, method = %args.method, path = %args.path, "method+path not found in spec; sending anyway");
     }
 
     // Confirm before any non-GET mutation.

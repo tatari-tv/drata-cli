@@ -7,6 +7,7 @@
 mod table;
 
 use clap::{CommandFactory, Parser};
+use drata_cli::backend::Backend;
 use drata_cli::cli::{Cli, OutputFormat};
 use drata_cli::config::{Config, TokenSource};
 use drata_cli::confirm::default_confirm;
@@ -46,8 +47,9 @@ impl<'a> MakeWriter<'a> for Captured {
 
 fn test_config() -> Config {
     Config {
+        backend: Backend::Drata,
         api_key: "test-key".to_string(),
-        region: "us".to_string(),
+        region: Some("us".to_string()),
         allow_writes: true,
         profile: "test".to_string(),
         output_format: OutputFormat::Json,

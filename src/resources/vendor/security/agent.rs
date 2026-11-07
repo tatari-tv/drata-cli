@@ -353,7 +353,7 @@ pub fn example_if_requested(action: &SecurityReviewAgentAction) -> Option<Result
     };
     let path = format!("{REVIEW_TEMPLATE}/{segment}");
     Some(
-        spec::example_for_operation("POST", &path)
+        spec::example_for_operation(crate::backend::Backend::Drata, "POST", &path)
             .and_then(|s| s.ok_or_else(|| eyre::eyre!("operation `POST {}` has no JSON request body", path))),
     )
 }
@@ -378,7 +378,7 @@ pub async fn handle(
         Call::Get { path } => client.get(&path).await?,
         Call::Post { path, body } => client.post(&path, body).await?,
         Call::PostForm { path, form } => client.post_multipart(&path, &form).await?,
-        Call::Delete { path, body } => client.delete_with_body(&path, body).await?,
+        Call::Delete { path, body } => client.delete(&path, Some(body)).await?,
     };
     print_value(&result, &config.output_format);
     debug!(method, path, "security-review agent complete");

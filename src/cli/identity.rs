@@ -112,7 +112,8 @@ pub struct IdentityBodyArgs {
 /// The enum runs to hundreds of values and grows with each Drata release, so the
 /// embedded spec is the list rather than a hand-copied clap enum.
 pub fn client_type(raw: &str) -> Result<String, String> {
-    let values = crate::spec::enum_values("ClientTypeEnum").map_err(|e| e.to_string())?;
+    let values =
+        crate::spec::enum_values(crate::backend::Backend::Drata, "ClientTypeEnum").map_err(|e| e.to_string())?;
     values
         .into_iter()
         .find(|v| v.eq_ignore_ascii_case(raw))

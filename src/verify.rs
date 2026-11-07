@@ -90,7 +90,7 @@ pub async fn run(client: &DrataClient) -> Result<VerifyResult> {
             // Best-effort cleanup: try to delete the throwaway vendor so it
             // does not persist in the tenant after a failed verify run.
             warn!(id = %id_str, "verify failed; attempting best-effort cleanup DELETE /vendors/{id_str}");
-            if let Err(cleanup_err) = client.delete(&format!("/vendors/{}", id_str)).await {
+            if let Err(cleanup_err) = client.delete(&format!("/vendors/{}", id_str), None).await {
                 warn!(%cleanup_err, "cleanup delete failed; zzz-clitest- record may persist");
             } else {
                 debug!(id = %id_str, "cleanup delete succeeded");
@@ -137,7 +137,7 @@ async fn verify_inner(client: &DrataClient, name: &str, id_str: &str) -> Result<
     // Step 3: Delete
     info!(id = %id_str, "verify step 3: DELETE /vendors/{id_str}");
     client
-        .delete(&format!("/vendors/{}", id_str))
+        .delete(&format!("/vendors/{}", id_str), None)
         .await
         .context("verify step 3 (delete) failed")?;
     debug!("verify step 3: vendor deleted");

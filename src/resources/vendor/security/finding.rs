@@ -335,7 +335,7 @@ pub fn example_if_requested(
         ("POST", kind.create_spec_path())
     };
     Some(
-        spec::example_for_operation(method, path)
+        spec::example_for_operation(crate::backend::Backend::Drata, method, path)
             .and_then(|s| s.ok_or_else(|| eyre::eyre!("operation `{} {}` has no JSON request body", method, path))),
     )
 }
@@ -447,7 +447,7 @@ pub async fn handle(client: &DrataClient, config: &Config, confirm: &ConfirmFn, 
             if !confirm("DELETE", &path)? {
                 bail!("aborted");
             }
-            let result = client.delete(&path).await?;
+            let result = client.delete(&path, None).await?;
             print_value(&result, &config.output_format);
         }
     }

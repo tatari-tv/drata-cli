@@ -3,6 +3,7 @@
 //! confirm prompt.
 
 use clap::Parser;
+use drata_cli::backend::Backend;
 use drata_cli::cli::{Cli, OutputFormat};
 use drata_cli::client::DrataClient;
 use drata_cli::config::{Config, TokenSource};
@@ -14,8 +15,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn test_config() -> Config {
     Config {
+        backend: Backend::Drata,
         api_key: "test-key".to_string(),
-        region: "us".to_string(),
+        region: Some("us".to_string()),
         allow_writes: true,
         profile: "test".to_string(),
         output_format: OutputFormat::Json,
@@ -33,9 +35,14 @@ async fn run(argv: &[&str], response: ResponseTemplate, allow_writes: bool, conf
     Mock::given(any()).respond_with(response).mount(&server).await;
     let cli = Cli::try_parse_from(std::iter::once("drata").chain(argv.iter().copied())).expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, allow_writes)
-        .expect("client builds")
-        .with_base_url(server.uri());
+    let client = DrataClient::new(
+        Backend::Drata,
+        config.api_key.clone(),
+        config.region.as_deref(),
+        allow_writes,
+    )
+    .expect("client builds")
+    .with_base_url(server.uri());
     let result = drata_cli::dispatch(&cli, &client, &config, &confirm).await;
     let requests = server.received_requests().await.unwrap_or_default();
     Run { result, requests }

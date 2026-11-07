@@ -296,7 +296,7 @@ pub fn uploaded_file_key(resp: &Value) -> Result<&str> {
 }
 
 fn example(method: &str, path: &str) -> Result<String> {
-    spec::example_for_operation(method, path)?
+    spec::example_for_operation(crate::backend::Backend::Drata, method, path)?
         .ok_or_else(|| eyre!("operation `{method} {path}` has no JSON request body"))
 }
 
@@ -406,7 +406,7 @@ pub async fn handle(
             if !confirm("DELETE", &remove_prompt(&path))? {
                 bail!("aborted");
             }
-            print_value(&client.delete(&path).await?, &config.output_format);
+            print_value(&client.delete(&path, None).await?, &config.output_format);
         }
         EvidenceItemAction::Upload { workspace_id, file } => {
             let path = files_path(workspace_id);
@@ -499,7 +499,7 @@ async fn handle_artifact(
             if !confirm("DELETE", &artifact_remove_prompt(&path))? {
                 bail!("aborted");
             }
-            print_value(&client.delete(&path).await?, &config.output_format);
+            print_value(&client.delete(&path, None).await?, &config.output_format);
         }
         EvidenceArtifactAction::RunAction {
             target,

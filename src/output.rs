@@ -24,6 +24,12 @@ pub fn print_value(value: &Value, format: &OutputFormat) {
     print_with(value, format, table::render);
 }
 
+/// The table `print_value_as` would print for `value`, as text of at most
+/// `width` columns; `None` when the value has no such table shape.
+pub fn render_text(value: &Value, width: usize, table: Table) -> Option<String> {
+    table::render_as(value, width, table)
+}
+
 /// `print_value` with a named table instead of a sniffed one, for a row shape
 /// another op shares (see `Table`).
 pub fn print_value_as(value: &Value, format: &OutputFormat, table: Table) {

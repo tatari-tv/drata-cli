@@ -21,6 +21,7 @@ pub mod personnel;
 pub mod policy;
 pub mod register;
 pub mod risk;
+pub mod safebase;
 pub mod search;
 pub mod ticket;
 pub mod upload;

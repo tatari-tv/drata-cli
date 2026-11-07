@@ -146,3 +146,34 @@ fn command_path_stops_at_the_leaf_and_drops_values() {
         "company get"
     );
 }
+
+#[test]
+fn safebase_login_and_logout_are_auth_commands() {
+    use clap::Parser;
+    let login = Cli::try_parse_from(["drata", "safebase", "login", "--api-key", "k", "--allow-writes"]).unwrap();
+    match &login.command {
+        Commands::Safebase {
+            action: cli::SafebaseAction::Login { api_key, allow_writes },
+        } => {
+            assert_eq!(api_key, "k");
+            assert!(*allow_writes);
+        }
+        other => panic!("parsed as {other:?}"),
+    }
+    assert!(is_auth_command(&login));
+    let logout = Cli::try_parse_from(["drata", "safebase", "logout"]).unwrap();
+    assert!(is_auth_command(&logout));
+    assert_eq!(command_path(&logout.command), "safebase logout");
+    // `safebase login` without a key is a parse error, as `drata login` is.
+    assert!(Cli::try_parse_from(["drata", "safebase", "login"]).is_err());
+}
+
+#[test]
+fn command_backend_routes_safebase_namespace_only() {
+    use clap::Parser;
+    let safebase = Cli::try_parse_from(["drata", "safebase", "logout"]).unwrap();
+    assert_eq!(command_backend(&safebase.command), Backend::Safebase);
+    let drata = Cli::try_parse_from(["drata", "company", "get"]).unwrap();
+    assert_eq!(command_backend(&drata.command), Backend::Drata);
+    assert_eq!(command_backend(&Commands::Logout), Backend::Drata);
+}

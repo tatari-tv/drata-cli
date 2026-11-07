@@ -1,8 +1,9 @@
-//! Drata HTTP client.
+//! HTTP client for the Drata-company APIs: the Drata GRC API and SafeBase.
 //!
 //! `serde_json::Value` is the wire currency: every verb returns `Value`,
 //! request bodies are built with `json!`. Adapted from `pagerduty-cli`'s
-//! `client.rs`, with two Drata-specific changes:
+//! `client.rs`. What differs per API (base URL, auth header, redirect policy)
+//! comes from `Backend`. The rest:
 //!
 //! - **Cursor pagination (Drata v2).** Drata list endpoints return
 //!   `{ "data": [...], "pagination": { "cursor": <string|null> } }`. We loop
@@ -18,9 +19,17 @@
 //!   and instrumentation machinery.
 //! - **NDJSON streaming.** `stream_all` drains cursor-paginated results,
 //!   writing one JSON object per line to a `Write` impl instead of buffering.
+//! - **Page-number pagination (SafeBase).** `pages` drives SafeBase's three
+//!   paged list ops from a per-op descriptor; the cursor loop here is Drata's.
+//! - **SafeBase envelope.** A SafeBase 2xx must carry `{"ok": true, ...}`; a
+//!   2xx with `ok: false` or no boolean `ok` is an `EnvelopeError` carrying
+//!   the body. The response is returned whole: callers read `result` only
+//!   when it is present (nine ops answer `{"ok": true}` alone).
 
+use crate::backend::Backend;
 use eyre::{Context, Result, bail};
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
+use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::{Client, Method, StatusCode};
 use serde_json::Value;
 use std::io::Write;
@@ -42,15 +51,27 @@ pub struct ApiError {
     pub formatted: String,
 }
 
+/// A SafeBase 2xx whose body breaks the `{ok, result}` envelope: `ok` is
+/// `false`, or there is no boolean `ok`. Never read as success.
+#[derive(Debug, Error)]
+#[error("{formatted}")]
+pub struct EnvelopeError {
+    pub status: StatusCode,
+    pub body: String,
+    pub formatted: String,
+}
+
 /// Raised when a non-GET request is attempted on a client whose resolved
 /// credential is not write-enabled. Fails closed: writes are off by default.
+/// Names the backend whose credential blocked the write.
 #[derive(Debug, Error)]
 #[error(
-    "write blocked: the active Drata credential is not write-enabled.\n\
+    "write blocked: the active {backend} credential is not write-enabled.\n\
      Non-GET requests ({method} {path}) require a credential with `allow-writes: true`.\n\
      Set it on the active profile in credentials.json, or pass --allow-writes."
 )]
 pub struct WriteGuardError {
+    pub backend: Backend,
     pub method: String,
     pub path: String,
 }
@@ -161,12 +182,6 @@ pub fn encode_path_segment(value: &str) -> String {
     utf8_percent_encode(value, PATH_SEGMENT_ENCODE_SET).to_string()
 }
 
-/// Region base URLs from the spec `servers` block. Selected by credential
-/// region; default is US.
-const US_BASE_URL: &str = "https://public-api.drata.com/public/v2";
-const EU_BASE_URL: &str = "https://public-api.eu.drata.com/public/v2";
-const APAC_BASE_URL: &str = "https://public-api.apac.drata.com/public/v2";
-
 /// Per-page size requested from cursor-paginated list endpoints: the spec's
 /// `size` maximum on every cursor endpoint. The server default of 50 put the
 /// page cap at 500k items, below a real tenant's `/events` count (~945k).
@@ -186,24 +201,6 @@ const MIN_PAGE_INTERVAL: Duration = Duration::from_millis(150);
 /// returns a null cursor cannot loop forever. At `PAGINATION_SIZE` this is 5M items.
 const MAX_PAGES: u32 = 10_000;
 
-/// Resolve a region string to its base URL. Returns `Err` for unknown regions
-/// so the bearer token is never sent to an unintended endpoint.
-pub fn base_url_for_region(region: &str) -> Result<&'static str> {
-    match region.to_lowercase().as_str() {
-        "us" => Ok(US_BASE_URL),
-        "eu" => Ok(EU_BASE_URL),
-        "apac" => Ok(APAC_BASE_URL),
-        other => {
-            bail!(
-                "Unknown region {:?}. Valid values: us, eu, apac. \
-                 Set the correct region in your profile (`drata login --region <region>`) \
-                 or via --region / DRATA_REGION.",
-                other
-            )
-        }
-    }
-}
-
 /// Whether `send_inner` retries an HTTP 429.
 ///
 /// `Default` retries up to `MAX_RETRY_ATTEMPTS` times, honoring `Retry-After`.
@@ -216,10 +213,17 @@ pub enum Retry429 {
     Never,
 }
 
+/// The client for both Drata-company APIs: the Drata GRC API and SafeBase.
+/// `Backend` picks which one, and with it the base URL, the auth header and
+/// the redirect policy. The name stays `DrataClient` because SafeBase is a
+/// Drata product and the binary is `drata`.
 pub struct DrataClient {
     http: Client,
+    backend: Backend,
     base_url: String,
-    api_key: String,
+    /// The backend's auth header, built once from the key. The only auth
+    /// header any request carries.
+    auth: (HeaderName, HeaderValue),
     /// Whether the resolved credential is write-enabled. When false, every
     /// non-GET request fails closed via the write guardrail.
     allow_writes: bool,
@@ -228,22 +232,27 @@ pub struct DrataClient {
 }
 
 impl DrataClient {
-    /// Build a client for the given region. `allow_writes` is a property of the
-    /// resolved credential: a non-GET request on a `false` client fails closed.
-    /// Returns `Err` if `region` is not a known value (us/eu/apac).
-    #[instrument(skip(api_key), fields(region, allow_writes))]
-    pub fn new(api_key: String, region: &str, allow_writes: bool) -> Result<Self> {
-        debug!(region, allow_writes, "building DrataClient");
-        let base_url = base_url_for_region(region)?;
+    /// Build a client for `backend`. `region` selects the Drata base URL
+    /// (default us); SafeBase has one and rejects any `region`. `allow_writes`
+    /// is a property of the resolved credential: a non-GET request on a
+    /// `false` client fails closed. Returns `Err` for an unknown region or a
+    /// key that cannot be sent as a header.
+    #[instrument(skip(api_key))]
+    pub fn new(backend: Backend, api_key: String, region: Option<&str>, allow_writes: bool) -> Result<Self> {
+        debug!(%backend, ?region, allow_writes, "building DrataClient");
+        let base_url = backend.base_url(region)?;
+        let auth = backend.auth_header(&api_key)?;
         let http = Client::builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .redirect(backend.redirect_policy())
             .build()
             .context("Failed to build HTTP client")?;
 
         Ok(Self {
             http,
+            backend,
             base_url: base_url.to_string(),
-            api_key,
+            auth,
             allow_writes,
             page_interval: MIN_PAGE_INTERVAL,
         })
@@ -255,12 +264,29 @@ impl DrataClient {
         self
     }
 
+    /// Replace the request timeout (default `REQUEST_TIMEOUT_SECS`), rebuilding
+    /// the HTTP client with the backend's redirect policy. A test seam: a
+    /// timed-out request is otherwise a 30 s wait.
+    pub fn with_timeout(mut self, timeout: Duration) -> Result<Self> {
+        self.http = Client::builder()
+            .timeout(timeout)
+            .redirect(self.backend.redirect_policy())
+            .build()
+            .context("Failed to build HTTP client")?;
+        Ok(self)
+    }
+
     /// Override the page pacing interval. A test seam: a long interval makes
     /// pacing measurable over local request latency.
     #[cfg(test)]
     pub(crate) fn with_page_interval(mut self, interval: Duration) -> Self {
         self.page_interval = interval;
         self
+    }
+
+    /// The API this client talks to.
+    pub fn backend(&self) -> Backend {
+        self.backend
     }
 
     /// Whether this client may issue mutating requests.
@@ -276,8 +302,9 @@ impl DrataClient {
     #[instrument(skip(self, body), fields(%method, %path, ?retry))]
     async fn send_inner(&self, method: Method, path: &str, body: Option<Value>, retry: Retry429) -> Result<Value> {
         if method != Method::GET && !self.allow_writes {
-            warn!(%method, %path, "write blocked: credential not write-enabled");
+            warn!(backend = %self.backend, %method, %path, "write blocked: credential not write-enabled");
             return Err(WriteGuardError {
+                backend: self.backend,
                 method: method.to_string(),
                 path: path.to_string(),
             }
@@ -295,7 +322,7 @@ impl DrataClient {
                 .request(method.clone(), &url)
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
-                .header("Authorization", format!("Bearer {}", self.api_key));
+                .header(self.auth.0.clone(), self.auth.1.clone());
 
             if let Some(ref b) = body {
                 req = req.json(b);
@@ -337,7 +364,7 @@ impl DrataClient {
 
             let json: Value = resp.json().await.context("Failed to parse response JSON")?;
             debug!(%status, "request succeeded");
-            return Ok(json);
+            return self.check_envelope(&method, &url, status, json);
         }
     }
 
@@ -355,8 +382,9 @@ impl DrataClient {
         debug!(%method, path, files = form.files.len(), fields = form.fields.len(), "multipart request");
 
         if !self.allow_writes {
-            warn!(%method, %path, "write blocked: credential not write-enabled");
+            warn!(backend = %self.backend, %method, %path, "write blocked: credential not write-enabled");
             return Err(WriteGuardError {
+                backend: self.backend,
                 method: method.to_string(),
                 path: path.to_string(),
             }
@@ -407,7 +435,7 @@ impl DrataClient {
                 .http
                 .request(method.clone(), &url)
                 .header("Accept", "application/json")
-                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header(self.auth.0.clone(), self.auth.1.clone())
                 .multipart(multipart)
                 .send()
                 .await
@@ -449,7 +477,7 @@ impl DrataClient {
 
             let json: Value = resp.json().await.context("Failed to parse multipart response JSON")?;
             debug!(%status, "multipart request succeeded");
-            return Ok(json);
+            return self.check_envelope(&method, &url, status, json);
         }
     }
 
@@ -477,13 +505,15 @@ impl DrataClient {
     /// legitimate signal.
     #[instrument(skip(self))]
     pub async fn try_get(&self, path: &str) -> Result<Option<Value>> {
-        match self.send_inner(Method::GET, path, None, Retry429::Default).await {
-            Ok(v) => Ok(Some(v)),
-            Err(e) => match e.downcast_ref::<ApiError>() {
-                Some(api_err) if api_err.status == StatusCode::NOT_FOUND => Ok(None),
-                _ => Err(e),
-            },
-        }
+        not_found_as_none(self.send_inner(Method::GET, path, None, Retry429::Default).await)
+    }
+
+    /// `try_get` sent exactly once: a 429 comes back as an `ApiError` instead
+    /// of being retried. For a lookup that must not repeat (the SafeBase
+    /// upload's recovery GET after an unanswered step 3).
+    #[instrument(skip(self))]
+    pub async fn try_get_once(&self, path: &str) -> Result<Option<Value>> {
+        not_found_as_none(self.send_inner(Method::GET, path, None, Retry429::Never).await)
     }
 
     #[instrument(skip(self, body))]
@@ -504,17 +534,26 @@ impl DrataClient {
         self.send_inner(Method::PUT, path, Some(body), Retry429::Default).await
     }
 
-    #[instrument(skip(self))]
-    pub async fn delete(&self, path: &str) -> Result<Value> {
-        self.send_inner(Method::DELETE, path, None, Retry429::Default).await
+    /// PUT sent exactly once: a 429 comes back as an `ApiError` instead of
+    /// being retried. For a create whose resend could make a second resource
+    /// (SafeBase `PUT /documents/upload`).
+    #[instrument(skip(self, body))]
+    pub async fn put_once(&self, path: &str, body: Value) -> Result<Value> {
+        self.send_inner(Method::PUT, path, Some(body), Retry429::Never).await
     }
 
-    /// DELETE with a JSON body, for the ops whose spec requires one (the agent
-    /// review's `assessment-runs/current` takes `{}`).
     #[instrument(skip(self, body))]
-    pub async fn delete_with_body(&self, path: &str, body: Value) -> Result<Value> {
-        self.send_inner(Method::DELETE, path, Some(body), Retry429::Default)
+    pub async fn patch(&self, path: &str, body: Value) -> Result<Value> {
+        self.send_inner(Method::PATCH, path, Some(body), Retry429::Default)
             .await
+    }
+
+    /// DELETE, with a JSON body for the ops whose spec requires one (Drata's
+    /// agent review `assessment-runs/current` takes `{}`; SafeBase
+    /// `DELETE /accounts/{id}/members` takes the emails to remove).
+    #[instrument(skip(self, body))]
+    pub async fn delete(&self, path: &str, body: Option<Value>) -> Result<Value> {
+        self.send_inner(Method::DELETE, path, body, Retry429::Default).await
     }
 
     /// Generic passthrough for the `raw` namespace. Non-GET is subject to the
@@ -666,6 +705,45 @@ impl DrataClient {
     }
 }
 
+impl DrataClient {
+    /// SafeBase answers every success as `{"ok": true, ...}`. A 2xx with
+    /// `ok: false`, or with no boolean `ok`, is an `EnvelopeError` carrying the
+    /// body, never a success. Drata bodies pass through untouched.
+    fn check_envelope(&self, method: &Method, url: &str, status: StatusCode, json: Value) -> Result<Value> {
+        if self.backend != Backend::Safebase {
+            return Ok(json);
+        }
+        let problem = match json.get("ok") {
+            Some(Value::Bool(true)) => return Ok(json),
+            Some(Value::Bool(false)) => "`ok` is false",
+            _ => "no boolean `ok`",
+        };
+        let body = json.to_string();
+        warn!(%method, %url, %status, problem, "SafeBase envelope rejected");
+        Err(EnvelopeError {
+            status,
+            formatted: format!(
+                "{} response on {} {} broke the envelope ({}): {}",
+                self.backend, method, url, problem, body
+            ),
+            body,
+        }
+        .into())
+    }
+}
+
+/// A GET's result with HTTP 404 turned into `Ok(None)`; every other error
+/// propagates.
+fn not_found_as_none(result: Result<Value>) -> Result<Option<Value>> {
+    match result {
+        Ok(v) => Ok(Some(v)),
+        Err(e) => match e.downcast_ref::<ApiError>() {
+            Some(api_err) if api_err.status == StatusCode::NOT_FOUND => Ok(None),
+            _ => Err(e),
+        },
+    }
+}
+
 /// Seconds to wait after a 429: the server's `Retry-After` when it parses,
 /// else the default, never past `MAX_RETRY_DELAY_SECS`.
 fn retry_delay(retry_after: Option<&str>) -> u64 {
@@ -770,6 +848,7 @@ fn agent_guidance(parsed: &Value) -> String {
     out
 }
 
+pub mod pages;
 pub mod presigned;
 
 #[cfg(test)]

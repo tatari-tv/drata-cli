@@ -100,7 +100,10 @@ async fn main() -> Result<()> {
         return drata_cli::run_auth(&cli, &diag);
     }
 
-    let config = Config::load(&cli).context("Failed to load configuration")?;
+    // Resolve only the credential of the backend this command calls: a Drata
+    // command never needs a SafeBase key, nor a SafeBase command a Drata key.
+    let backend = drata_cli::command_backend(&cli.command);
+    let config = Config::load(&cli, backend).context("Failed to load configuration")?;
 
     let confirm_fn = confirm::default_confirm(cli.yes);
     drata_cli::run(&cli, &config, confirm_fn)

@@ -7,6 +7,7 @@
 mod table;
 
 use clap::Parser;
+use drata_cli::backend::Backend;
 use drata_cli::cli::{Cli, OutputFormat};
 use drata_cli::client::DrataClient;
 use drata_cli::config::{Config, TokenSource};
@@ -17,8 +18,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn test_config(allow_writes: bool) -> Config {
     Config {
+        backend: Backend::Drata,
         api_key: "test-key".to_string(),
-        region: "us".to_string(),
+        region: Some("us".to_string()),
         allow_writes,
         profile: "test".to_string(),
         output_format: OutputFormat::Json,
@@ -40,9 +42,14 @@ async fn dispatch(argv: &[&str], allow_writes: bool) -> (eyre::Result<()>, Vec<w
     )
     .expect("argv parses");
     let config = test_config(allow_writes);
-    let client = DrataClient::new(config.api_key.clone(), &config.region, allow_writes)
-        .expect("client builds")
-        .with_base_url(server.uri());
+    let client = DrataClient::new(
+        Backend::Drata,
+        config.api_key.clone(),
+        config.region.as_deref(),
+        allow_writes,
+    )
+    .expect("client builds")
+    .with_base_url(server.uri());
     let result = drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes)).await;
     (result, server.received_requests().await.unwrap_or_default())
 }

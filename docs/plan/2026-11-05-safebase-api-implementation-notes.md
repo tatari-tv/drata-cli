@@ -1,0 +1,217 @@
+# Implementation Notes: SafeBase REST API in drata-cli
+
+Design doc: `docs/plan/2026-11-05-safebase-api.md`
+
+## Phase 1: Backend seam
+
+### Design decisions
+- `DrataClient` stores the auth header pair once, as `auth: (HeaderName, HeaderValue)` built by `Backend::auth_header` in `new` (`src/client.rs:DrataClient::new`). The key is checked as a header value at construction, the error never echoes the key, and `send_inner` / `send_multipart` both read the one stored pair, so no other path names an auth header. The value is marked sensitive
+- SafeBase same-origin redirects take the origin from the redirect chain's first URL (`attempt.previous().first()`), not a captured base URL (`src/backend.rs:same_origin_redirects`). Every request goes to `base_url`, so production behavior is the same, and it stays correct after `with_base_url` points the client at wiremock with no `Client` rebuild. Otherwise harvested as-is from atlassian-cli (`MAX_REDIRECTS = 10`, `>=` check, error text)
+- A broken SafeBase envelope is a new typed `EnvelopeError { status, body, formatted }`, not an `ApiError` (`src/client.rs:check_envelope`). An `ApiError` with status 200 would lie, and `try_get`'s 404 match stays untouched. Checked in both `send_inner` and `send_multipart`. On `ok: true` the whole response comes back; callers read `result`
+- Drata region constants and the region resolver moved from `client.rs` to `src/backend.rs` (`DRATA_*_BASE_URL`, `drata_base_url`): the backend owns its base URL. `Backend::Drata.base_url(None)` is `us`, the profile default
+- Both spec JSON strings are `pub(crate)` consts in `src/spec.rs`; `Backend::spec` holds the two `OnceLock`s and uses `get_or_init`, replacing the old `set` then re-`get`
+- `Backend` implements `Display` ("Drata" | "SafeBase") for error text; Phase 2's backend-named `WriteGuardError` can use it
+- `operation_tags` takes a `Backend` too, beside the two functions the doc names, so no spec walker quietly assumes Drata
+
+### Deviations
+- The doc sketches `spec() -> &'static SpecIndex`. No `SpecIndex` type exists; the cache has always held the parsed `serde_json::Value`. Implemented as `Backend::spec(self) -> Result<&'static Value>`: same effect, correct seam (parsing an embedded spec can fail, hence `Result`)
+- `DrataClient::new` is `new(backend, api_key, region: Option<&str>, allow_writes)`; the doc does not spell the signature out. Every existing caller passes `Backend::Drata` and `Some(region)`
+- `delete_with_body` is gone; `delete(path, body: Option<Value>)` covers both, per "delete() gains an optional body". Its one caller (`src/resources/vendor/security/agent.rs`) passes `Some(body)`, every other caller `None`. No shim
+- `test_base_url_for_region` moved out of `src/client/tests.rs` with the function it tests: it is `drata_base_url_resolves_each_region` in `src/backend/tests.rs`, same assertions plus the `None` default
+- `example_for_operation`, `example_for_schema` and `enum_values` stay Drata-only (they read `Backend::Drata.spec()`). Phase 3 owns `--example` from the SafeBase spec and adds the backend argument there. The 3.1 type-list handling in `build_skeleton` is tested directly against the SafeBase spec
+
+### Tradeoffs
+- A SafeBase `204 No Content` still maps to `Value::Null`, not an envelope error. The doc keeps "204 -> null unchanged" beside the envelope rule, SafeBase documents no 204, and a 204 has no body to check. See open questions
+- `type: [T, "null"]` reads as the first non-null member, `["null"]` alone as null, over emitting `null` for every nullable field: a skeleton is a fill-in template, so it shows the usable type
+- SafeBase client tests live in `tests/client.rs` beside the Drata ones over a new file: same seam, same helpers, well under the line cap
+
+### Open questions
+- Should a SafeBase 204 fail the envelope check (fail closed) over returning null? Phase 0 saw none
+- The SafeBase spec has one op with no `operationId` (`PATCH /accounts/{id}`). Harmless here; Phase 3's coverage test must not assert non-empty ids for SafeBase
+
+## Phase 2: Credentials, lazy clients, `drata safebase` skeleton
+
+### Design decisions
+- Saves always write the nested shape (`src/config.rs:Credentials::save`). A flat profile is read as a `drata` block and is never written back flat: one write shape, and the `.pre-safebase` backup covers rollback
+- The shape the file was read in is a private `Shape` (`Empty | Legacy | Flat | Nested`) set by `Credentials::parse`; `save` copies the on-disk file to `credentials.json.pre-safebase` (0600, atomic) only when it is `Legacy` or `Flat` (`src/config.rs:back_up`). A read never saves; only the legacy single-key `migrated` path does, as before
+- The legacy migration now writes nested, so it takes the backup too. `Credentials::load` marks the migrated set `Nested` after persisting it, so the login that follows in the same process does not overwrite the legacy backup with the nested file
+- Profiles parse one by one from raw JSON (`ProfileOnDisk::into_profile`) so every error names its profile: flat + nested is an error, and so is a profile with neither (the doc's "a profile needs at least one")
+- `Config` gains `backend` and `region: Option<String>` (`None` for SafeBase); `Config::load(cli, backend)` resolves only that backend's credential. `lib.rs:command_backend` maps `Commands::Safebase` to SafeBase and everything else to Drata; `main` resolves that one credential, so no command needs the other backend's key. `run` builds the client from `config.backend`
+- `AuthDiagnostic` holds a `CredentialStatus` per backend (`drata`, `safebase`). The SafeBase status resolves from `SAFEBASE_API_KEY` and the profile only; `--api-key` / `--allow-writes` / `--region` feed the Drata status, as the doc says
+- `whoami` / `auth` print the Drata lines first, byte for byte as before, then an indented `safebase:` block (`  key:` / `  source:` / `  writes:`), so the only unindented `writes:` line stays Drata's for vendor-eval (`src/resources/auth.rs:render_diagnostic`, pinned by `whoami_drata_lines_keep_their_wording_and_lead`)
+- `--region` scoping is one helper, `config::check_region_scope`, called from `Config::load(.., Safebase)` and from `run_auth`, so `drata safebase login --region eu` fails before anything is written
+- `config::remove_block` returns a `Removal` (`NotFound | Block | Profile`) and saves only when it removed something: a no-op logout does not rewrite (or back up) the file
+- `WriteGuardError` carries `backend: Backend`; its first line reads `write blocked: the active {backend} credential is not write-enabled.` The Drata text is unchanged
+- Global `--api-key`, `--region`, `--allow-writes` help lines now state their backend scope, since "Drata API key" stopped being true. The README and `after_help` stay Phase 7's
+- The config test fixture `Env` clears the key env vars on drop, while it still holds the lock
+
+### Deviations
+- `run(cli, config, confirm)` keeps its signature; the lazy step sits in `main`, which calls `Config::load(&cli, command_backend(&cli.command))`. Same effect, correct seam: `tests/logging.rs` keeps driving `run` with a fixture `Config`
+- `save_profile` / `remove_profile` are replaced by `save_drata`, `save_safebase` and `remove_block(name, backend)`, and `Profile` is now the two-block struct (the old flat fields live in `DrataBlock`). No shim
+- `drata logout` output changes from `Removed profile "x".` to `Removed the Drata credential from profile "x".` (or `... and profile "x".` when it was the last block), because logout no longer drops the whole profile. `drata login` output is unchanged
+- `tests/commands.rs` `UNCURATED` gains `safebase`: the command table proves Drata ops only. SafeBase coverage arrives with Phases 3 and 5
+- Existing tests changed only for the new shapes: `Config` fixtures (`backend`, `region: Some(..)`), `diag.drata.*`, `test_remove_profile` asserting `Removal` values
+
+### Tradeoffs
+- Always writing nested vs leaving Drata-only profiles flat so an old binary keeps reading the file without an `mv`: one write shape is simpler to reason about, and the backup is the rollback the doc names
+- An existing `.pre-safebase` is overwritten when a flat file is saved again (only reachable after a manual restore) vs refusing the save: the file about to be rewritten is the newest flat state, the one a rollback wants
+- Unknown keys inside a block are ignored, as the old flat `Profile` did, vs `deny_unknown_fields`: an older binary keeps reading a file a newer one wrote
+- `drata auth` (not `whoami`) prints SafeBase setup help whenever no SafeBase key is found, including for Drata-only users: discoverability over two extra lines
+
+### Open questions
+- `drata auth` now shows SafeBase setup help to every Drata-only user. Keep it, or show it only when the profile has a `safebase` block or `SAFEBASE_API_KEY` is set?
+- The legacy single-key migration now also leaves a `.pre-safebase` copy (the legacy file). Fine, or should that path skip the backup?
+
+## Phase 3: `drata safebase raw`
+
+### Design decisions
+- `SafebaseAction::Raw(RawArgs)` reuses the existing `RawArgs` and `raw::handle`, no fork (`src/cli/safebase.rs`, `src/lib.rs:dispatch`). `handle` already takes the backend from `Config`/client, so the only change inside it is the spec-validation lookup, which now reads `config.backend` instead of `Backend::Drata` (`src/raw.rs:handle`). The confirm prompt and write guard are the same code paths as `drata raw`
+- `--example` takes the backend from the caller: `raw::example_if_requested(backend, args)`; `lib.rs:example_if_requested` passes `Backend::Drata` for `Commands::Raw` and `Backend::Safebase` for `safebase raw`. It runs before config load, so no key is needed
+- `spec::example_for_operation`, `example_for_schema`, `enum_values` gained a leading `backend: Backend` argument, as Phase 1 deferred. Every Drata caller passes `Backend::Drata` explicitly; no default shim
+- The "no operation" error names the spec (`in the SafeBase spec`), so a Drata path typed under `safebase raw --example` says which spec was searched
+- `tests/coverage.rs` gained a SafeBase test with `EXPECTED_SAFEBASE_OPERATIONS = 47`, `raw_reachable` accepts PATCH, and no `operationId` is required (`PATCH /accounts/{id}` has none). A second test pins the `POST /questionnaires` multipart field names (`qnr`, `accountId`, `productId`, `dueDate`, `notes`) to the committed spec
+- Wiremock tests live in a new `tests/safebase.rs`, driving `raw::handle` from parsed argv
+
+### Deviations
+- `--example PATCH '/document/{id}'` prints `{}`, not a populated object. `build_skeleton` emits required fields (and fields with an example/default) only, and every `PATCH /document/{id}` field is optional. That is the shared Drata behavior and still satisfies "prints a JSON object, exit 0"; I did not change the skeleton rule for SafeBase. The skeleton tests use `POST /documents/upload`, which has required fields
+- `raw` multipart stays POST and PUT only, as for `drata raw`: no SafeBase op takes a multipart PATCH, so none was added
+- `run_auth` gets an unreachable `SafebaseAction::Raw(_)` error arm, because the `Commands::Safebase` match there is now non-exhaustive in spirit; `is_auth_command` already excludes it
+
+### Tradeoffs
+- Reusing `RawArgs` unchanged over a SafeBase-specific struct: identical flags are the requirement, so one struct keeps the two namespaces from drifting. The `--help` text for the flags still reads "under the API base", which is true for both
+- A required-fields-only `{}` skeleton vs listing optional fields for SafeBase: changing it would fork `build_skeleton`'s contract for one backend
+
+### Open questions
+- Should `--example` skeletons include optional fields (commented or as nulls) so `PATCH /document/{id}` shows its fields? It applies to Drata too, so it is a separate change
+
+## Phase 4: Page-number pagination
+
+### Design decisions
+- One descriptor type, `PagedOp`, with three consts `ACCOUNTS`, `DOCUMENTS`, `KB_SEARCH` (`src/client/pages.rs`). Fields: path, page param + first page (1 or 0), size param + page size (1000 / 100 / 1000, Phase 0's maximums), JSON pointer to the items, `Stop::TotalPages(ptr)` or `Stop::Count(ptr)`, `max_pages` and a `cap_source` string for the error
+- Every page is validated by a pure `PagedOp::check` before any of its items reach the sink, so the rules are unit-testable without a server and a bad page under NDJSON streaming writes none of its own items; earlier pages' lines stay written
+- Two entries mirror the cursor path: `DrataClient::get_all_pages(op, path)` (collect, the list default) and `stream_all_pages(op, path, writer)` (NDJSON, the `--all` mode), both over one loop, `drain_numbered_pages`. Phase 5 calls these the way `vendor list` calls `get_all` / `stream_all`
+- Errors are a typed `PageError` enum (`BadField`, `EmptyPage`, `RepeatedPage`, `CountExceeded`, `PastLastPage`, `PageCap`). Each message names the path and the request's `param=value` (`pageNumber=2`, `page=1`), so zero-based `/documents` reports the number actually sent. Tests downcast to the variant as well as checking the text
+- A request failure (HTTP error, envelope error) mid-listing is wrapped with `<path> failed at <param>=<n> after <k> items`; the inner `ApiError` / `EnvelopeError` still downcasts
+- `/accounts` checks `totalPages` against its 500 cap on every page, so `totalPages: 501` fails on page 1 in one request instead of after 500 pages of work. The loop also refuses to request page index `>= max_pages`, which is the hard cap for `/documents` (count-based, no total pages to check up front) and `/kb/search`. `DOCUMENTS` and `KB_SEARCH` use `client.rs`'s `MAX_PAGES` (child module reads the private const)
+- `totalPages: 0` or `count: 0` with an empty first page is empty success. Items on a page past `totalPages` (including `totalPages: 0` with items) is `PastLastPage`; items past `count` is `CountExceeded`
+- The loop refuses a non-SafeBase client and a `path` whose route differs from `op.path`: a descriptor applied to the wrong op fails loudly
+- Pages are paced with the client's existing `page_interval` (150 ms), same as the cursor loop
+- Break-to-prove: each guard (spec-bound cap, loop cap, off-by-one on the cap, empty page, repeated page, count exceeded, past last page, bad stop field, page label on a mid-stream failure) was disabled once and its test failed
+
+### Deviations
+- The doc's "page 501" rule is enforced from the server's reported `totalPages` (> 500 fails on the first page) and by the loop cap; no request for page 501 is ever sent. Same effect, earlier
+- No `limit` variant (Drata has `get_all_limited`): no Phase 5 SafeBase verb takes `--limit`
+- No CLI commands in this phase, per the phase scope; the `--all` NDJSON mode is the `stream_all_pages` entry Phase 5 wires up
+
+### Tradeoffs
+- Pacing SafeBase pages at 150 ms vs no pacing: SafeBase documents no limit and Phase 0 saw no rate-limit headers, but pacing cannot trip an unknown limit and costs little next to request latency. Tests set the interval to zero
+- Comparing a page's items to the previous page's (whole-`Value` equality) vs tracking every seen item id: matches the doc's rule exactly, needs no per-op id field, and a server echoing an older page still ends at the stop rule or the cap
+- Hard cap tested with a copy of `DOCUMENTS` capped at 2 pages, not 10,000 wiremock requests; a separate test pins `DOCUMENTS` / `KB_SEARCH` to `MAX_PAGES` and `ACCOUNTS` to 500
+
+### Open questions
+- None.
+
+## Phase 5: Curated SafeBase reads
+
+### Design decisions
+- Reads split into fetch and print. `resources::safebase::fetch(action, client, stream)` returns a `Reply` (`Ok | Text | Rows | One | Streamed`); `handle` is the thin shell that prints it (`src/resources/safebase.rs`). Wiremock tests assert the rendered rows through `Reply::table_text` and the NDJSON through the `stream` writer, with no stdout capture
+- One module per noun under `src/resources/safebase/` (`account`, `member`, `document`, `request`, `kb`), each with a pure path builder that has a unit test
+- Named tables, not sniffed: `Table::SafebaseAccounts | Members | Documents | DocumentTypes | Requests | KbEntries`, renderers in `src/output/table/safebase.rs`. SafeBase rows share keys (`id`, `name`, `type`) with Drata rows, so a sniff would collide. New `output::render_text` exposes the named render for tests
+- Lists print `{"data": [...]}` in JSON mode, as Drata lists do; `get` prints the `result` object. The envelope is not echoed
+- Verbs map to ops, params checked against `spec/safebase-openapi-v1.json`: `account list` `GET /accounts`, `get` `GET /accounts/{id}`, `url` `GET /accounts/{id}/url`; `member list` `GET /accounts/members` (`email`, `sfdcAccountId`); `document list` `GET /documents` (`query`), `get` `GET /document/{id}` (`type=external`), `types` `GET /document-types`; `request list` `GET /requests` (`status` enum); `kb search` `GET /kb/search` (`query`)
+- Path ids go through `encode_path_segment`; the status filter is a `ValueEnum` (`SafebaseRequestStatus`, lower-case wire names), so an out-of-enum value fails in clap
+- A 2xx whose `result` lacks the expected list or string (`document types` `result.items`, `account url` `result`) is an error naming it, never an empty table
+- An `{ok}`-only response maps to `Reply::Ok` and prints `ok`. No curated read hits such an op, and the mapping is covered by `ok_only_response_prints_ok`
+- `tests/coverage.rs` gains `CURATED` (9 `(method, path)` entries) with `every_curated_safebase_entry_matches_a_spec_operation` and a uniqueness test. Break-to-prove: a misspelled entry fails the first test; a wrong `companyName` field in the requests renderer fails `request_list_sends_status_and_renders_rows`. Both reverted
+
+### Deviations
+- `account url` prints the bare URL as plain text, even in JSON mode, not a JSON-quoted string: it is a single scalar for `$(...)` use
+- No account-list filters (`name`, `domain`, ...) and no `document list` filters beyond `--query` (`orderBy`, `tags`, ...): the doc's command list has only `--all` and `--query`. Raw reaches the rest
+- `document types` reads `result.items` (the spec's shape) and ignores `count`
+- `tests/commands.rs` is untouched: its `UNCURATED` already lists `safebase`, and SafeBase verbs are proven in `tests/safebase_reads.rs` instead (that table is Drata ops)
+
+### Tradeoffs
+- `Reply` enum plus `fetch` over printing inside each handler: one extra type, but the rendered output becomes testable data
+- Table-per-command variants on `Table` over a generic key-based SafeBase renderer: explicit columns per noun, matching how Drata tables read
+
+### Open questions
+- None.
+
+## Phase 6: Curated SafeBase writes
+
+### Design decisions
+- Verbs map to ops, every path and body field checked against `spec/safebase-openapi-v1.json`: `document upload` `POST` then `PUT /documents/upload`; `request approve` `POST /requests/{requestId}/approve` `{accountId}`; `request decline` `POST /requests/{requestId}/decline` (`{}` or `{message}`); `member add` `POST /accounts/{id}/members` `{members: [{email, firstName, lastName}], message?}`; `member remove` `DELETE /accounts/{id}/members` `{members: [emails]}`; `kb add` `POST /kb/entries`; `kb update` `PATCH /kb/entries/{id}`
+- `--notify` sends `message: true`: the spec's `message` is `oneOf string | boolean`, and `true` is its "email with no custom message". Shared `EmailNotice` clap args (`--message` conflicts with `--notify`) and one pure mapper, `resources::safebase::notice_message`
+- `resources::safebase::fetch` became `execute(action, client, confirm, stream)` and `handle` takes the `ConfirmFn`: the entry now routes writes too, so the old name lied. Every write calls `confirmed(confirm, method, path)` before its request; the client's write guard is unchanged and covers every verb
+- Upload lives in `src/resources/safebase/document/upload.rs`. A typed `UploadError` (`Request | Send | Create | Unknown`) carries `fileId` / `externalId` in its message, so main's error print shows them; tests downcast to the variant
+- The size bound (`fileSize.maximum`) and the MIME enum are read from the embedded SafeBase spec (`upload::upload_limits`), not copied into the code. Size is checked on file metadata before the file is read, so an oversized file is never loaded, then re-checked on the bytes
+- MIME type: the first `mime_guess` guess for the extension that is in the spec enum (`upload::pick_mime`). No guess in the enum (or no extension) fails before any request, naming the guesses and the allowed list
+- `--external-id` is parsed with `Uuid::parse_str` and sent in lowercase hyphenated form; the lookup uses the same string. Default is a fresh v4
+- Step 3 is sent with a new `DrataClient::put_once` (`Retry429::Never`), so not even a 429 resends the PUT. Step 1 keeps the normal `post`
+- "Outcome open" (`upload::outcome_is_open`): a `reqwest::Error` anywhere in the step 3 error chain that is not a connect or builder error (timeout, dropped connection, unreadable 2xx body). An `ApiError`, `EnvelopeError` or write-guard error is SafeBase's own answer or no send at all, so it is definite and skips the lookup. A connect failure never sent the request, also definite
+- The lookup is `try_get(document::get_path(externalId, true))`: found AND `size` equals the local byte count AND `checksum` equals the local md5b64 -> `Reply::Warned` (warning on stderr, document printed, exit 0). A 404, a mismatch, or a failed lookup -> `UploadError::Unknown` (`outcome unknown`, with `fileId` and `externalId`)
+- New `Reply::Warned { warning, table, row }` keeps the found-after-timeout warning testable as data; `handle` prints it to stderr
+- One confirm for the whole upload (`POST /documents/upload (then the signed URL, then PUT /documents/upload)`), not one per step, like `drata upload-url create --file`
+- Step 1 failure errors never echo the response body: it can hold the signed URL, whose query is a credential
+- `DrataClient::with_timeout` (pub, like `with_base_url`) rebuilds the HTTP client with the backend's redirect policy; the step 3 timeout tests use 300 ms against a 5 s wiremock delay
+- Fixture `tests/fixtures/zzz-clitest.pdf` (134 bytes); its md5b64 `/nZ6d/ougolRF+QdP/1xsw==` came from `openssl dgst -md5 -binary tests/fixtures/zzz-clitest.pdf | base64` and is hard-coded in `tests/safebase_writes.rs` with the command cited
+- `tests/coverage.rs` `CURATED` gains the 8 write ops (17 total)
+- Break-to-prove, each run once and reverted: SafeBase key added to the signed-URL headers; `replacementDocumentId` dropped; a second PUT on timeout; size ignored in the match; timeout classified definite; size check loosened; md5 base64 URL-safe alphabet; `--notify` mapped to no message; approve field renamed; member add always sending `message`; confirm skipped. Every one failed its test
+
+### Deviations
+- Step 2 uses `put_presigned` as is, whose own bound is `PRESIGNED_TIMEOUT_SECS` (300 s), not the API client's 30 s the doc names. Reusing the shared transport was the stated requirement, its doc says the longer bound exists because the body is a whole file, and at 30 s a 75 MiB upload needs 2.6 MB/s. No retry and no redirects, as the doc says; a 429 there is a plain `PresignedError`
+- `UploadArgs.doc_type` is the field behind `--type` (`type` is a Rust keyword)
+- `--replace` is not checked as a UUID locally (only `--external-id` is, because the doc requires it); SafeBase validates it
+- Step 1 errors are wrapped in `UploadError::Request`, so a write-guard refusal on upload surfaces as text (`write blocked ...`) inside that error rather than as a bare `WriteGuardError`. The other write verbs return the bare `WriteGuardError`
+
+### Tradeoffs
+- Reading the size and MIME bounds from the spec vs constants: the spec is the contract and the coverage tripwire already watches it; a missing pointer fails loudly
+- Treating a connect error on step 3 as definite vs looking it up: a connect failure never sent the PUT, so "outcome unknown" would be untrue
+- `--external-id` canonicalized to lowercase hyphenated vs sent verbatim: one form for the store and the lookup; the help text says so
+- Member remove passes duplicate emails through to SafeBase (`uniqueItems`, which rejects them) vs deduping locally: no silent rewrite of what the user typed
+
+### Open questions
+- Step 2 timeout: keep the presigned transport's 300 s bound (current), or pass the API client's 30 s as the doc literally says?
+- Tags across `--replace` remain untested (Phase 0 had no tags); the help text says so. Worth a shakedown check once the tenant has a tag?
+
+## Phase 7: Docs and help
+
+### Design decisions
+- One `## SafeBase` README section with `###` subsections (credential, write gate, `credentials.json` shape, raw, curated reads, curated writes, document upload), placed after the raw namespace (`README.md`). It describes what shipped: Phase 6's PUT signed URL, the observed `--replace` behavior, `account url` printing a bare URL, `--notify`
+- Prose is bullets with no line numbers, counts or version pins, per the durable-doc rule. The intro, Authentication and Spec coverage sections were reworded to name both backends
+- Top-level `about` and `after_help` name both APIs and the SafeBase credential (`src/cli.rs:Cli`); the `safebase` subtree gets its own `after_help` (credential sources, write gate, `--region` Drata-only, `raw --example`) on the `Commands::Safebase` variant
+- `drata-cli.yml` sample shows the nested per-backend shape and the SafeBase login and env var; Cargo.toml `description` names Drata and SafeBase
+
+### Deviations
+- `drata-cli <command>` examples became `drata <command>`; the one install sentence now says "The crate is `drata-cli`; the binary is named `drata`" and the title heading keeps the crate name, since neither matches the `drata-cli [a-z]` criterion
+- The Write gate prose said `allow_writes: true`; corrected to the real key `allow-writes`
+- One pre-existing "real tenant" in the Live verification section became "live tenant" (prose rule)
+
+### Tradeoffs
+- Reusing the Phase 6 option wording in README vs restating from the design doc: the notes record the shipped behavior, so the README follows them
+
+### Open questions
+- None.
+
+## Audit fixes
+
+Folds the implementation-audit findings (review-panel round 1). Each code fix has a test that was run once against a deliberately broken build and failed.
+
+### Design decisions
+- The upload recovery lookup goes through a new `DrataClient::try_get_once` (`Retry429::Never`), beside `put_once` (`src/client.rs:try_get_once`, `src/resources/safebase/document/upload.rs:settle`). A 429 on the lookup now ends in `outcome unknown` after exactly one GET, as the doc's "once" requires. `try_get` and `try_get_once` share `not_found_as_none`, so 404 stays "not found" on both. Test: `upload_step3_timeout_lookup_429_is_sent_once`
+- A step 1 envelope error (2xx with `ok: false` or no boolean `ok`) names only the status and withholds the body, which can carry `result.signedUrl` (`upload.rs:step1_cause`). Test: `upload_step1_envelope_error_withholds_the_signed_url`
+- `drata safebase raw --example ... --region x` is now an error: the SafeBase arm of `example_if_requested` runs `config::check_region_scope` on the skeleton (`src/lib.rs:example_if_requested`), since `--example` returns before `Config::load`. Test: `safebase_raw_example_rejects_region`
+- `member list` and `request list` read their rows through `items_at`, like the paged lists and `document types`, so a 2xx with no `result` array is an error, never `ok` or a single row (`member.rs`, `request.rs`). Tests: `request_list_without_result_is_an_error`, `member_list_without_result_is_an_error`, `member_list_with_an_object_result_is_an_error`. The Phase 5 test `ok_only_response_prints_ok`, which pinned the old `{ok}` -> `ok` behavior on `request list`, is replaced by the first of these
+- `drata logout` help now reads "Remove only the Drata credential from the profile (a SafeBase credential stays)" (`src/cli.rs:Commands::Logout`). Test: `logout_help_says_it_removes_only_the_drata_credential`
+- Design doc: the step 2 bullet now names the presigned 300 s bound; the step 3 lookup bullet says it is never retried, not even on a 429; Goals "Zero behavior change" lists the three exceptions (both `drata logout` lines and the `drata auth` SafeBase help)
+
+### Deviations
+- Phase 7's `drata logout` not-found wording change was undisclosed: `No profile named "x" to remove.` became `No Drata credential in profile "x" to remove.` It follows from per-block logout and is now in the doc's Goals exceptions. No code change
+- Phase 6's note "Step 1 failure errors never echo the response body" overstated what shipped and still overstates it: only an envelope error (a 2xx, the response that carries the ticket) withholds its body. A non-2xx step 1 error still shows SafeBase's error body, which carries no signed URL and is how a missing scope (`documents:edit`) reaches the user; `upload_step1_failure_sends_nothing_to_storage` pins that
+
+### Tradeoffs
+- Redacting the envelope error at the upload's step 1 vs dropping the body from every `EnvelopeError`: the signed URL only rides the step 1 response, and every other SafeBase op keeps the body that explains a broken envelope
+- `items_at(resp, "", op)` for the two flat lists vs a separate helper: one error shape for every SafeBase list
+
+### Open questions
+- Phase 6's step 2 timeout question is resolved: kept at the presigned transport's 300 s, and the doc now says so

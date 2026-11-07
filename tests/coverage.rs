@@ -13,11 +13,15 @@
 //! a curated entry stops matching a real operation - the early-warning the
 //! design doc asks for.
 
+use drata_cli::backend::Backend;
 use drata_cli::spec::{self, Operation};
 
 /// Operation count of the committed spec: a tripwire that fails on every spec refresh,
 /// so a refresh is a deliberate, reviewed change.
 const EXPECTED_OPERATIONS: usize = 308;
+
+/// Operation count of the committed SafeBase spec (`spec/safebase-openapi-v1.json`).
+const EXPECTED_SAFEBASE_OPERATIONS: usize = 47;
 
 /// The command table (`tests/commands/table.rs`). Only `method` and `path`
 /// are read here; `tests/commands.rs` reads the argv and response of each row.
@@ -44,12 +48,12 @@ fn is_curated(op: &Operation) -> bool {
 /// An operation is reachable via `raw` iff it is routable: a known upper-cased
 /// method and an absolute path template.
 fn raw_reachable(op: &Operation) -> bool {
-    matches!(op.method.as_str(), "GET" | "POST" | "PUT" | "DELETE") && op.path.starts_with('/')
+    matches!(op.method.as_str(), "GET" | "POST" | "PUT" | "PATCH" | "DELETE") && op.path.starts_with('/')
 }
 
 #[test]
 fn every_operation_is_reachable() {
-    let ops = spec::operations().expect("spec operations parse");
+    let ops = spec::operations(Backend::Drata).expect("spec operations parse");
     assert_eq!(
         ops.len(),
         EXPECTED_OPERATIONS,
@@ -68,9 +72,89 @@ fn every_operation_is_reachable() {
     );
 }
 
+/// `drata safebase raw` reaches every SafeBase op, so every op must be
+/// routable through it. Unlike Drata's, one op
+/// (`PATCH /accounts/{id}`) has no `operationId`, so none is required.
+#[test]
+fn every_safebase_operation_is_reachable_through_raw() {
+    let ops = spec::operations(Backend::Safebase).expect("spec operations parse");
+    assert_eq!(
+        ops.len(),
+        EXPECTED_SAFEBASE_OPERATIONS,
+        "expected {EXPECTED_SAFEBASE_OPERATIONS} SafeBase operations"
+    );
+    let unreachable: Vec<String> = ops
+        .iter()
+        .filter(|op| !raw_reachable(op))
+        .map(|op| format!("{} {}", op.method, op.path))
+        .collect();
+    assert!(
+        unreachable.is_empty(),
+        "unreachable SafeBase operations: {unreachable:#?}"
+    );
+    assert!(
+        ops.iter().any(|op| op.method == "PATCH"),
+        "SafeBase has PATCH operations; raw must reach them"
+    );
+}
+
+/// The SafeBase ops the curated `drata safebase` verbs reach, one per verb
+/// (`tests/safebase_reads.rs` and `tests/safebase_writes.rs` send each and
+/// assert it on the wire): reads `account list|get|url`, `member list`,
+/// `document list|get|types`, `request list`, `kb search`; writes `document
+/// upload` (POST then PUT `/documents/upload`), `request approve|decline`,
+/// `member add|remove`, `kb add|update`.
+const CURATED: &[(&str, &str)] = &[
+    ("GET", "/accounts"),
+    ("GET", "/accounts/{id}"),
+    ("GET", "/accounts/{id}/url"),
+    ("GET", "/accounts/members"),
+    ("GET", "/documents"),
+    ("GET", "/document/{id}"),
+    ("GET", "/document-types"),
+    ("GET", "/requests"),
+    ("GET", "/kb/search"),
+    ("POST", "/documents/upload"),
+    ("PUT", "/documents/upload"),
+    ("POST", "/requests/{requestId}/approve"),
+    ("POST", "/requests/{requestId}/decline"),
+    ("POST", "/accounts/{id}/members"),
+    ("DELETE", "/accounts/{id}/members"),
+    ("POST", "/kb/entries"),
+    ("PATCH", "/kb/entries/{id}"),
+];
+
+#[test]
+fn every_curated_safebase_entry_matches_a_spec_operation() {
+    let ops = spec::operations(Backend::Safebase).expect("spec operations parse");
+    for (method, path) in CURATED {
+        assert!(
+            ops.iter().any(|op| op.method == *method && op.path == *path),
+            "curated SafeBase entry `{method} {path}` has no matching spec operation"
+        );
+    }
+}
+
+#[test]
+fn curated_safebase_entries_are_unique() {
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in CURATED {
+        assert!(seen.insert(entry), "duplicate curated SafeBase entry {entry:?}");
+    }
+}
+
+#[test]
+fn safebase_questionnaire_upload_matches_the_documented_multipart_fields() {
+    let spec = Backend::Safebase.spec().expect("spec parses");
+    let schema = &spec["paths"]["/questionnaires"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]["properties"];
+    for field in ["qnr", "accountId", "productId", "dueDate", "notes"] {
+        assert!(schema.get(field).is_some(), "POST /questionnaires lacks field {field}");
+    }
+}
+
 #[test]
 fn every_curated_entry_matches_a_real_operation() {
-    let ops = spec::operations().expect("spec operations parse");
+    let ops = spec::operations(Backend::Drata).expect("spec operations parse");
     for (method, path) in curated() {
         let found = ops.iter().any(|op| op.method == method && op.path == path);
         assert!(
@@ -83,7 +167,7 @@ fn every_curated_entry_matches_a_real_operation() {
 
 #[test]
 fn reports_curated_coverage_percentage() {
-    let ops = spec::operations().expect("spec operations parse");
+    let ops = spec::operations(Backend::Drata).expect("spec operations parse");
     let total = ops.len();
     let curated = ops.iter().filter(|op| is_curated(op)).count();
     let pct = (curated as f64 / total as f64) * 100.0;
@@ -105,7 +189,7 @@ fn reports_curated_coverage_percentage() {
 
 #[test]
 fn operation_level_tags_match_the_committed_spec() {
-    let tags = spec::operation_tags().expect("operation tags parse");
+    let tags = spec::operation_tags(Backend::Drata).expect("operation tags parse");
     assert_eq!(tags.len(), 51);
     assert!(tags.contains(&"Audit Requests".to_string()));
     assert!(tags.contains(&"Procurement Connection Mappings".to_string()));

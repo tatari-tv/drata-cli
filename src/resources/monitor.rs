@@ -64,7 +64,7 @@ pub fn example_if_requested(action: &MonitorAction) -> Option<Result<String>> {
 /// The op's body skeleton from the spec, with a full recipe spliced in when
 /// the body carries one.
 fn body_example(method: &str, path: &str, has_recipe: bool) -> Result<String> {
-    let skeleton = spec::example_for_operation(method, path)?
+    let skeleton = spec::example_for_operation(crate::backend::Backend::Drata, method, path)?
         .ok_or_else(|| eyre::eyre!("operation `{} {}` has no JSON request body", method, path))?;
     if !has_recipe {
         return Ok(skeleton);
@@ -78,10 +78,10 @@ fn body_example(method: &str, path: &str, has_recipe: bool) -> Result<String> {
 /// skeleton stops at its depth bound before a provider's resources, which hold
 /// the test's conditions.
 pub fn recipe_example() -> Result<Value> {
-    let resource = spec::example_for_schema("CustomTestRecipeResourcePublicV2Dto")?;
-    let mut provider = spec::example_for_schema("CustomTestRecipeProviderPublicV2Dto")?;
+    let resource = spec::example_for_schema(crate::backend::Backend::Drata, "CustomTestRecipeResourcePublicV2Dto")?;
+    let mut provider = spec::example_for_schema(crate::backend::Backend::Drata, "CustomTestRecipeProviderPublicV2Dto")?;
     provider["resources"] = json!([resource]);
-    let mut recipe = spec::example_for_schema("CustomTestRecipePublicV2Dto")?;
+    let mut recipe = spec::example_for_schema(crate::backend::Backend::Drata, "CustomTestRecipePublicV2Dto")?;
     recipe["providers"] = json!([provider]);
     Ok(recipe)
 }

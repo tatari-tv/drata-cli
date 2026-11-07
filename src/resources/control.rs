@@ -32,7 +32,7 @@ pub fn example_if_requested(action: &ControlAction) -> Option<Result<String>> {
 }
 
 fn example_skeleton(method: &str, path: &str) -> Result<String> {
-    spec::example_for_operation(method, path)?
+    spec::example_for_operation(crate::backend::Backend::Drata, method, path)?
         .ok_or_else(|| eyre::eyre!("operation `{} {}` has no JSON request body", method, path))
 }
 

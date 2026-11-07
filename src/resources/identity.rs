@@ -133,7 +133,7 @@ enum Verb<'a> {
 
 fn example(kind: Kind) -> Result<String> {
     let template = kind.actions_template();
-    spec::example_for_operation("POST", &template)?
+    spec::example_for_operation(crate::backend::Backend::Drata, "POST", &template)?
         .ok_or_else(|| eyre::eyre!("operation `POST {template}` has no JSON request body"))
 }
 

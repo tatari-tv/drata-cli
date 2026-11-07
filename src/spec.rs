@@ -1,8 +1,10 @@
 //! OpenAPI spec parser.
 //!
-//! The committed spec (`spec/drata-openapi-v2.json`) is embedded via
-//! `include_str!` so the parser and coverage test work regardless of the
-//! process's working directory. The spec anchors two things:
+//! Two committed specs are embedded via `include_str!`, one per `Backend`:
+//! `spec/drata-openapi-v2.json` (Drata) and `spec/safebase-openapi-v1.json`
+//! (SafeBase, OpenAPI 3.1). Embedding keeps the parser and coverage test
+//! working regardless of the process's working directory. `Backend::spec`
+//! parses each once. The specs anchor two things:
 //!
 //! - **`--example` skeletons** generated from an operation's request schema
 //!   (`example_for_operation`). This generalizes the hand-written vendors
@@ -21,17 +23,21 @@
 //! every `required` property is emitted, plus any property that carries its own
 //! `example`/`default` (so the common optional fields are discoverable). `$ref`
 //! and `allOf` are resolved (to pull in enum values and merged object shapes);
-//! `oneOf`/`anyOf` take the first variant. Nested objects/arrays recurse to a
+//! `oneOf`/`anyOf` take the first variant; an OpenAPI 3.1 type list
+//! (`type: [T, "null"]`) takes its first non-null type. Nested objects/arrays recurse to a
 //! bounded depth (`MAX_DEPTH`) to stay cycle-safe and keep the skeleton legible.
 
+use crate::backend::Backend;
 use eyre::{Context, Result, eyre};
 use serde_json::{Map, Value, json};
-use std::sync::OnceLock;
 use tracing::{debug, instrument, trace};
 
-/// The committed OpenAPI spec, embedded at compile time so spec-driven features
-/// (examples, coverage) never depend on the runtime working directory.
-const SPEC_JSON: &str = include_str!("../spec/drata-openapi-v2.json");
+/// The committed Drata OpenAPI spec, embedded at compile time so spec-driven
+/// features (examples, coverage) never depend on the runtime working directory.
+pub(crate) const DRATA_SPEC_JSON: &str = include_str!("../spec/drata-openapi-v2.json");
+
+/// The committed SafeBase OpenAPI spec, embedded the same way.
+pub(crate) const SAFEBASE_SPEC_JSON: &str = include_str!("../spec/safebase-openapi-v1.json");
 
 /// Bound on `$ref`/`allOf`/nested-object recursion when building a skeleton.
 /// Deep enough for Drata's real request bodies, shallow enough to stay legible
@@ -41,7 +47,7 @@ const MAX_DEPTH: u32 = 6;
 /// A single OpenAPI operation: one HTTP method on one path template.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Operation {
-    /// Upper-cased HTTP method (`GET`, `POST`, `PUT`, `DELETE`).
+    /// Upper-cased HTTP method (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`).
     pub method: String,
     /// Path template as written in the spec, e.g. `/vendors/{id}`.
     pub path: String,
@@ -53,33 +59,19 @@ pub struct Operation {
     pub multipart: bool,
 }
 
-/// Parse and cache the embedded spec as a `serde_json::Value`. Parsed once;
-/// subsequent calls return the cached reference.
-fn spec() -> Result<&'static Value> {
-    static SPEC: OnceLock<Value> = OnceLock::new();
-    if let Some(v) = SPEC.get() {
-        return Ok(v);
-    }
-    let parsed: Value = serde_json::from_str(SPEC_JSON).context("Failed to parse embedded OpenAPI spec")?;
-    // OnceLock::set fails only if another thread won the race; either way the
-    // value is now present, so re-read it.
-    let _ = SPEC.set(parsed);
-    SPEC.get()
-        .ok_or_else(|| eyre!("spec OnceLock unexpectedly empty after set"))
-}
-
-/// HTTP method keys we treat as operations. Drata's spec uses only these four,
-/// but the filter keeps non-operation path keys (`parameters`, `summary`) out.
+/// HTTP method keys we treat as operations. Drata's spec uses four of them and
+/// SafeBase's five (it adds PATCH); the filter keeps non-operation path keys (`parameters`, `summary`) out.
 const HTTP_METHODS: &[&str] = &["get", "post", "put", "patch", "delete", "head", "options"];
 
-/// Enumerate every operation in the spec: method + path + operationId + tags.
+/// Enumerate every operation in `backend`'s spec: method + path + operationId
+/// + tags.
 ///
 /// Tags come from each operation's own `tags` array, not the top-level `tags`
 /// list, which has drifted from it before. This is the authoritative set the coverage
 /// test asserts against.
-#[instrument(skip_all)]
-pub fn operations() -> Result<Vec<Operation>> {
-    let spec = spec()?;
+#[instrument(skip_all, fields(%backend))]
+pub fn operations(backend: Backend) -> Result<Vec<Operation>> {
+    let spec = backend.spec()?;
     let paths = spec
         .get("paths")
         .and_then(Value::as_object)
@@ -124,20 +116,21 @@ pub fn operations() -> Result<Vec<Operation>> {
 /// The distinct operation-level tag set (sorted, deduped). Sourced from the
 /// operations themselves, so `Audit Requests` and
 /// `Procurement Connection Mappings` are included.
-#[instrument(skip_all)]
-pub fn operation_tags() -> Result<Vec<String>> {
-    let mut tags: Vec<String> = operations()?.into_iter().flat_map(|op| op.tags).collect();
+#[instrument(skip_all, fields(%backend))]
+pub fn operation_tags(backend: Backend) -> Result<Vec<String>> {
+    let mut tags: Vec<String> = operations(backend)?.into_iter().flat_map(|op| op.tags).collect();
     tags.sort();
     tags.dedup();
     debug!(count = tags.len(), "collected operation-level tags");
     Ok(tags)
 }
 
-/// Find an operation by HTTP method + path template (case-insensitive method).
-#[instrument(skip_all, fields(%method, %path))]
-pub fn find_by_method_path(method: &str, path: &str) -> Result<Option<Operation>> {
+/// Find an operation in `backend`'s spec by HTTP method + path template
+/// (case-insensitive method).
+#[instrument(skip_all, fields(%backend, %method, %path))]
+pub fn find_by_method_path(backend: Backend, method: &str, path: &str) -> Result<Option<Operation>> {
     let want = method.to_uppercase();
-    let found = operations()?
+    let found = operations(backend)?
         .into_iter()
         .find(|op| op.method == want && op.path == path);
     debug!(found = found.is_some(), "lookup by method+path");
@@ -147,9 +140,9 @@ pub fn find_by_method_path(method: &str, path: &str) -> Result<Option<Operation>
 /// Generate a `--example` request-body skeleton for an operation identified by
 /// HTTP method + path template. Returns `None` when the operation has no
 /// JSON request body (e.g. a GET or a multipart upload).
-#[instrument(skip_all, fields(%method, %path))]
-pub fn example_for_operation(method: &str, path: &str) -> Result<Option<String>> {
-    let spec = spec()?;
+#[instrument(skip_all, fields(%backend, %method, %path))]
+pub fn example_for_operation(backend: Backend, method: &str, path: &str) -> Result<Option<String>> {
+    let spec = backend.spec()?;
     let schema = match request_schema(spec, method, path)? {
         Some(s) => s,
         None => {
@@ -167,9 +160,9 @@ pub fn example_for_operation(method: &str, path: &str) -> Result<Option<String>>
 /// built the same way as an operation's. For bodies nested deeper than
 /// `MAX_DEPTH`, a caller assembles the skeleton from its component parts.
 /// `Err` when the spec has no such schema.
-#[instrument(skip_all, fields(%name))]
-pub fn example_for_schema(name: &str) -> Result<Value> {
-    let spec = spec()?;
+#[instrument(skip_all, fields(%backend, %name))]
+pub fn example_for_schema(backend: Backend, name: &str) -> Result<Value> {
+    let spec = backend.spec()?;
     let schema = spec
         .get("components")
         .and_then(|c| c.get("schemas"))
@@ -180,8 +173,9 @@ pub fn example_for_schema(name: &str) -> Result<Value> {
 
 /// The values of a string enum component schema (`#/components/schemas/<name>`).
 /// `Err` when the spec has no such schema or it is not a string enum.
-pub fn enum_values(name: &str) -> Result<Vec<String>> {
-    let schema = spec()?
+pub fn enum_values(backend: Backend, name: &str) -> Result<Vec<String>> {
+    let schema = backend
+        .spec()?
         .get("components")
         .and_then(|c| c.get("schemas"))
         .and_then(|s| s.get(name))
@@ -255,7 +249,7 @@ fn build_skeleton(spec: &Value, schema: &Value, depth: u32) -> Value {
         return first.clone();
     }
 
-    match schema.get("type").and_then(Value::as_str) {
+    match schema_type(schema) {
         Some("object") => build_object(spec, schema, depth),
         Some("array") => build_array(spec, schema, depth),
         Some("string") => json!("string"),
@@ -264,6 +258,20 @@ fn build_skeleton(spec: &Value, schema: &Value, depth: u32) -> Value {
         // No `type` but has `properties` -> still an object.
         _ if schema.get("properties").is_some() => build_object(spec, schema, depth),
         _ => Value::Null,
+    }
+}
+
+/// A schema's `type`. OpenAPI 3.0 writes one string; 3.1 (the SafeBase spec)
+/// may write a list such as `["string", "null"]`, read here as its first
+/// non-null member. A list of only `"null"` reads as `"null"`.
+fn schema_type(schema: &Value) -> Option<&str> {
+    match schema.get("type")? {
+        Value::String(t) => Some(t.as_str()),
+        Value::Array(types) => {
+            let names: Vec<&str> = types.iter().filter_map(Value::as_str).collect();
+            names.iter().copied().find(|t| *t != "null").or(names.first().copied())
+        }
+        _ => None,
     }
 }
 

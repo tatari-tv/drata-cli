@@ -6,13 +6,14 @@
 //! schemas for the vendor endpoints.
 #![allow(clippy::unwrap_used)]
 use super::*;
+use crate::backend::Backend;
 use crate::client::DrataClient;
 use serde_json::json;
 use wiremock::matchers::{body_partial_json, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 async fn rw_client(server: &MockServer) -> DrataClient {
-    DrataClient::new("test-key".to_string(), "us", true)
+    DrataClient::new(Backend::Drata, "test-key".to_string(), Some("us"), true)
         .unwrap()
         .with_base_url(server.uri())
 }
@@ -110,7 +111,7 @@ async fn verify_run_succeeds_against_fixtures() {
     assert!(found, "vendor should appear in list");
 
     // Step 3: delete succeeds (204 -> Value::Null)
-    let delete_resp = client.delete(&format!("/vendors/{}", vendor_id)).await.unwrap();
+    let delete_resp = client.delete(&format!("/vendors/{}", vendor_id), None).await.unwrap();
     assert_eq!(delete_resp, serde_json::Value::Null);
 
     // Step 4 (404 after delete): wiremock doesn't support expiring mocks, so a

@@ -2,6 +2,7 @@
 #![deny(dead_code)]
 #![deny(unused_variables)]
 
+pub mod backend;
 pub mod cli;
 pub mod client;
 pub mod config;
@@ -16,9 +17,10 @@ pub mod resources;
 pub mod spec;
 pub mod verify;
 
-use cli::{Cli, Commands};
+use backend::Backend;
+use cli::{Cli, Commands, SafebaseAction};
 use client::DrataClient;
-use config::{AuthDiagnostic, Config, DEFAULT_PROFILE};
+use config::{AuthDiagnostic, Config};
 use confirm::ConfirmFn;
 use eyre::Result;
 use tracing::instrument;
@@ -50,7 +52,11 @@ pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
             resources::identity::example_if_requested_version_control(action)
         }
         Commands::Connection { action } => resources::connection::example_if_requested(action),
-        Commands::Raw(args) => raw::example_if_requested(args),
+        Commands::Raw(args) => raw::example_if_requested(Backend::Drata, args),
+        Commands::Safebase {
+            action: SafebaseAction::Raw(args),
+        } => raw::example_if_requested(Backend::Safebase, args)
+            .map(|skeleton| config::check_region_scope(cli, Backend::Safebase).and(skeleton)),
         _ => None,
     }
 }
@@ -129,38 +135,68 @@ fn kebab(ident: &str) -> String {
 pub fn is_auth_command(cli: &Cli) -> bool {
     matches!(
         cli.command,
-        Commands::Login { .. } | Commands::Logout | Commands::Whoami | Commands::Auth
+        Commands::Login { .. }
+            | Commands::Logout
+            | Commands::Whoami
+            | Commands::Auth
+            | Commands::Safebase {
+                action: SafebaseAction::Login { .. } | SafebaseAction::Logout
+            }
     )
 }
 
-/// The profile name the user selected (CLI > env > default). Used by auth
-/// commands that mutate the credentials file.
-fn selected_profile(cli: &Cli) -> String {
-    cli.profile
-        .clone()
-        .or_else(|| std::env::var("DRATA_PROFILE").ok())
-        .unwrap_or_else(|| DEFAULT_PROFILE.to_string())
+/// The API a command calls: SafeBase for everything under `drata safebase`,
+/// Drata otherwise. Picks whose credential `Config::load` resolves, so a
+/// command never needs the other backend's key.
+pub fn command_backend(command: &Commands) -> Backend {
+    match command {
+        Commands::Safebase { .. } => Backend::Safebase,
+        _ => Backend::Drata,
+    }
 }
 
 /// Dispatch the auth/onboarding commands. Safe to call when no key is
-/// configured.
+/// configured. `drata login`/`logout` touch only the profile's Drata block,
+/// `drata safebase login`/`logout` only its SafeBase block.
 pub fn run_auth(cli: &Cli, diag: &AuthDiagnostic) -> Result<()> {
+    config::check_region_scope(cli, command_backend(&cli.command))?;
+    let profile = config::selected_profile(cli);
     match &cli.command {
         Commands::Login {
             api_key,
             region,
             allow_writes,
-        } => resources::auth::login(&selected_profile(cli), api_key, region, *allow_writes),
-        Commands::Logout => resources::auth::logout(&selected_profile(cli)),
+        } => resources::auth::login(&profile, api_key, region, *allow_writes),
+        Commands::Logout => resources::auth::logout(&profile, Backend::Drata),
+        Commands::Safebase { action } => match action {
+            SafebaseAction::Login { api_key, allow_writes } => {
+                resources::auth::safebase_login(&profile, api_key, *allow_writes)
+            }
+            SafebaseAction::Logout => resources::auth::logout(&profile, Backend::Safebase),
+            SafebaseAction::Raw(_)
+            | SafebaseAction::Account { .. }
+            | SafebaseAction::Member { .. }
+            | SafebaseAction::Document { .. }
+            | SafebaseAction::Request { .. }
+            | SafebaseAction::Kb { .. } => Err(eyre::eyre!("run_auth called on non-auth command")),
+        },
         Commands::Whoami => resources::auth::whoami(diag),
         Commands::Auth => resources::auth::auth(diag),
         _ => Err(eyre::eyre!("run_auth called on non-auth command")),
     }
 }
 
+/// Build the client for the command's backend from its resolved credential,
+/// then dispatch. `config` is resolved per command (`Config::load(cli,
+/// command_backend(..))`), so no command demands a key it does not use.
 #[instrument(skip_all, fields(command = %command_path(&cli.command)))]
 pub async fn run(cli: &Cli, config: &Config, confirm: ConfirmFn) -> Result<()> {
-    let client = DrataClient::new(config.api_key.clone(), &config.region, config.allow_writes)?;
+    let client = DrataClient::new(
+        config.backend,
+        config.api_key.clone(),
+        config.region.as_deref(),
+        config.allow_writes,
+    )?;
     dispatch(cli, &client, config, &confirm).await
 }
 
@@ -289,7 +325,28 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
         }
         // Auth commands normally take the no-key bypass in main; if they reach
         // `run`, a key is configured. Re-derive the diagnostic to report source.
-        Commands::Login { .. } | Commands::Logout | Commands::Whoami | Commands::Auth => {
+        Commands::Safebase {
+            action: SafebaseAction::Raw(args),
+        } => {
+            raw::handle(args, client, config, confirm).await?;
+        }
+        Commands::Safebase {
+            action:
+                action @ (SafebaseAction::Account { .. }
+                | SafebaseAction::Member { .. }
+                | SafebaseAction::Document { .. }
+                | SafebaseAction::Request { .. }
+                | SafebaseAction::Kb { .. }),
+        } => {
+            resources::safebase::handle(action, client, config, confirm).await?;
+        }
+        Commands::Login { .. }
+        | Commands::Logout
+        | Commands::Whoami
+        | Commands::Auth
+        | Commands::Safebase {
+            action: SafebaseAction::Login { .. } | SafebaseAction::Logout,
+        } => {
             let diag = AuthDiagnostic::load(cli)?;
             run_auth(cli, &diag)?;
         }

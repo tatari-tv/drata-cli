@@ -1,35 +1,26 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+use crate::backend::Backend;
 use std::io::Write;
 use tempfile::NamedTempFile;
 
 #[test]
 fn test_new_succeeds() {
-    let client = DrataClient::new("test-key".to_string(), "us", false);
+    let client = DrataClient::new(Backend::Drata, "test-key".to_string(), Some("us"), false);
     assert!(client.is_ok());
 }
 
 #[test]
 fn test_with_base_url() {
-    let client = DrataClient::new("test-key".to_string(), "us", false)
+    let client = DrataClient::new(Backend::Drata, "test-key".to_string(), Some("us"), false)
         .unwrap()
         .with_base_url("https://custom.example.com".to_string());
     assert_eq!(client.base_url, "https://custom.example.com");
 }
 
 #[test]
-fn test_base_url_for_region() {
-    assert_eq!(base_url_for_region("us").unwrap(), US_BASE_URL);
-    assert_eq!(base_url_for_region("eu").unwrap(), EU_BASE_URL);
-    assert_eq!(base_url_for_region("EU").unwrap(), EU_BASE_URL);
-    assert_eq!(base_url_for_region("apac").unwrap(), APAC_BASE_URL);
-    // Unknown region returns an error.
-    assert!(base_url_for_region("mars").is_err());
-}
-
-#[test]
 fn test_new_rejects_unknown_region() {
-    let result = DrataClient::new("test-key".to_string(), "mars", false);
+    let result = DrataClient::new(Backend::Drata, "test-key".to_string(), Some("mars"), false);
     assert!(result.is_err(), "unknown region should return Err");
     if let Err(e) = result {
         let msg = e.to_string();
@@ -40,9 +31,9 @@ fn test_new_rejects_unknown_region() {
 
 #[test]
 fn test_allow_writes_reflects_construction() {
-    let ro = DrataClient::new("k".to_string(), "us", false).unwrap();
+    let ro = DrataClient::new(Backend::Drata, "k".to_string(), Some("us"), false).unwrap();
     assert!(!ro.allow_writes());
-    let rw = DrataClient::new("k".to_string(), "us", true).unwrap();
+    let rw = DrataClient::new(Backend::Drata, "k".to_string(), Some("us"), true).unwrap();
     assert!(rw.allow_writes());
 }
 
@@ -120,13 +111,13 @@ use wiremock::matchers::{method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 async fn rw_client(server: &MockServer) -> DrataClient {
-    DrataClient::new("test-key".to_string(), "us", true)
+    DrataClient::new(Backend::Drata, "test-key".to_string(), Some("us"), true)
         .unwrap()
         .with_base_url(server.uri())
 }
 
 async fn ro_client_for_stream(server: &MockServer) -> DrataClient {
-    DrataClient::new("test-key".to_string(), "us", false)
+    DrataClient::new(Backend::Drata, "test-key".to_string(), Some("us"), false)
         .unwrap()
         .with_base_url(server.uri())
 }
@@ -232,7 +223,7 @@ async fn post_multipart_sends_file() {
 #[tokio::test]
 async fn post_multipart_blocked_on_readonly_client() {
     let server = MockServer::start().await;
-    let client = DrataClient::new("test-key".to_string(), "us", false)
+    let client = DrataClient::new(Backend::Drata, "test-key".to_string(), Some("us"), false)
         .unwrap()
         .with_base_url(server.uri());
 
