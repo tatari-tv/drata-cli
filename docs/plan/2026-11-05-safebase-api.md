@@ -84,9 +84,11 @@ drata safebase raw <METHOD> <path> -> Backend::Safebase
 
 | Op | Request | Items | Stop |
 |---|---|---|---|
-| `GET /accounts` | `pageNumber`, `pageSize` (max 100) | `result[]` | `pageNumber >= pagination.totalPages` |
-| `GET /documents` | `page`, `limit` | `result.documents[]` | collected `>= result.count` |
-| `GET /kb/search` | `pageNumber`, `pageSize` | `result.items[]` | collected `>= result.count` |
+| `GET /accounts` | `pageNumber` (from 1), `pageSize` (max 1000) | `result[]` | `pageNumber >= pagination.totalPages` |
+| `GET /documents` | `page` (from 0), `limit` (max 100) | `result.documents[]` | collected `>= result.count` |
+| `GET /kb/search` | `pageNumber` (from 1), `pageSize` (max 1000) | `result.items[]` | `pageNumber >= pagination.totalPages` |
+
+Amended after Phase 0 Observed: `/documents` is zero-based, and `/kb/search` `result.count` counts one page only.
 
   - list commands fetch every page by default; `--all` switches output to NDJSON streaming. Same contract as the Drata lists (`src/resources/vendor.rs:147-151`)
   - errors, never empty success or silent truncation:
@@ -116,7 +118,7 @@ drata safebase raw <METHOD> <path> -> Backend::Safebase
       - never retries the PUT on its own
   - step 2 uses the API client's timeout and no retry. 429 on the presigned host is an error like any other
   - `--replace`: Phase 0 observes which fields (tags, products, expiry, type, usedForAi) survive a replacement; the verb's help text states the observed behavior
-  - Phase 0 records the signed URL's method and required headers; the spec text says POST and is not trusted until observed
+  - the signed URL takes PUT (Phase 0 Observed); the spec text says POST and is wrong
 
 ### Data Model
 
@@ -143,7 +145,7 @@ drata safebase raw <METHOD> <path> -> Backend::Safebase
   - `drata login` replaces only the `drata` block; `drata safebase login` replaces only the `safebase` block
   - `drata logout` removes only the `drata` block; `drata safebase logout` removes only the `safebase` block; a profile left with no block is removed
   - mode 0600, atomic write, unchanged
-- Env vars: `SAFEBASE_API_KEY` (matches the keep secret name `safebase-api-key.age`). `DRATA_API_KEY`, `DRATA_REGION`, `DRATA_PROFILE` unchanged. `DRATA_PROFILE` selects the profile for both backends
+- Env vars: `SAFEBASE_API_KEY` (one per backend, same as `DRATA_API_KEY`; keep holds `safebase-readonly-api-key.age` and `safebase-readwrite-api-key.age`, see Phase 0 Observed). `DRATA_API_KEY`, `DRATA_REGION`, `DRATA_PROFILE` unchanged. `DRATA_PROFILE` selects the profile for both backends
 - Key precedence per backend: `--api-key` > env var > profile > error naming the backend and profile
 - A profile with no block for the command's backend is that same error, never a fallback to the other backend's key
 - Write flag per backend, same rule as today (`src/config.rs:281-288`): `--allow-writes` OR the profile block's `allow-writes`, and the profile flag counts only when the key came from that profile. A key from `--api-key` or `SAFEBASE_API_KEY` is read-only unless `--allow-writes` is passed
@@ -205,6 +207,39 @@ drata safebase kb search [<query>] [--all] | add --data <json> | update <id> --d
   - `curl -s -o /dev/null -w '%{http_code}' -H "x-sb-api-key: $SAFEBASE_API_KEY" https://app.safebase.io/api/ext/v1/rest/organizations` prints `200`
   - `Observed` holds: signed-URL method and headers, max honored page sizes, fields kept on replace
   - `GET /document/{id}` after the DELETE returns 404
+
+##### Observed (2026-11-07, Tatari tenant, plan `business`)
+
+Keys: Scott minted two, `keep/.env/safebase-readonly-api-key.age` and `keep/.env/safebase-readwrite-api-key.age`. SafeBase enforces scopes server side.
+
+- `GET /organizations` with the read-only key: `200`, `{"ok":true,"result":{"id":"dccaf15d-...","name":"Tatari","primaryDomain":"tatari.tv","spCustomDomain":"trust.tatari.tv","plan":"business",...}}`
+- Read-only key on `PATCH /document/{id}` and `POST /documents/upload`: `403 {"statusCode":403,"cause":"forbidden","name":"ApiError","message":"Missing required scope(s): documents:edit.","error":"forbidden"}`
+- Bad key: `400 {"statusCode":400,"cause":"bad_request","name":"ApiError","message":"Invalid API key.","error":"bad_request"}` (400, not 401)
+- Validation error: `400 {"statusCode":400,...,"message":"Invalid request: [ValidationError: \"limit\" must be less than or equal to 100]","error":"bad_request"}`. Path ids are Joi GUIDs: the nil UUID gets `"id" must be a valid GUID`
+- Not found: `404 {"statusCode":404,"cause":"not_found","name":"ApiError","message":"Not found","error":"not_found"}`
+- Rate-limit headers: none on any response (no `x-ratelimit-*`, `ratelimit-*`, `retry-after`)
+- Redirect check on `/organizations`: `200 []`, no redirect
+- Pagination:
+  - `GET /accounts?pageNumber=N&pageSize=1`: pages 1 and 2 differ. Shape `{"ok":true,"result":[...],"pagination":{"pageNumber":1,"pageSize":1,"totalCount":3,"totalPages":3,"maxPages":500,"maxSize":1000}}`. `pageSize` max 1000 (1001 -> 400). `pageNumber` min 1 (0 -> 400). Without `pageNumber`, `totalPages` is `null`
+  - `GET /documents?page=N&limit=1`: pages differ. `page` is ZERO-based: `page=0&limit=10` -> 10 items, `page=1` -> 10, `page=2` -> 3, `page=3` -> 0, `count` 23 throughout. `limit` max 100 (500 -> 400), default 20. No `pagination` object: `{"ok":true,"result":{"documents":[...],"count":23}}`. `checksum` is the file's md5b64
+  - `GET /kb/search?pageNumber=N&pageSize=1`: pages differ. `result.count` is the item count of THIS page: `pageSize=1` -> `"count":1` with `pagination.totalCount` 7. Shape `{"ok":true,"result":{"items":[...],"count":1},"pagination":{"pageNumber":1,"pageSize":1,"totalCount":7,"totalPages":7,"maxPages":500,"maxSize":1000}}`. `pageSize` max 1000, `pageNumber` min 1, past the end (`pageNumber=8`) -> 0 items
+- Largest honored page size: `/accounts` 1000, `/documents` 100, `/kb/search` 1000
+- Upload round trip (`zzz-clitest-1.pdf`, 552 bytes, `aiOptOut: true`):
+  - step 1 `POST /documents/upload` -> `{"ok":true,"result":{"fileId":"...","signedUrl":"https://temp-org-storage.safebase.io/<org>/documents/<fileId>?X-Goog-Algorithm=...&X-Goog-Expires=900&X-Goog-SignedHeaders=content-md5;content-type;host;x-goog-content-length-range;x-goog-meta-original-name&...","headers":{"content-type":"application/pdf","content-md5":"<md5b64>","x-goog-content-length-range":"0,552","x-goog-meta-original-name":"zzz-clitest-1.pdf"}}}`
+  - step 2: the signed URL takes **PUT** with exactly the returned headers -> `200`, empty body. GCS V4 signed URL, valid 900 s. The spec text's POST is wrong
+  - step 3 `PUT /documents/upload` -> `200 {"ok":true,"result":{"id":"...","externalId":"<uuid>","checksum":"<md5b64>","size":552,"uploadStatus":"pending",...}}`; `uploadStatus` reads `complete` seconds later
+- `GET /document/<externalId>?type=external` -> `200`, the same document. `result.checksum` equals the uploaded `md5b64`; `result.size` equals the byte count. A non-UUID external id (`drata_policy:64`, which exists) returns 404
+- Replace (`PATCH` sets `type`, `expiresAt`, `productIds:["default"]`, `aiOptOut`, then upload `zzz-clitest-2.pdf` with `replacementDocumentId`): the document keeps its `id`. `name`, `externalId`, `checksum`, `size` take the new values. `type`, `expiresAt`, `aiOptOut`, `products` survive. Tags untested: the tenant has none (`GET /tags` -> `{"items":[],"count":0}`)
+- Cleanup: `DELETE /document/{id}` -> `200 {"ok":true}`; `GET /document/{id}` -> `404`; the old external id -> `404`; `/documents` back to 23 with no `zzz` names
+- Read-only keys: yes, SafeBase mints keys without write scopes (the 403 above)
+- `PATCH /document/{id}` success body is `{"ok":true}`, matching the spec
+
+Folded into later phases:
+- `/kb/search` stops on `pageNumber >= pagination.totalPages`, not on `result.count`
+- `/documents` sends `page` from 0 and `limit` 100
+- `/accounts` always sends `pageNumber`, with `pageSize` 1000
+- Upload step 2 uses PUT
+- `SAFEBASE_API_KEY` stays the CLI's env var. The keep files are `safebase-readonly-api-key` and `safebase-readwrite-api-key`, so the name no longer matches a keep file
 
 #### Phase 1: Backend seam
 **Model:** opus
