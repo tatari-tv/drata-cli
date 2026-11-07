@@ -82,10 +82,10 @@ pub enum SafebaseAccountAction {
 
 #[derive(Subcommand, Debug)]
 pub enum SafebaseMemberAction {
-    /// List account members, optionally filtered
+    /// List the members with an email, optionally within one Salesforce account
     List {
-        /// Only members with this email
-        #[arg(long)]
+        /// Members with this email (SafeBase requires it, observed 2026-11-07)
+        #[arg(long, required = true)]
         email: Option<String>,
         /// Only members of the account with this Salesforce account id
         #[arg(long)]

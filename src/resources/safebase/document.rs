@@ -49,9 +49,15 @@ fn list_path(query: Option<&str>) -> String {
 }
 
 /// `GET /document/{id}` path; `external` adds the spec's `type=external`
-/// lookup (`type` defaults to `document`). Pure.
+/// lookup (`type` defaults to `document`). A UUID external id is sent in the
+/// lowercase hyphenated form `upload --external-id` stores, so the lookup
+/// matches whatever case was typed. Pure.
 fn get_path(id: &str, external: bool) -> String {
-    let mut q = QueryPath::new(format!("/document/{}", encode_path_segment(id)));
+    let id = match uuid::Uuid::parse_str(id) {
+        Ok(u) if external => u.hyphenated().to_string(),
+        _ => id.to_string(),
+    };
+    let mut q = QueryPath::new(format!("/document/{}", encode_path_segment(&id)));
     if external {
         q.push("type", "external");
     }
@@ -73,5 +79,16 @@ mod tests {
         assert_eq!(get_path("d1", false), "/document/d1");
         assert_eq!(get_path("d1", true), "/document/d1?type=external");
         assert_eq!(get_path("a/b", false), "/document/a%2Fb");
+    }
+
+    #[test]
+    fn get_path_lowercases_a_uuid_external_id_only() {
+        let upper = "7E3B1C2A-9D4F-4A6B-8C1D-2E3F4A5B6C7D";
+        assert_eq!(
+            get_path(upper, true),
+            "/document/7e3b1c2a-9d4f-4a6b-8c1d-2e3f4a5b6c7d?type=external"
+        );
+        assert_eq!(get_path(upper, false), format!("/document/{upper}"));
+        assert_eq!(get_path("Not-A-Uuid", true), "/document/Not-A-Uuid?type=external");
     }
 }

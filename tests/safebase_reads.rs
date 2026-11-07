@@ -178,7 +178,7 @@ async fn member_list_sends_both_filters_and_renders_rows() {
 }
 
 #[tokio::test]
-async fn member_list_without_filters_sends_no_query() {
+async fn member_list_with_only_email_sends_only_email() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/accounts/members"))
@@ -188,9 +188,24 @@ async fn member_list_without_filters_sends_no_query() {
         .mount(&server)
         .await;
 
-    let (reply, _) = run(&server, &["member", "list"]).await.expect("list ok");
+    let (reply, _) = run(&server, &["member", "list", "--email", "l@x.co"])
+        .await
+        .expect("list ok");
     assert!(table_of(&reply).contains("Legacy Name"));
-    assert_eq!(only_request(&server).await.url.query(), None);
+    assert_eq!(only_request(&server).await.url.query(), Some("email=l@x.co"));
+}
+
+#[test]
+fn member_list_without_email_is_rejected_before_any_request() {
+    // SafeBase answers 400 `"email" is required` (shakedown v0.3.0), so the
+    // CLI requires it rather than send a request that cannot succeed.
+    for argv in [
+        vec!["drata", "safebase", "member", "list"],
+        vec!["drata", "safebase", "member", "list", "--sfdc-account-id", "001XX"],
+    ] {
+        let err = Cli::try_parse_from(&argv).expect_err("email is required");
+        assert!(err.to_string().contains("--email"), "{err}");
+    }
 }
 
 #[tokio::test]
@@ -402,7 +417,7 @@ async fn request_list_without_result_is_an_error() {
 
 #[tokio::test]
 async fn member_list_without_result_is_an_error() {
-    list_without_result_is_an_error("/accounts/members", &["member", "list"]).await;
+    list_without_result_is_an_error("/accounts/members", &["member", "list", "--email", "a@b.co"]).await;
 }
 
 #[tokio::test]
@@ -414,7 +429,7 @@ async fn member_list_with_an_object_result_is_an_error() {
         .mount(&server)
         .await;
 
-    let err = run(&server, &["member", "list"])
+    let err = run(&server, &["member", "list", "--email", "a@b.co"])
         .await
         .expect_err("one object is not a list");
     assert!(err.to_string().contains("no `result` array"), "{err}");
