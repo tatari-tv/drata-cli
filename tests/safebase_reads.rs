@@ -6,7 +6,8 @@ use clap::Parser;
 use drata_cli::backend::Backend;
 use drata_cli::cli::{Cli, Commands};
 use drata_cli::client::DrataClient;
-use drata_cli::resources::safebase::{Reply, fetch};
+use drata_cli::confirm::always_no;
+use drata_cli::resources::safebase::{Reply, execute};
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -30,7 +31,7 @@ async fn run(server: &MockServer, argv: &[&str]) -> eyre::Result<(Reply, String)
         panic!("not a safebase command");
     };
     let mut sink = Vec::new();
-    let reply = fetch(&action, &client(server), &mut sink).await?;
+    let reply = execute(&action, &client(server), &always_no(), &mut sink).await?;
     Ok((reply, String::from_utf8(sink).expect("utf8")))
 }
 

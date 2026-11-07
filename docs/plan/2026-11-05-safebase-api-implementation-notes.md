@@ -136,3 +136,40 @@ Design doc: `docs/plan/2026-11-05-safebase-api.md`
 
 ### Open questions
 - None.
+
+## Phase 6: Curated SafeBase writes
+
+### Design decisions
+- Verbs map to ops, every path and body field checked against `spec/safebase-openapi-v1.json`: `document upload` `POST` then `PUT /documents/upload`; `request approve` `POST /requests/{requestId}/approve` `{accountId}`; `request decline` `POST /requests/{requestId}/decline` (`{}` or `{message}`); `member add` `POST /accounts/{id}/members` `{members: [{email, firstName, lastName}], message?}`; `member remove` `DELETE /accounts/{id}/members` `{members: [emails]}`; `kb add` `POST /kb/entries`; `kb update` `PATCH /kb/entries/{id}`
+- `--notify` sends `message: true`: the spec's `message` is `oneOf string | boolean`, and `true` is its "email with no custom message". Shared `EmailNotice` clap args (`--message` conflicts with `--notify`) and one pure mapper, `resources::safebase::notice_message`
+- `resources::safebase::fetch` became `execute(action, client, confirm, stream)` and `handle` takes the `ConfirmFn`: the entry now routes writes too, so the old name lied. Every write calls `confirmed(confirm, method, path)` before its request; the client's write guard is unchanged and covers every verb
+- Upload lives in `src/resources/safebase/document/upload.rs`. A typed `UploadError` (`Request | Send | Create | Unknown`) carries `fileId` / `externalId` in its message, so main's error print shows them; tests downcast to the variant
+- The size bound (`fileSize.maximum`) and the MIME enum are read from the embedded SafeBase spec (`upload::upload_limits`), not copied into the code. Size is checked on file metadata before the file is read, so an oversized file is never loaded, then re-checked on the bytes
+- MIME type: the first `mime_guess` guess for the extension that is in the spec enum (`upload::pick_mime`). No guess in the enum (or no extension) fails before any request, naming the guesses and the allowed list
+- `--external-id` is parsed with `Uuid::parse_str` and sent in lowercase hyphenated form; the lookup uses the same string. Default is a fresh v4
+- Step 3 is sent with a new `DrataClient::put_once` (`Retry429::Never`), so not even a 429 resends the PUT. Step 1 keeps the normal `post`
+- "Outcome open" (`upload::outcome_is_open`): a `reqwest::Error` anywhere in the step 3 error chain that is not a connect or builder error (timeout, dropped connection, unreadable 2xx body). An `ApiError`, `EnvelopeError` or write-guard error is SafeBase's own answer or no send at all, so it is definite and skips the lookup. A connect failure never sent the request, also definite
+- The lookup is `try_get(document::get_path(externalId, true))`: found AND `size` equals the local byte count AND `checksum` equals the local md5b64 -> `Reply::Warned` (warning on stderr, document printed, exit 0). A 404, a mismatch, or a failed lookup -> `UploadError::Unknown` (`outcome unknown`, with `fileId` and `externalId`)
+- New `Reply::Warned { warning, table, row }` keeps the found-after-timeout warning testable as data; `handle` prints it to stderr
+- One confirm for the whole upload (`POST /documents/upload (then the signed URL, then PUT /documents/upload)`), not one per step, like `drata upload-url create --file`
+- Step 1 failure errors never echo the response body: it can hold the signed URL, whose query is a credential
+- `DrataClient::with_timeout` (pub, like `with_base_url`) rebuilds the HTTP client with the backend's redirect policy; the step 3 timeout tests use 300 ms against a 5 s wiremock delay
+- Fixture `tests/fixtures/zzz-clitest.pdf` (134 bytes); its md5b64 `/nZ6d/ougolRF+QdP/1xsw==` came from `openssl dgst -md5 -binary tests/fixtures/zzz-clitest.pdf | base64` and is hard-coded in `tests/safebase_writes.rs` with the command cited
+- `tests/coverage.rs` `CURATED` gains the 8 write ops (17 total)
+- Break-to-prove, each run once and reverted: SafeBase key added to the signed-URL headers; `replacementDocumentId` dropped; a second PUT on timeout; size ignored in the match; timeout classified definite; size check loosened; md5 base64 URL-safe alphabet; `--notify` mapped to no message; approve field renamed; member add always sending `message`; confirm skipped. Every one failed its test
+
+### Deviations
+- Step 2 uses `put_presigned` as is, whose own bound is `PRESIGNED_TIMEOUT_SECS` (300 s), not the API client's 30 s the doc names. Reusing the shared transport was the stated requirement, its doc says the longer bound exists because the body is a whole file, and at 30 s a 75 MiB upload needs 2.6 MB/s. No retry and no redirects, as the doc says; a 429 there is a plain `PresignedError`
+- `UploadArgs.doc_type` is the field behind `--type` (`type` is a Rust keyword)
+- `--replace` is not checked as a UUID locally (only `--external-id` is, because the doc requires it); SafeBase validates it
+- Step 1 errors are wrapped in `UploadError::Request`, so a write-guard refusal on upload surfaces as text (`write blocked ...`) inside that error rather than as a bare `WriteGuardError`. The other write verbs return the bare `WriteGuardError`
+
+### Tradeoffs
+- Reading the size and MIME bounds from the spec vs constants: the spec is the contract and the coverage tripwire already watches it; a missing pointer fails loudly
+- Treating a connect error on step 3 as definite vs looking it up: a connect failure never sent the PUT, so "outcome unknown" would be untrue
+- `--external-id` canonicalized to lowercase hyphenated vs sent verbatim: one form for the store and the lookup; the help text says so
+- Member remove passes duplicate emails through to SafeBase (`uniqueItems`, which rejects them) vs deduping locally: no silent rewrite of what the user typed
+
+### Open questions
+- Step 2 timeout: keep the presigned transport's 300 s bound (current), or pass the API client's 30 s as the doc literally says?
+- Tags across `--replace` remain untested (Phase 0 had no tags); the help text says so. Worth a shakedown check once the tenant has a tag?

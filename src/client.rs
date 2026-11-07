@@ -264,6 +264,18 @@ impl DrataClient {
         self
     }
 
+    /// Replace the request timeout (default `REQUEST_TIMEOUT_SECS`), rebuilding
+    /// the HTTP client with the backend's redirect policy. A test seam: a
+    /// timed-out request is otherwise a 30 s wait.
+    pub fn with_timeout(mut self, timeout: Duration) -> Result<Self> {
+        self.http = Client::builder()
+            .timeout(timeout)
+            .redirect(self.backend.redirect_policy())
+            .build()
+            .context("Failed to build HTTP client")?;
+        Ok(self)
+    }
+
     /// Override the page pacing interval. A test seam: a long interval makes
     /// pacing measurable over local request latency.
     #[cfg(test)]
@@ -518,6 +530,14 @@ impl DrataClient {
     #[instrument(skip(self, body))]
     pub async fn put(&self, path: &str, body: Value) -> Result<Value> {
         self.send_inner(Method::PUT, path, Some(body), Retry429::Default).await
+    }
+
+    /// PUT sent exactly once: a 429 comes back as an `ApiError` instead of
+    /// being retried. For a create whose resend could make a second resource
+    /// (SafeBase `PUT /documents/upload`).
+    #[instrument(skip(self, body))]
+    pub async fn put_once(&self, path: &str, body: Value) -> Result<Value> {
+        self.send_inner(Method::PUT, path, Some(body), Retry429::Never).await
     }
 
     #[instrument(skip(self, body))]

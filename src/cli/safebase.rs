@@ -1,7 +1,20 @@
 //! clap types for `drata safebase`, the SafeBase Trust Center API namespace.
 
 use super::RawArgs;
-use clap::{Subcommand, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
+use std::path::PathBuf;
+
+/// SafeBase's email on a member add or a request decline is opt-in. Neither
+/// flag omits `message` from the body, so SafeBase sends no email.
+#[derive(Args, Debug, Clone, Default)]
+pub struct EmailNotice {
+    /// Send SafeBase's email with this custom message
+    #[arg(long, conflicts_with = "notify")]
+    pub message: Option<String>,
+    /// Send SafeBase's email with no custom message
+    #[arg(long)]
+    pub notify: bool,
+}
 
 #[derive(Subcommand, Debug)]
 pub enum SafebaseAction {
@@ -78,6 +91,30 @@ pub enum SafebaseMemberAction {
         #[arg(long)]
         sfdc_account_id: Option<String>,
     },
+    /// Add one member (with names) to an account. Bulk adds go through raw
+    Add {
+        /// Account id (UUID)
+        account_id: String,
+        /// Member email
+        #[arg(long)]
+        email: String,
+        /// Member first name
+        #[arg(long)]
+        first_name: String,
+        /// Member last name
+        #[arg(long)]
+        last_name: String,
+        #[command(flatten)]
+        notice: EmailNotice,
+    },
+    /// Remove members from an account by email
+    Remove {
+        /// Account id (UUID)
+        account_id: String,
+        /// Emails of the members to remove (space-separated or repeated)
+        #[arg(long, required = true, num_args = 1..)]
+        email: Vec<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -101,6 +138,32 @@ pub enum SafebaseDocumentAction {
     },
     /// List the document types
     Types,
+    /// Upload a file as a document: request an upload, send the bytes to
+    /// SafeBase's signed URL, then create (or replace) the document
+    Upload(UploadArgs),
+}
+
+/// `drata safebase document upload`.
+#[derive(Args, Debug)]
+pub struct UploadArgs {
+    /// File to upload (at most 75 MiB; its type must be one SafeBase accepts)
+    pub file: PathBuf,
+    /// Document name shown in the trust center
+    #[arg(long)]
+    pub name: String,
+    /// Document type (see `drata safebase document types`)
+    #[arg(long = "type")]
+    pub doc_type: Option<String>,
+    /// Replace the file of this existing document (document id). Observed
+    /// 2026-11-07: the document keeps its id; name, externalId, checksum and
+    /// size take the new values; type, expiresAt, aiOptOut and products
+    /// survive; tags untested
+    #[arg(long)]
+    pub replace: Option<String>,
+    /// External id to store on the document (a UUID; default: a fresh v4).
+    /// Sent in lowercase hyphenated form; `document get --external` finds it
+    #[arg(long)]
+    pub external_id: Option<String>,
 }
 
 /// Access request status filter for `request list` (spec `status` enum).
@@ -120,6 +183,22 @@ pub enum SafebaseRequestAction {
         #[arg(long, value_enum)]
         status: Option<SafebaseRequestStatus>,
     },
+    /// Approve an access request into an existing account. Approving into a
+    /// new account goes through raw
+    Approve {
+        /// Request id (UUID)
+        request_id: String,
+        /// Account to grant access through (UUID; see `account list`)
+        #[arg(long)]
+        account_id: String,
+    },
+    /// Decline an access request
+    Decline {
+        /// Request id (UUID)
+        request_id: String,
+        #[command(flatten)]
+        notice: EmailNotice,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -131,5 +210,21 @@ pub enum SafebaseKbAction {
         /// Stream every entry as NDJSON, one per line
         #[arg(long)]
         all: bool,
+    },
+    /// Add a knowledge base entry (`question` required; `answer`, `comment`,
+    /// `accessLevel` optional)
+    Add {
+        /// Entry JSON: inline, @file, or - for stdin
+        #[arg(long)]
+        data: String,
+    },
+    /// Update a knowledge base entry (fields to change; null clears
+    /// `answer` / `comment`)
+    Update {
+        /// KB entry id
+        id: String,
+        /// Fields JSON: inline, @file, or - for stdin
+        #[arg(long)]
+        data: String,
     },
 }

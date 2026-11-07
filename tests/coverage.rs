@@ -98,10 +98,12 @@ fn every_safebase_operation_is_reachable_through_raw() {
     );
 }
 
-/// The SafeBase ops the curated `drata safebase` reads reach, one per verb
-/// (`tests/safebase_reads.rs` sends each and asserts it on the wire):
-/// `account list|get|url`, `member list`, `document list|get|types`,
-/// `request list`, `kb search`.
+/// The SafeBase ops the curated `drata safebase` verbs reach, one per verb
+/// (`tests/safebase_reads.rs` and `tests/safebase_writes.rs` send each and
+/// assert it on the wire): reads `account list|get|url`, `member list`,
+/// `document list|get|types`, `request list`, `kb search`; writes `document
+/// upload` (POST then PUT `/documents/upload`), `request approve|decline`,
+/// `member add|remove`, `kb add|update`.
 const CURATED: &[(&str, &str)] = &[
     ("GET", "/accounts"),
     ("GET", "/accounts/{id}"),
@@ -112,6 +114,14 @@ const CURATED: &[(&str, &str)] = &[
     ("GET", "/document-types"),
     ("GET", "/requests"),
     ("GET", "/kb/search"),
+    ("POST", "/documents/upload"),
+    ("PUT", "/documents/upload"),
+    ("POST", "/requests/{requestId}/approve"),
+    ("POST", "/requests/{requestId}/decline"),
+    ("POST", "/accounts/{id}/members"),
+    ("DELETE", "/accounts/{id}/members"),
+    ("POST", "/kb/entries"),
+    ("PATCH", "/kb/entries/{id}"),
 ];
 
 #[test]

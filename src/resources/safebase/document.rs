@@ -1,16 +1,24 @@
-//! `drata safebase document list | get | types`.
+//! `drata safebase document list | get | types | upload`.
 
 use super::{Reply, items_at, list_pages, reply_from};
 use crate::cli::SafebaseDocumentAction;
 use crate::client::{DrataClient, encode_path_segment, pages::DOCUMENTS};
+use crate::confirm::ConfirmFn;
 use crate::output::Table;
 use crate::query::QueryPath;
 use eyre::Result;
 use std::io::Write;
 use tracing::{debug, instrument};
 
-#[instrument(skip(client, stream))]
-pub async fn fetch<W: Write>(action: &SafebaseDocumentAction, client: &DrataClient, stream: &mut W) -> Result<Reply> {
+pub mod upload;
+
+#[instrument(skip(client, confirm, stream))]
+pub async fn execute<W: Write>(
+    action: &SafebaseDocumentAction,
+    client: &DrataClient,
+    confirm: &ConfirmFn,
+    stream: &mut W,
+) -> Result<Reply> {
     match action {
         SafebaseDocumentAction::List { all, query } => {
             let path = list_path(query.as_deref());
@@ -29,6 +37,7 @@ pub async fn fetch<W: Write>(action: &SafebaseDocumentAction, client: &DrataClie
                 rows: items_at(&resp, "/items", "document types")?.clone(),
             })
         }
+        SafebaseDocumentAction::Upload(args) => upload::run(args, client, confirm).await,
     }
 }
 

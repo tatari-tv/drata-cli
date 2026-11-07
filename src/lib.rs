@@ -337,7 +337,7 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
                 | SafebaseAction::Request { .. }
                 | SafebaseAction::Kb { .. }),
         } => {
-            resources::safebase::handle(action, client, config).await?;
+            resources::safebase::handle(action, client, config, confirm).await?;
         }
         Commands::Login { .. }
         | Commands::Logout
