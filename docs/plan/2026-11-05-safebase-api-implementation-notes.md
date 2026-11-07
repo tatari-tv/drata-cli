@@ -83,3 +83,30 @@ Design doc: `docs/plan/2026-11-05-safebase-api.md`
 
 ### Open questions
 - Should `--example` skeletons include optional fields (commented or as nulls) so `PATCH /document/{id}` shows its fields? It applies to Drata too, so it is a separate change
+
+## Phase 4: Page-number pagination
+
+### Design decisions
+- One descriptor type, `PagedOp`, with three consts `ACCOUNTS`, `DOCUMENTS`, `KB_SEARCH` (`src/client/pages.rs`). Fields: path, page param + first page (1 or 0), size param + page size (1000 / 100 / 1000, Phase 0's maximums), JSON pointer to the items, `Stop::TotalPages(ptr)` or `Stop::Count(ptr)`, `max_pages` and a `cap_source` string for the error
+- Every page is validated by a pure `PagedOp::check` before any of its items reach the sink, so the rules are unit-testable without a server and a bad page under NDJSON streaming writes none of its own items; earlier pages' lines stay written
+- Two entries mirror the cursor path: `DrataClient::get_all_pages(op, path)` (collect, the list default) and `stream_all_pages(op, path, writer)` (NDJSON, the `--all` mode), both over one loop, `drain_numbered_pages`. Phase 5 calls these the way `vendor list` calls `get_all` / `stream_all`
+- Errors are a typed `PageError` enum (`BadField`, `EmptyPage`, `RepeatedPage`, `CountExceeded`, `PastLastPage`, `PageCap`). Each message names the path and the request's `param=value` (`pageNumber=2`, `page=1`), so zero-based `/documents` reports the number actually sent. Tests downcast to the variant as well as checking the text
+- A request failure (HTTP error, envelope error) mid-listing is wrapped with `<path> failed at <param>=<n> after <k> items`; the inner `ApiError` / `EnvelopeError` still downcasts
+- `/accounts` checks `totalPages` against its 500 cap on every page, so `totalPages: 501` fails on page 1 in one request instead of after 500 pages of work. The loop also refuses to request page index `>= max_pages`, which is the hard cap for `/documents` (count-based, no total pages to check up front) and `/kb/search`. `DOCUMENTS` and `KB_SEARCH` use `client.rs`'s `MAX_PAGES` (child module reads the private const)
+- `totalPages: 0` or `count: 0` with an empty first page is empty success. Items on a page past `totalPages` (including `totalPages: 0` with items) is `PastLastPage`; items past `count` is `CountExceeded`
+- The loop refuses a non-SafeBase client and a `path` whose route differs from `op.path`: a descriptor applied to the wrong op fails loudly
+- Pages are paced with the client's existing `page_interval` (150 ms), same as the cursor loop
+- Break-to-prove: each guard (spec-bound cap, loop cap, off-by-one on the cap, empty page, repeated page, count exceeded, past last page, bad stop field, page label on a mid-stream failure) was disabled once and its test failed
+
+### Deviations
+- The doc's "page 501" rule is enforced from the server's reported `totalPages` (> 500 fails on the first page) and by the loop cap; no request for page 501 is ever sent. Same effect, earlier
+- No `limit` variant (Drata has `get_all_limited`): no Phase 5 SafeBase verb takes `--limit`
+- No CLI commands in this phase, per the phase scope; the `--all` NDJSON mode is the `stream_all_pages` entry Phase 5 wires up
+
+### Tradeoffs
+- Pacing SafeBase pages at 150 ms vs no pacing: SafeBase documents no limit and Phase 0 saw no rate-limit headers, but pacing cannot trip an unknown limit and costs little next to request latency. Tests set the interval to zero
+- Comparing a page's items to the previous page's (whole-`Value` equality) vs tracking every seen item id: matches the doc's rule exactly, needs no per-op id field, and a server echoing an older page still ends at the stop rule or the cap
+- Hard cap tested with a copy of `DOCUMENTS` capped at 2 pages, not 10,000 wiremock requests; a separate test pins `DOCUMENTS` / `KB_SEARCH` to `MAX_PAGES` and `ACCOUNTS` to 500
+
+### Open questions
+- None.

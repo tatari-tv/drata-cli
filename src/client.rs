@@ -19,6 +19,8 @@
 //!   and instrumentation machinery.
 //! - **NDJSON streaming.** `stream_all` drains cursor-paginated results,
 //!   writing one JSON object per line to a `Write` impl instead of buffering.
+//! - **Page-number pagination (SafeBase).** `pages` drives SafeBase's three
+//!   paged list ops from a per-op descriptor; the cursor loop here is Drata's.
 //! - **SafeBase envelope.** A SafeBase 2xx must carry `{"ok": true, ...}`; a
 //!   2xx with `ok: false` or no boolean `ok` is an `EnvelopeError` carrying
 //!   the body. The response is returned whole: callers read `result` only
@@ -812,6 +814,7 @@ fn agent_guidance(parsed: &Value) -> String {
     out
 }
 
+pub mod pages;
 pub mod presigned;
 
 #[cfg(test)]
