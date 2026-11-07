@@ -174,9 +174,14 @@ const PAGINATION_SIZE: u32 = 500;
 const MAX_RETRY_ATTEMPTS: u32 = 3;
 const DEFAULT_RETRY_DELAY_SECS: u64 = 5;
 /// Upper bound on a server-provided `Retry-After`. A hostile or buggy server
-/// could otherwise stall the CLI for minutes/hours despite bounded attempts.
-const MAX_RETRY_DELAY_SECS: u64 = 60;
+/// could otherwise stall the CLI for hours despite bounded attempts. 60s was too
+/// low: the v0.2.0 shakedown saw Drata's edge send `Retry-After: 162`, so every
+/// capped retry landed inside the block and all three attempts were wasted.
+const MAX_RETRY_DELAY_SECS: u64 = 300;
 const REQUEST_TIMEOUT_SECS: u64 = 30;
+/// Minimum spacing between page requests in one cursor drain: 400/min, under
+/// Drata's 500/min per-IP limit with room for other calls.
+const MIN_PAGE_INTERVAL: Duration = Duration::from_millis(150);
 /// Hard cap on pages drained by cursor pagination, so a server that never
 /// returns a null cursor cannot loop forever. At `PAGINATION_SIZE` this is 5M items.
 const MAX_PAGES: u32 = 10_000;
@@ -218,6 +223,8 @@ pub struct DrataClient {
     /// Whether the resolved credential is write-enabled. When false, every
     /// non-GET request fails closed via the write guardrail.
     allow_writes: bool,
+    /// Minimum spacing between page requests in one cursor drain.
+    page_interval: Duration,
 }
 
 impl DrataClient {
@@ -238,12 +245,21 @@ impl DrataClient {
             base_url: base_url.to_string(),
             api_key,
             allow_writes,
+            page_interval: MIN_PAGE_INTERVAL,
         })
     }
 
     /// Override the base URL. The wiremock test seam.
     pub fn with_base_url(mut self, url: String) -> Self {
         self.base_url = url;
+        self
+    }
+
+    /// Override the page pacing interval. A test seam: a long interval makes
+    /// pacing measurable over local request latency.
+    #[cfg(test)]
+    pub(crate) fn with_page_interval(mut self, interval: Duration) -> Self {
+        self.page_interval = interval;
         self
     }
 
@@ -292,13 +308,8 @@ impl DrataClient {
                 if attempts > MAX_RETRY_ATTEMPTS {
                     bail!("Rate limited after {} attempts", MAX_RETRY_ATTEMPTS);
                 }
-                let delay = resp
-                    .headers()
-                    .get("Retry-After")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(DEFAULT_RETRY_DELAY_SECS)
-                    .min(MAX_RETRY_DELAY_SECS);
+                let delay = retry_delay(resp.headers().get("Retry-After").and_then(|v| v.to_str().ok()));
+                announce_retry(delay, attempts);
                 warn!(delay, attempts, max = MAX_RETRY_ATTEMPTS, "rate limited, retrying");
                 sleep(Duration::from_secs(delay)).await;
                 continue;
@@ -408,13 +419,8 @@ impl DrataClient {
                 if attempts > MAX_RETRY_ATTEMPTS {
                     bail!("Rate limited after {} attempts (multipart)", MAX_RETRY_ATTEMPTS);
                 }
-                let delay = resp
-                    .headers()
-                    .get("Retry-After")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(DEFAULT_RETRY_DELAY_SECS)
-                    .min(MAX_RETRY_DELAY_SECS);
+                let delay = retry_delay(resp.headers().get("Retry-After").and_then(|v| v.to_str().ok()));
+                announce_retry(delay, attempts);
                 warn!(
                     delay,
                     attempts,
@@ -522,18 +528,76 @@ impl DrataClient {
     /// Paginate through all results for a Drata v2 cursor-paginated list
     /// endpoint. `path` may already carry query parameters. Accumulates the
     /// `data[]` array; stops when `pagination.cursor` is null.
+    #[instrument(skip(self))]
+    pub async fn get_all(&self, path: &str) -> Result<Vec<Value>> {
+        self.get_all_limited(path, None).await
+    }
+
+    /// `get_all`, stopping once `limit` items are collected.
+    #[instrument(skip(self))]
+    pub async fn get_all_limited(&self, path: &str, limit: Option<usize>) -> Result<Vec<Value>> {
+        let mut all = Vec::new();
+        let (items, pages) = self
+            .drain_pages(path, limit, |item| {
+                all.push(item.clone());
+                Ok(())
+            })
+            .await?;
+        debug!(total = items, pages, "cursor pagination complete");
+        Ok(all)
+    }
+
+    /// Stream all results from a cursor-paginated list endpoint as NDJSON.
+    /// Writes one JSON object per line to `writer` instead of buffering an
+    /// unbounded `Vec<Value>`. This is the `--all` path for large tenants.
+    #[instrument(skip(self, writer))]
+    pub async fn stream_all<W: Write>(&self, path: &str, writer: &mut W) -> Result<u64> {
+        self.stream_all_limited(path, None, writer).await
+    }
+
+    /// `stream_all`, stopping once `limit` items are written.
+    #[instrument(skip(self, writer))]
+    pub async fn stream_all_limited<W: Write>(&self, path: &str, limit: Option<usize>, writer: &mut W) -> Result<u64> {
+        let (items, pages) = self
+            .drain_pages(path, limit, |item| {
+                let line = serde_json::to_string(item).context("Failed to serialize item as NDJSON")?;
+                writeln!(writer, "{}", line).context("Failed to write NDJSON line")?;
+                Ok(())
+            })
+            .await?;
+        debug!(total_items = items, pages, "stream_all complete");
+        Ok(items)
+    }
+
+    /// The one cursor loop behind `get_all*` and `stream_all*`. Hands each item
+    /// to `sink`, stops at a null cursor or at `limit` items, and returns
+    /// (items, pages).
     ///
     /// Hardened: aborts if the server returns a cursor it already gave us (no
     /// forward progress), and caps total pages at `MAX_PAGES`.
-    #[instrument(skip(self))]
-    pub async fn get_all(&self, path: &str) -> Result<Vec<Value>> {
-        let mut all = Vec::new();
+    ///
+    /// Paced: page requests are spaced at least `MIN_PAGE_INTERVAL` apart, so a
+    /// large tenant (~495k assets, ~945k events) cannot outrun Drata's 500/min
+    /// limit and trip the edge's multi-minute 429 block (v0.2.0 shakedown).
+    async fn drain_pages<F>(&self, path: &str, limit: Option<usize>, mut sink: F) -> Result<(u64, u32)>
+    where
+        F: FnMut(&Value) -> Result<()>,
+    {
         let mut cursor: Option<String> = None;
         let mut seen_cursors: std::collections::HashSet<String> = std::collections::HashSet::new();
         let sep = if path.contains('?') { '&' } else { '?' };
+        let size = match limit {
+            Some(n) => n.clamp(1, PAGINATION_SIZE as usize) as u32,
+            None => PAGINATION_SIZE,
+        };
         let mut pages = 0u32;
+        let mut items: u64 = 0;
+        let mut last_page: Option<tokio::time::Instant> = None;
 
         loop {
+            if limit.is_some_and(|n| items >= n as u64) {
+                break;
+            }
             pages += 1;
             if pages > MAX_PAGES {
                 bail!(
@@ -541,20 +605,35 @@ impl DrataClient {
                      without a null cursor; the result set is larger than the cap allows",
                     MAX_PAGES,
                     path,
-                    all.len(),
-                    PAGINATION_SIZE
+                    items,
+                    size
                 );
             }
 
+            if let Some(prev) = last_page {
+                let wait = self.page_interval.saturating_sub(prev.elapsed());
+                if !wait.is_zero() {
+                    trace!(wait_ms = wait.as_millis() as u64, "pacing page request");
+                    sleep(wait).await;
+                }
+            }
+            last_page = Some(tokio::time::Instant::now());
+
             let paginated = match &cursor {
-                Some(c) => format!("{}{}size={}&cursor={}", path, sep, PAGINATION_SIZE, encode_query(c)),
-                None => format!("{}{}size={}", path, sep, PAGINATION_SIZE),
+                Some(c) => format!("{}{}size={}&cursor={}", path, sep, size, encode_query(c)),
+                None => format!("{}{}size={}", path, sep, size),
             };
             let resp = self.get(&paginated).await?;
 
-            if let Some(items) = resp.get("data").and_then(|v| v.as_array()) {
-                trace!(page = pages, items = items.len(), "accumulated page");
-                all.extend(items.clone());
+            if let Some(page) = resp.get("data").and_then(|v| v.as_array()) {
+                trace!(page = pages, items = page.len(), "draining page");
+                for item in page {
+                    if limit.is_some_and(|n| items >= n as u64) {
+                        break;
+                    }
+                    sink(item)?;
+                    items += 1;
+                }
             }
 
             let next = resp
@@ -583,79 +662,26 @@ impl DrataClient {
             }
         }
 
-        debug!(total = all.len(), pages, "cursor pagination complete");
-        Ok(all)
+        Ok((items, pages))
     }
+}
 
-    /// Stream all results from a cursor-paginated list endpoint as NDJSON.
-    /// Writes one JSON object per line to `writer` instead of buffering an
-    /// unbounded `Vec<Value>`. Same hardening as `get_all` (repeated-cursor
-    /// abort, max-page bound).
-    ///
-    /// This is the `--all` streaming path for large tenants where buffering the
-    /// full result set would be impractical.
-    #[instrument(skip(self, writer))]
-    pub async fn stream_all<W: Write>(&self, path: &str, writer: &mut W) -> Result<u64> {
-        let mut cursor: Option<String> = None;
-        let mut seen_cursors: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let sep = if path.contains('?') { '&' } else { '?' };
-        let mut pages = 0u32;
-        let mut total_items: u64 = 0;
+/// Seconds to wait after a 429: the server's `Retry-After` when it parses,
+/// else the default, never past `MAX_RETRY_DELAY_SECS`.
+fn retry_delay(retry_after: Option<&str>) -> u64 {
+    retry_after
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_RETRY_DELAY_SECS)
+        .min(MAX_RETRY_DELAY_SECS)
+}
 
-        loop {
-            pages += 1;
-            if pages > MAX_PAGES {
-                bail!(
-                    "stream_all hit the {}-page cap on {} after {} items (size {}) \
-                     without a null cursor; the result set is larger than the cap allows",
-                    MAX_PAGES,
-                    path,
-                    total_items,
-                    PAGINATION_SIZE
-                );
-            }
-
-            let paginated = match &cursor {
-                Some(c) => format!("{}{}size={}&cursor={}", path, sep, PAGINATION_SIZE, encode_query(c)),
-                None => format!("{}{}size={}", path, sep, PAGINATION_SIZE),
-            };
-            let resp = self.get(&paginated).await?;
-
-            if let Some(items) = resp.get("data").and_then(|v| v.as_array()) {
-                trace!(page = pages, items = items.len(), "streaming page");
-                for item in items {
-                    let line = serde_json::to_string(item).context("Failed to serialize item as NDJSON")?;
-                    writeln!(writer, "{}", line).context("Failed to write NDJSON line")?;
-                    total_items += 1;
-                }
-            }
-
-            let next = resp
-                .get("pagination")
-                .and_then(|p| p.get("cursor"))
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .map(String::from);
-
-            match next {
-                Some(n) => {
-                    if !seen_cursors.insert(n.clone()) {
-                        bail!(
-                            "repeated cursor {:?} detected in stream_all on path {}; \
-                             server is not making forward progress.",
-                            n,
-                            path
-                        );
-                    }
-                    cursor = Some(n);
-                }
-                None => break,
-            }
-        }
-
-        debug!(total_items, pages, "stream_all complete");
-        Ok(total_items)
-    }
+/// A 429 wait can run minutes; the `warn!` goes only to the log file, so say
+/// it on stderr too or the terminal looks hung.
+fn announce_retry(delay: u64, attempts: u32) {
+    eprintln!(
+        "drata: rate limited, waiting {}s before retry {}/{}",
+        delay, attempts, MAX_RETRY_ATTEMPTS
+    );
 }
 
 /// Format a Drata API error response into a human-readable message. Drata

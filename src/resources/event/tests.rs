@@ -3,7 +3,10 @@ use super::*;
 
 #[test]
 fn event_actions_are_constructible() {
-    let list = EventAction::List { all: false };
+    let list = EventAction::List {
+        all: false,
+        limit: None,
+    };
     assert!(matches!(list, EventAction::List { .. }));
 
     let get = EventAction::Get {

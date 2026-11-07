@@ -369,6 +369,7 @@ drata-cli framework requirement controls <workspace_id> <framework_id> <requirem
 
 ```
 drata-cli asset list
+drata-cli asset list --limit 50     # stop after 50 assets
 drata-cli asset get <asset_id>
 drata-cli asset create --example
 drata-cli asset create --name "Server" --description "..." --asset-type PHYSICAL --asset-class-types HARDWARE COMPUTE --owner-id 42
@@ -453,6 +454,7 @@ drata-cli audit request dcf-suggestion run-action <workspace_id> <audit_id> <req
 drata-cli event list
 drata-cli event get <event_id>
 drata-cli event list --all       # stream all pages as NDJSON
+drata-cli event list --limit 100 # stop after 100 events
 ```
 
 ## Request body skeletons (--example)
@@ -523,6 +525,12 @@ drata-cli vendor list --all | jq '.name'
 drata-cli personnel list --all > personnel.ndjson
 drata-cli event list --all | grep '"type":"USER_LOGIN"'
 ```
+
+A list without `--all` or `--limit` still fetches every page, which on a large
+tenant means thousands of requests. `asset list` and `event list` take
+`--limit N` to stop once N items are in hand. Page requests are paced under
+Drata's per-IP rate limit, and a 429 waits out the server's `Retry-After`
+(up to `MAX_RETRY_DELAY_SECS` in `src/client.rs`) with a notice on stderr.
 
 ## The raw namespace
 

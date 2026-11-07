@@ -716,3 +716,12 @@ fn dcf_suggestion_rows_pick_the_suggestion_table() {
     assert!(out.contains("DCF-1"), "`DCF-1` missing from\n{out}");
     assert!(out.contains("HIGH"), "`HIGH` missing from\n{out}");
 }
+
+#[test]
+fn monitor_rows_show_the_test_id_the_verbs_take() {
+    let rows = [json!({"id": 264, "testId": 90000, "name": "zzz", "checkStatus": "ENABLED"})];
+    let out = render_monitors(&rows, DEFAULT_WIDTH);
+    assert!(out.contains("TEST_ID"), "header missing from\n{out}");
+    assert!(out.contains("90000"), "testId missing from\n{out}");
+    assert!(!out.contains("264"), "row id leaked into the table\n{out}");
+}
