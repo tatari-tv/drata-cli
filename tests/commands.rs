@@ -10,6 +10,7 @@
 mod table;
 
 use clap::{CommandFactory, Parser};
+use drata_cli::backend::Backend;
 use drata_cli::cli::{Cli, OutputFormat};
 use drata_cli::client::DrataClient;
 use drata_cli::config::{Config, TokenSource};
@@ -75,7 +76,7 @@ async fn prove(row: &Row) -> Result<(), String> {
         .chain(std::iter::once("--yes"));
     let cli = Cli::try_parse_from(argv).map_err(|e| format!("clap rejected argv: {e}"))?;
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), Some(&config.region), true)
         .map_err(|e| format!("client build: {e}"))?
         .with_base_url(server.uri());
     let confirm = default_confirm(cli.yes);
@@ -213,7 +214,7 @@ async fn sent(argv: &[&str], response: Response) -> wiremock::Request {
     )
     .expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), Some(&config.region), true)
         .expect("client builds")
         .with_base_url(server.uri());
     drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes))
@@ -482,7 +483,7 @@ async fn searched(facets: &[&str], response: serde_json::Value) -> (serde_json::
         .respond_with(ResponseTemplate::new(200).set_body_json(response))
         .mount(&server)
         .await;
-    let client = DrataClient::new("test-key".to_string(), "us", true)
+    let client = DrataClient::new(Backend::Drata, "test-key".to_string(), Some("us"), true)
         .expect("client builds")
         .with_base_url(server.uri());
     let facets: Vec<String> = facets.iter().map(|f| f.to_string()).collect();
@@ -524,7 +525,7 @@ async fn vendor_search_without_facet_walks_every_page_and_drops_the_envelope() {
         })))
         .mount(&server)
         .await;
-    let client = DrataClient::new("test-key".to_string(), "us", true)
+    let client = DrataClient::new(Backend::Drata, "test-key".to_string(), Some("us"), true)
         .expect("client builds")
         .with_base_url(server.uri());
     let value = drata_cli::resources::search::fetch(&client, drata_cli::query::QueryPath::new("/vendors-search"), &[])
@@ -790,7 +791,7 @@ async fn finalizations_422_fails_and_prints_the_servers_message() {
     ])
     .expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), Some(&config.region), true)
         .expect("client builds")
         .with_base_url(server.uri());
     let err = drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes))
@@ -830,7 +831,7 @@ async fn access_link(data: &str) -> (eyre::Result<()>, Vec<wiremock::Request>) {
     ])
     .expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), Some(&config.region), true)
         .expect("client builds")
         .with_base_url(server.uri());
     let result = drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes)).await;
@@ -871,7 +872,7 @@ async fn monitor(argv: &[&str], response: ResponseTemplate) -> (eyre::Result<()>
     )
     .expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), Some(&config.region), true)
         .expect("client builds")
         .with_base_url(server.uri());
     let result = drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes)).await;
@@ -1018,7 +1019,7 @@ async fn validate_recipe_exits_non_zero_when_invalid_and_sends_no_confirm() {
     let cli = Cli::try_parse_from(["drata", "monitor", "validate-recipe", "1", "--recipe", table::RECIPE])
         .expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), Some(&config.region), true)
         .expect("client builds")
         .with_base_url(server.uri());
     let err = drata_cli::dispatch(&cli, &client, &config, &drata_cli::confirm::fail_closed())
@@ -1096,7 +1097,7 @@ async fn with_confirm(
     Mock::given(any()).respond_with(response).mount(&server).await;
     let cli = Cli::try_parse_from(std::iter::once("drata").chain(argv.iter().copied())).expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), Some(&config.region), true)
         .expect("client builds")
         .with_base_url(server.uri());
     let result = drata_cli::dispatch(&cli, &client, &config, &confirm).await;
@@ -1425,7 +1426,7 @@ async fn identity_run_action_without_its_required_field_sends_nothing() {
     ])
     .expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), Some(&config.region), true)
         .expect("client builds")
         .with_base_url(server.uri());
     let err = drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes))

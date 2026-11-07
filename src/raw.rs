@@ -15,6 +15,7 @@
 //!
 //! Phase 4: confirm-on-mutation gate (all non-GET through `raw` now prompts).
 
+use crate::backend::Backend;
 use crate::cli::RawArgs;
 use crate::client::{DrataClient, Multipart, encode_query};
 use crate::config::Config;
@@ -45,7 +46,7 @@ fn example_skeleton(method: &str, path: &str) -> Result<String> {
         Some(skeleton) => Ok(skeleton),
         None => {
             // Distinguish "no such operation" from "operation has no JSON body".
-            match spec::find_by_method_path(method, path)? {
+            match spec::find_by_method_path(Backend::Drata, method, path)? {
                 Some(_) => Err(eyre!(
                     "`{} {}` has no JSON request body (it may be a GET or a multipart upload)",
                     method.to_uppercase(),
@@ -80,7 +81,7 @@ pub async fn handle(args: &RawArgs, client: &DrataClient, config: &Config, confi
     // Validate against the spec when possible. An unknown method+path is a warn,
     // not a hard error: the spec is an aid, and a power user may legitimately hit
     // a path the committed snapshot does not yet describe.
-    if spec::find_by_method_path(&args.method, &args.path)?.is_none() {
+    if spec::find_by_method_path(Backend::Drata, &args.method, &args.path)?.is_none() {
         warn!(method = %args.method, path = %args.path, "method+path not found in spec; sending anyway");
     }
 

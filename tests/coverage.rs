@@ -13,6 +13,7 @@
 //! a curated entry stops matching a real operation - the early-warning the
 //! design doc asks for.
 
+use drata_cli::backend::Backend;
 use drata_cli::spec::{self, Operation};
 
 /// Operation count of the committed spec: a tripwire that fails on every spec refresh,
@@ -49,7 +50,7 @@ fn raw_reachable(op: &Operation) -> bool {
 
 #[test]
 fn every_operation_is_reachable() {
-    let ops = spec::operations().expect("spec operations parse");
+    let ops = spec::operations(Backend::Drata).expect("spec operations parse");
     assert_eq!(
         ops.len(),
         EXPECTED_OPERATIONS,
@@ -70,7 +71,7 @@ fn every_operation_is_reachable() {
 
 #[test]
 fn every_curated_entry_matches_a_real_operation() {
-    let ops = spec::operations().expect("spec operations parse");
+    let ops = spec::operations(Backend::Drata).expect("spec operations parse");
     for (method, path) in curated() {
         let found = ops.iter().any(|op| op.method == method && op.path == path);
         assert!(
@@ -83,7 +84,7 @@ fn every_curated_entry_matches_a_real_operation() {
 
 #[test]
 fn reports_curated_coverage_percentage() {
-    let ops = spec::operations().expect("spec operations parse");
+    let ops = spec::operations(Backend::Drata).expect("spec operations parse");
     let total = ops.len();
     let curated = ops.iter().filter(|op| is_curated(op)).count();
     let pct = (curated as f64 / total as f64) * 100.0;
@@ -105,7 +106,7 @@ fn reports_curated_coverage_percentage() {
 
 #[test]
 fn operation_level_tags_match_the_committed_spec() {
-    let tags = spec::operation_tags().expect("operation tags parse");
+    let tags = spec::operation_tags(Backend::Drata).expect("operation tags parse");
     assert_eq!(tags.len(), 51);
     assert!(tags.contains(&"Audit Requests".to_string()));
     assert!(tags.contains(&"Procurement Connection Mappings".to_string()));

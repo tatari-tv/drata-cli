@@ -2,6 +2,7 @@
 #![deny(dead_code)]
 #![deny(unused_variables)]
 
+pub mod backend;
 pub mod cli;
 pub mod client;
 pub mod config;
@@ -16,6 +17,7 @@ pub mod resources;
 pub mod spec;
 pub mod verify;
 
+use backend::Backend;
 use cli::{Cli, Commands};
 use client::DrataClient;
 use config::{AuthDiagnostic, Config, DEFAULT_PROFILE};
@@ -160,7 +162,12 @@ pub fn run_auth(cli: &Cli, diag: &AuthDiagnostic) -> Result<()> {
 
 #[instrument(skip_all, fields(command = %command_path(&cli.command)))]
 pub async fn run(cli: &Cli, config: &Config, confirm: ConfirmFn) -> Result<()> {
-    let client = DrataClient::new(config.api_key.clone(), &config.region, config.allow_writes)?;
+    let client = DrataClient::new(
+        Backend::Drata,
+        config.api_key.clone(),
+        Some(&config.region),
+        config.allow_writes,
+    )?;
     dispatch(cli, &client, config, &confirm).await
 }
 

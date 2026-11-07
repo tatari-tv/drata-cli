@@ -5,6 +5,7 @@
 //! rejection prints S3's body with the signed query removed.
 
 use clap::Parser;
+use drata_cli::backend::Backend;
 use drata_cli::cli::{Cli, OutputFormat};
 use drata_cli::client::DrataClient;
 use drata_cli::config::{Config, TokenSource};
@@ -69,7 +70,7 @@ async fn run(servers: &Servers, file: &std::path::Path) -> eyre::Result<()> {
     ])
     .expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, true)
+    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), Some(&config.region), true)
         .expect("client builds")
         .with_base_url(servers.drata.uri());
     drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes)).await

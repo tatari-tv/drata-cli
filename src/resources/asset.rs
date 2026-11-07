@@ -186,7 +186,7 @@ async fn remove(client: &DrataClient, config: &Config, confirm: &ConfirmFn, asse
     if !confirm("DELETE", &format!("/assets/{}", asset_id))? {
         bail!("aborted");
     }
-    let result = client.delete(&format!("/assets/{}", asset_id)).await?;
+    let result = client.delete(&format!("/assets/{}", asset_id), None).await?;
     print_value(&result, &config.output_format);
     Ok(())
 }

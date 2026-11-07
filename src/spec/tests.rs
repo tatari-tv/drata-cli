@@ -3,13 +3,13 @@ use super::*;
 
 #[test]
 fn enumerates_every_operation_in_the_committed_spec() {
-    let ops = operations().unwrap();
+    let ops = operations(Backend::Drata).unwrap();
     assert_eq!(ops.len(), 308, "spec should expose exactly 308 operations");
 }
 
 #[test]
 fn every_operation_has_method_path_and_id() {
-    let ops = operations().unwrap();
+    let ops = operations(Backend::Drata).unwrap();
     for op in &ops {
         assert!(!op.method.is_empty(), "operation missing method: {op:?}");
         assert!(op.path.starts_with('/'), "path should be absolute: {op:?}");
@@ -19,7 +19,7 @@ fn every_operation_has_method_path_and_id() {
 
 #[test]
 fn methods_are_upper_cased_and_known() {
-    let ops = operations().unwrap();
+    let ops = operations(Backend::Drata).unwrap();
     for op in &ops {
         assert!(
             matches!(op.method.as_str(), "GET" | "POST" | "PUT" | "DELETE"),
@@ -34,7 +34,7 @@ fn methods_are_upper_cased_and_known() {
 fn operation_tags_include_tags_once_missing_from_top_level() {
     // Tags are sourced from operations because the top-level `tags` list once
     // omitted these two; keep asserting them so a regression in either list shows.
-    let tags = operation_tags().unwrap();
+    let tags = operation_tags(Backend::Drata).unwrap();
     assert_eq!(tags.len(), 51, "expected 51 operation-level tags, got {}", tags.len());
     assert!(tags.contains(&"Audit Requests".to_string()));
     assert!(tags.contains(&"Procurement Connection Mappings".to_string()));
@@ -42,13 +42,17 @@ fn operation_tags_include_tags_once_missing_from_top_level() {
 
 #[test]
 fn fourteen_operations_are_multipart_uploads() {
-    let multipart = operations().unwrap().into_iter().filter(|op| op.multipart).count();
+    let multipart = operations(Backend::Drata)
+        .unwrap()
+        .into_iter()
+        .filter(|op| op.multipart)
+        .count();
     assert_eq!(multipart, 14, "expected 14 multipart upload operations");
 }
 
 #[test]
 fn find_by_method_path_resolves_a_known_op() {
-    let op = find_by_method_path("post", "/vendors").unwrap();
+    let op = find_by_method_path(Backend::Drata, "post", "/vendors").unwrap();
     assert!(op.is_some());
     let op = op.unwrap();
     assert_eq!(op.method, "POST");
@@ -57,7 +61,11 @@ fn find_by_method_path_resolves_a_known_op() {
 
 #[test]
 fn find_by_method_path_returns_none_for_unknown() {
-    assert!(find_by_method_path("get", "/no/such/path").unwrap().is_none());
+    assert!(
+        find_by_method_path(Backend::Drata, "get", "/no/such/path")
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -109,4 +117,82 @@ fn example_for_schema_builds_a_named_component() {
 fn example_for_unknown_schema_is_an_error() {
     let err = example_for_schema("NoSuchSchemaDto").unwrap_err();
     assert!(err.to_string().contains("NoSuchSchemaDto"), "{err}");
+}
+
+#[test]
+fn enumerates_every_operation_in_the_safebase_spec() {
+    let ops = operations(Backend::Safebase).unwrap();
+    assert_eq!(ops.len(), 47, "SafeBase spec should expose exactly 47 operations");
+    let count = |m: &str| ops.iter().filter(|op| op.method == m).count();
+    assert_eq!(
+        (
+            count("GET"),
+            count("POST"),
+            count("PATCH"),
+            count("DELETE"),
+            count("PUT")
+        ),
+        (22, 12, 6, 6, 1)
+    );
+    // No operationId assertion: the SafeBase spec omits one (`PATCH /accounts/{id}`).
+    for op in &ops {
+        assert!(op.path.starts_with('/'), "path should be absolute: {op:?}");
+    }
+}
+
+#[test]
+fn safebase_has_one_multipart_operation() {
+    let multipart: Vec<_> = operations(Backend::Safebase)
+        .unwrap()
+        .into_iter()
+        .filter(|op| op.multipart)
+        .collect();
+    assert_eq!(multipart.len(), 1);
+    assert_eq!(
+        (multipart[0].method.as_str(), multipart[0].path.as_str()),
+        ("POST", "/questionnaires")
+    );
+}
+
+#[test]
+fn find_by_method_path_is_scoped_to_its_backend() {
+    let op = find_by_method_path(Backend::Safebase, "patch", "/document/{id}")
+        .unwrap()
+        .unwrap();
+    assert_eq!(op.method, "PATCH");
+    assert!(
+        find_by_method_path(Backend::Drata, "patch", "/document/{id}")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        find_by_method_path(Backend::Safebase, "post", "/vendors")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn skeleton_reads_an_openapi_31_type_list_as_its_non_null_type() {
+    let spec = Backend::Safebase.spec().unwrap();
+    assert_eq!(
+        build_skeleton(spec, &json!({"type": ["string", "null"]}), 0),
+        json!("string")
+    );
+    assert_eq!(build_skeleton(spec, &json!({"type": ["null", "integer"]}), 0), json!(0));
+    assert_eq!(
+        build_skeleton(spec, &json!({"type": ["boolean", "null"]}), 0),
+        json!(false)
+    );
+    assert_eq!(build_skeleton(spec, &json!({"type": ["null"]}), 0), Value::Null);
+}
+
+#[test]
+fn skeleton_reads_a_type_list_from_the_safebase_spec() {
+    let spec = Backend::Safebase.spec().unwrap();
+    let expires = spec
+        .pointer("/paths/~1documents~1upload/put/requestBody/content/application~1json/schema/properties/expiresAt")
+        .unwrap();
+    assert_eq!(expires["type"], json!(["string", "null"]));
+    assert_eq!(build_skeleton(spec, expires, 0), json!("string"));
 }

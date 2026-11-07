@@ -236,7 +236,7 @@ pub async fn handle(
             if !confirm("DELETE", &path)? {
                 bail!("aborted");
             }
-            print_value(&client.delete(&path).await?, &config.output_format);
+            print_value(&client.delete(&path, None).await?, &config.output_format);
         }
     }
     Ok(())

@@ -3,6 +3,7 @@
 //! the write guard, and the partial-artifact exit rule.
 
 use clap::Parser;
+use drata_cli::backend::Backend;
 use drata_cli::cli::{Cli, OutputFormat};
 use drata_cli::client::DrataClient;
 use drata_cli::config::{Config, TokenSource};
@@ -35,9 +36,14 @@ async fn run(argv: &[&str], response: ResponseTemplate, allow_writes: bool, conf
     Mock::given(any()).respond_with(response).mount(&server).await;
     let cli = Cli::try_parse_from(std::iter::once("drata").chain(argv.iter().copied())).expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(config.api_key.clone(), &config.region, allow_writes)
-        .expect("client builds")
-        .with_base_url(server.uri());
+    let client = DrataClient::new(
+        Backend::Drata,
+        config.api_key.clone(),
+        Some(&config.region),
+        allow_writes,
+    )
+    .expect("client builds")
+    .with_base_url(server.uri());
     let result = drata_cli::dispatch(&cli, &client, &config, &confirm).await;
     let requests = server.received_requests().await.unwrap_or_default();
     Run { result, requests }

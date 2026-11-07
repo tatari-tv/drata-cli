@@ -288,7 +288,7 @@ async fn remove(
     if !confirm("DELETE", &path)? {
         bail!("aborted");
     }
-    let result = client.delete(&path).await?;
+    let result = client.delete(&path, None).await?;
     print_value(&result, &config.output_format);
     Ok(())
 }

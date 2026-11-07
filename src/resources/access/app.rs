@@ -217,7 +217,7 @@ pub async fn handle(
             if !confirm("DELETE", &remove_prompt(&path))? {
                 bail!("aborted");
             }
-            print_value(&client.delete(&path).await?, &config.output_format);
+            print_value(&client.delete(&path, None).await?, &config.output_format);
         }
         AccessReviewAppAction::Users { action } => handle_users(action, client, config, confirm).await?,
     }
