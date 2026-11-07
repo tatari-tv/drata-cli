@@ -319,6 +319,7 @@ fn build_search(args: &RiskSearchArgs) -> Result<(QueryPath, Vec<String>)> {
         .push_each("status[]", args.status.iter().map(wire_name))
         .push_each("treatmentPlan[]", args.treatment_plan.iter().map(wire_name))
         .push_each("type[]", args.kinds.iter().map(wire_name))
+        .push_each("riskRegisterId[]", &args.risk_register_ids)
         .push_opt("inherentScoreGte", args.inherent_score_gte)
         .push_opt("inherentScoreLte", args.inherent_score_lte)
         .push_opt("residualScoreGte", args.residual_score_gte)

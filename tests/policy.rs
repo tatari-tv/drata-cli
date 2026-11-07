@@ -192,3 +192,11 @@ async fn policy_language_list_and_versions_send_their_filters() {
     let q = req.url.query().unwrap();
     assert!(q.contains("policyId=7") && q.contains("expand%5B%5D=policy"), "{q}");
 }
+
+#[tokio::test]
+async fn policy_actions_sends_no_query_string() {
+    let req = sent(&["policy", "actions", "7"], Response::Page).await;
+    assert_eq!(req.method.as_str(), "GET");
+    assert_eq!(req.url.path(), "/policies/7/actions");
+    assert_eq!(req.url.query(), None, "the op takes no query params");
+}

@@ -61,19 +61,59 @@ impl Provider {
         }
     }
 
+    /// The prefix of the spec's string form of `{connectionId}`, if the
+    /// provider has one: AWS, Azure and GCP take a numeric id or a prefixed
+    /// natural key; GitLab takes a numeric id only.
+    pub fn id_prefix(self) -> Option<&'static str> {
+        match self {
+            Provider::Aws => Some("roleArn:"),
+            Provider::Azure => Some("subscriptionId:"),
+            Provider::Gcp => Some("projectId:"),
+            Provider::Gitlab => None,
+        }
+    }
+
     /// The spec path template of the item ops, for `--example` on `update`.
     fn item_template(self) -> String {
         format!("{}/{{connectionId}}", self.collection())
     }
 }
 
-/// `.../{connectionId}`. Pure.
-pub fn item_path(provider: Provider, connection_id: u64) -> String {
-    format!(
+/// Check a `{connectionId}` against the forms the provider's spec accepts: a
+/// numeric id, or (AWS, Azure, GCP) the provider's prefix and a non-empty key.
+/// A `%` is refused: no accepted form contains one, so it can only be a
+/// pre-encoded `/` that `encode_path_segment` would encode a second time. Pure.
+pub fn check_connection_id(provider: Provider, connection_id: &str) -> Result<()> {
+    if connection_id.parse::<u64>().is_ok() {
+        return Ok(());
+    }
+    let Some(prefix) = provider.id_prefix() else {
+        bail!(
+            "`{}` takes a numeric connection id, got `{connection_id}`",
+            provider.noun()
+        );
+    };
+    match connection_id.strip_prefix(prefix) {
+        Some(key) if !key.is_empty() && !key.contains('%') => Ok(()),
+        Some(key) if key.contains('%') => bail!(
+            "`{}`: pass the connection id unencoded (drata percent-encodes `/` itself), got `{connection_id}`",
+            provider.noun()
+        ),
+        _ => bail!(
+            "`{}` takes a numeric connection id or `{prefix}<value>`, got `{connection_id}`",
+            provider.noun()
+        ),
+    }
+}
+
+/// `.../{connectionId}`, the id checked and encoded as one path segment.
+pub fn item_path(provider: Provider, connection_id: &str) -> Result<String> {
+    check_connection_id(provider, connection_id)?;
+    Ok(format!(
         "{}/{}",
         provider.collection(),
-        encode_path_segment(&connection_id.to_string())
-    )
+        encode_path_segment(connection_id)
+    ))
 }
 
 /// `GET` collection with `expand[]`. Pure.
@@ -83,11 +123,11 @@ pub fn list_path(provider: Provider, expand: &[ConnectionExpand]) -> String {
     q.finish()
 }
 
-/// `GET` one connection with `expand[]`. Pure.
-pub fn get_path(provider: Provider, args: &ConnectionGetArgs) -> String {
-    let mut q = QueryPath::new(item_path(provider, args.connection_id));
+/// `GET` one connection with `expand[]`.
+pub fn get_path(provider: Provider, args: &ConnectionGetArgs) -> Result<String> {
+    let mut q = QueryPath::new(item_path(provider, &args.connection_id)?);
     q.push_each("expand[]", args.expand.iter().map(wire_name));
-    q.finish()
+    Ok(q.finish())
 }
 
 /// The `--data` body for `create` or `update`: `@file` or `-` only, and a JSON
@@ -156,7 +196,7 @@ pub async fn handle(
             print_value(&json!({ "data": items }), &config.output_format);
         }
         ConnectionVerb::Get(args) => {
-            let path = get_path(provider, args);
+            let path = get_path(provider, args)?;
             debug!(path, noun = provider.noun(), "connection get");
             print_value(&client.get(&path).await?, &config.output_format);
         }
@@ -182,8 +222,8 @@ pub async fn handle(
                     provider.noun()
                 );
             };
+            let path = item_path(provider, connection_id)?;
             let payload = read_body(data)?;
-            let path = item_path(provider, *connection_id);
             debug!(path, noun = provider.noun(), "connection update");
             if !confirm("PUT", &path)? {
                 bail!("aborted");
@@ -191,7 +231,7 @@ pub async fn handle(
             print_value(&client.put(&path, payload).await?, &config.output_format);
         }
         ConnectionVerb::Remove { connection_id } => {
-            let path = item_path(provider, *connection_id);
+            let path = item_path(provider, connection_id)?;
             debug!(path, noun = provider.noun(), "connection remove");
             if !confirm("DELETE", &path)? {
                 bail!("aborted");

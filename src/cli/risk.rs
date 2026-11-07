@@ -47,6 +47,9 @@ pub struct RiskSearchArgs {
     /// Search one risk register; omit to search every register
     #[arg(long)]
     pub register_id: Option<String>,
+    /// Search only these risk registers (space-separated IDs); the one-register search takes --register-id instead
+    #[arg(long = "risk-register-id", num_args = 1.., conflicts_with = "register_id")]
+    pub risk_register_ids: Vec<u64>,
     /// Free-text query (max 191 chars)
     #[arg(long)]
     pub q: Option<String>,

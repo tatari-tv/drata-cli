@@ -452,6 +452,28 @@ async fn risk_search_facet_requests_one_page_and_prints_the_envelope() {
     assert!(!q.contains("size="), "facet mode fetches the server's one page: {q}");
 }
 
+#[tokio::test]
+async fn risk_search_takes_a_chosen_set_of_registers_space_separated() {
+    let req = sent(&["risk", "search", "--risk-register-id", "3", "9"], Response::Page).await;
+    assert_eq!(req.url.path(), "/risks-search");
+    let q = req.url.query().unwrap_or_default().to_string();
+    assert!(q.contains("riskRegisterId%5B%5D=3&riskRegisterId%5B%5D=9"), "{q}");
+}
+
+#[test]
+fn risk_register_ids_refuse_commas_and_the_one_register_search() {
+    let parses = |argv: &[&str]| Cli::try_parse_from(std::iter::once("drata").chain(argv.iter().copied())).is_ok();
+    assert!(!parses(&["risk", "search", "--risk-register-id", "3,9"]));
+    assert!(!parses(&[
+        "risk",
+        "search",
+        "--register-id",
+        "4",
+        "--risk-register-id",
+        "3"
+    ]));
+}
+
 /// Mount `response` on a fresh mock and run a vendor search through the shared
 /// search verb; returns the value it would print and the requests it sent.
 async fn searched(facets: &[&str], response: serde_json::Value) -> (serde_json::Value, Vec<wiremock::Request>) {

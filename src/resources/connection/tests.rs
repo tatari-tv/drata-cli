@@ -17,12 +17,60 @@ fn paths_for_each_provider() {
             list_path(provider, &[ConnectionExpand::Workspaces]),
             format!("{base}?expand%5B%5D=workspaces")
         );
-        assert_eq!(item_path(provider, 7), format!("{base}/7"));
+        assert_eq!(item_path(provider, "7").unwrap(), format!("{base}/7"));
         let args = ConnectionGetArgs {
-            connection_id: 7,
+            connection_id: "7".to_string(),
             expand: vec![ConnectionExpand::Workspaces],
         };
-        assert_eq!(get_path(provider, &args), format!("{base}/7?expand%5B%5D=workspaces"));
+        assert_eq!(
+            get_path(provider, &args).unwrap(),
+            format!("{base}/7?expand%5B%5D=workspaces")
+        );
+    }
+}
+
+#[test]
+fn prefixed_ids_are_one_encoded_segment_for_their_own_provider() {
+    let cases = [
+        (
+            Provider::Aws,
+            "roleArn:arn:aws:iam::123456789012:role/path/DrataAuditRole",
+            "/aws-connections/roleArn:arn:aws:iam::123456789012:role%2Fpath%2FDrataAuditRole",
+        ),
+        (
+            Provider::Azure,
+            "subscriptionId:28ffcc9b-be6d-4bbf-b53a-057049debc38",
+            "/azure-connections/subscriptionId:28ffcc9b-be6d-4bbf-b53a-057049debc38",
+        ),
+        (
+            Provider::Gcp,
+            "projectId:my-project",
+            "/gcp-connections/projectId:my-project",
+        ),
+    ];
+    for (provider, id, want) in cases {
+        assert_eq!(item_path(provider, id).unwrap(), want, "{provider:?}");
+    }
+}
+
+#[test]
+fn ids_outside_the_providers_spec_forms_are_refused() {
+    let refused = [
+        (Provider::Gitlab, "projectId:my-project", "numeric connection id"),
+        (Provider::Gitlab, "abc", "numeric connection id"),
+        (Provider::Aws, "subscriptionId:x", "roleArn:<value>"),
+        (
+            Provider::Azure,
+            "roleArn:arn:aws:iam::1:role/X",
+            "subscriptionId:<value>",
+        ),
+        (Provider::Gcp, "projectId:", "projectId:<value>"),
+        (Provider::Gcp, "-1", "projectId:<value>"),
+        (Provider::Aws, "roleArn:arn:aws:iam::1:role%2FX", "unencoded"),
+    ];
+    for (provider, id, want) in refused {
+        let msg = item_path(provider, id).unwrap_err().to_string();
+        assert!(msg.contains(want), "{provider:?} {id}: {msg}");
     }
 }
 

@@ -212,8 +212,8 @@ async fn update(
 #[instrument(skip(client, config))]
 async fn actions(client: &DrataClient, config: &Config, policy_id: &str) -> Result<()> {
     debug!(policy_id, "policy actions");
-    let all = client.get_all(&format!("/policies/{}/actions", policy_id)).await?;
-    let result = json!({ "data": all });
+    // One unpaginated `{data}` envelope: the op takes no query params, `size` included.
+    let result = client.get(&format!("/policies/{}/actions", policy_id)).await?;
     print_value(&result, &config.output_format);
     Ok(())
 }

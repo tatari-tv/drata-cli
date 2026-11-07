@@ -87,7 +87,8 @@ async fn run_logged(argv: &[&str]) -> (eyre::Result<()>, String) {
 #[tokio::test]
 async fn a_rejected_inline_credential_never_reaches_the_log() {
     let body = format!(r#"{{"secretAccessKey":"{SECRET}"}}"#);
-    let cases: [(Vec<&str>, &str); 2] = [
+    let base64 = format!(r#"["{SECRET}"]"#);
+    let cases: [(Vec<&str>, &str); 5] = [
         (
             vec!["connection", "aws", "create", "--data", &body],
             "command=connection aws create",
@@ -103,6 +104,41 @@ async fn a_rejected_inline_credential_never_reaches_the_log() {
                 &body,
             ],
             "command=vendor security-review provide-trust-center-access-link",
+        ),
+        // A malformed --query fails after the span is entered, before any request.
+        (
+            vec![
+                "raw",
+                "POST",
+                "/connections",
+                "--query",
+                "no-equals-sign",
+                "--data",
+                &body,
+            ],
+            "handle{method=POST path=/connections}",
+        ),
+        // No --code: rejected after the span is entered, before the confirm.
+        (
+            vec![
+                "control",
+                "create",
+                "1",
+                "--name",
+                "n",
+                "--description",
+                "d",
+                "--external-evidence-metadata",
+                &body,
+                "--base64-files",
+                &base64,
+            ],
+            "create{workspace_id=Some(\"1\")",
+        ),
+        // No --name: rejected after the span is entered, before the confirm.
+        (
+            vec!["evidence", "create", "1", "--description", SECRET],
+            "create{workspace_id=Some(\"1\")",
         ),
     ];
     for (argv, span) in cases {

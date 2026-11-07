@@ -174,6 +174,7 @@ drata-cli risk upload <register_id> <risk_id> --file ./evidence.pdf            #
 drata-cli risk upload <register_id> <risk_id> --file ./a.pdf ./b.pdf
 drata-cli risk remove <register_id> <risk_id>
 drata-cli risk search                                  # all pages as rows; --facet <name> for facet counts
+drata-cli risk search --risk-register-id 3 9           # only these registers (--register-id <id> searches one)
 drata-cli risk ticket list <register_id> <risk_id>
 drata-cli risk ticket link <register_id> <risk_id> --ticket-url https://example.atlassian.net/browse/SEC-1
 drata-cli risk ticket unlink <register_id> <risk_id> <ticket_id>
@@ -308,10 +309,14 @@ drata-cli access-review period evidence-package <period_id>            # prints 
 `connection aws | azure | gcp | gitlab` share one verb set. Bodies carry cloud
 credentials, so `create` and `update` take `--data @file` or `--data -` only and
 reject inline JSON before any request. `--example` prints the provider's body skeleton.
+`<connection_id>` is the numeric id, or the provider's natural key: `roleArn:<role ARN>`
+(AWS), `subscriptionId:<subscription ID>` (Azure), `projectId:<project ID>` (GCP).
+GitLab takes the numeric id only. Pass an ARN unencoded; the CLI encodes its `/`.
 
 ```
 drata-cli connection aws list
 drata-cli connection aws get <connection_id>
+drata-cli connection aws get roleArn:arn:aws:iam::123456789012:role/DrataAuditRole
 drata-cli connection aws create --example
 drata-cli connection aws create --data @aws-connection.json
 drata-cli connection aws update <connection_id> --data @aws-connection.json

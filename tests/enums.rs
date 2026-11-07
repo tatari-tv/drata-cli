@@ -695,3 +695,100 @@ fn upload_purpose_matches_the_spec() {
         "upload-url create --purpose"
     );
 }
+
+/// The spec's enum values for request-body field `field` of `method path`,
+/// read from the `content_type` schema: through an `allOf` wrapper and, for an
+/// array field, its `items`.
+fn request_values(method: &str, path: &str, content_type: &str, field: &str) -> BTreeSet<String> {
+    let spec = spec();
+    let schema = resolve(
+        &spec,
+        &spec["paths"][path][method]["requestBody"]["content"][content_type]["schema"],
+    );
+    let mut prop = resolve(&spec, &schema["properties"][field]);
+    if let Some(inner) = prop.get("allOf").and_then(|a| a.get(0)) {
+        prop = resolve(&spec, inner);
+    }
+    if let Some(items) = prop.get("items") {
+        prop = resolve(&spec, items);
+    }
+    prop["enum"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{method} {path} {field} has no enum"))
+        .iter()
+        .map(|v| v.as_str().expect("string enum").to_string())
+        .collect()
+}
+
+#[test]
+fn risk_search_filter_enums_match_the_spec_on_both_ops() {
+    for path in ["/risks-search", "/risk-registers/{riskRegisterId}/risks-search"] {
+        same::<RiskStatus>(path, "status[]");
+        same::<RiskTreatmentPlan>(path, "treatmentPlan[]");
+        same::<RiskKind>(path, "type[]");
+    }
+}
+
+#[test]
+fn ticket_field_types_match_the_spec_on_every_create_op() {
+    let accepted: BTreeSet<String> = drata_cli::resources::ticket::FIELD_TYPES
+        .iter()
+        .map(|t| t.to_string())
+        .collect();
+    assert_eq!(
+        accepted.len(),
+        drata_cli::resources::ticket::FIELD_TYPES.len(),
+        "duplicate type"
+    );
+    let spec = spec();
+    for path in [
+        "/risk-registers/{riskRegisterId}/risks/{riskId}/tickets/action-create",
+        "/workspaces/{workspaceId}/monitoring-tests/{testId}/tickets/action-create",
+    ] {
+        let body = resolve(
+            &spec,
+            &spec["paths"][path]["post"]["requestBody"]["content"]["application/json"]["schema"],
+        );
+        let field = resolve(&spec, &body["properties"]["fields"]["items"]);
+        let kind = resolve(&spec, &field["properties"]["type"]["allOf"][0]);
+        let want: BTreeSet<String> = kind["enum"]
+            .as_array()
+            .unwrap_or_else(|| panic!("POST {path} field type has no enum"))
+            .iter()
+            .map(|v| v.as_str().expect("string enum").to_string())
+            .collect();
+        assert_eq!(accepted, want, "POST {path} fields[].type");
+    }
+}
+
+/// The enum flags v0.1.5 shipped without a spec-parity check. All match the
+/// spec today; a divergence found here is reported, not fixed by changing the
+/// accepted values, which would change behavior.
+#[test]
+fn pre_existing_enum_flags_match_the_spec() {
+    let review_actions = "/vendors/{vendorId}/security-reviews/{securityReviewId}/actions";
+    assert_eq!(
+        flag_values::<SecurityReviewAction>(),
+        request_values("post", review_actions, "application/json", "action"),
+        "SecurityReviewAction: POST security-reviews/{{id}}/actions action"
+    );
+    for content_type in ["multipart/form-data", "application/json"] {
+        assert_eq!(
+            flag_values::<DeviceDocumentType>(),
+            request_values("post", "/devices/{deviceId}/documents", content_type, "type"),
+            "DeviceDocumentType: POST /devices/{{id}}/documents type"
+        );
+    }
+    for (method, path) in [("post", "/assets"), ("put", "/assets/{assetId}")] {
+        assert_eq!(
+            flag_values::<AssetType>(),
+            request_values(method, path, "application/json", "assetType"),
+            "AssetType: assets assetType"
+        );
+        assert_eq!(
+            flag_values::<AssetClassType>(),
+            request_values(method, path, "application/json", "assetClassTypes"),
+            "AssetClassType: assets assetClassTypes[]"
+        );
+    }
+}

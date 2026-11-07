@@ -193,7 +193,7 @@ fn build_create_body(name: &str, fields: &CreateFields, file_key: Option<&str>) 
 }
 
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(client, config, confirm))]
+#[instrument(skip(client, config, confirm, fields))]
 async fn create(
     client: &DrataClient,
     config: &Config,

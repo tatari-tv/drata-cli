@@ -57,6 +57,7 @@ fn treatment_plan_str_roundtrips() {
 fn search_args() -> RiskSearchArgs {
     RiskSearchArgs {
         register_id: None,
+        risk_register_ids: vec![],
         q: None,
         status: vec![],
         treatment_plan: vec![],
@@ -97,6 +98,16 @@ fn search_path_encodes_arrays_scores_and_expand() {
     assert_eq!(
         path,
         "/risks-search?q=a%20b&status%5B%5D=ACTIVE&status%5B%5D=CLOSED&residualScoreGte=5&vendorNames%5B%5D=Okta&expand%5B%5D=customFields"
+    );
+}
+
+#[test]
+fn search_across_chosen_registers_sends_each_register_id() {
+    let mut a = search_args();
+    a.risk_register_ids = vec![3, 9];
+    assert_eq!(
+        build_search(&a).unwrap().0.finish(),
+        "/risks-search?riskRegisterId%5B%5D=3&riskRegisterId%5B%5D=9"
     );
 }
 

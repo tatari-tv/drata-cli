@@ -156,7 +156,8 @@ async fn get(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[instrument(skip(client, config, confirm))]
+// The two evidence args are request-body JSON (base64 file contents).
+#[instrument(skip(client, config, confirm, external_evidence_metadata, base64_files))]
 async fn create(
     client: &DrataClient,
     config: &Config,

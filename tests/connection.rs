@@ -117,3 +117,78 @@ fn example_needs_no_data_or_id_and_data_is_required_otherwise() {
         assert!(Cli::try_parse_from(["drata", "connection", provider, "update", "1"]).is_err());
     }
 }
+
+#[tokio::test]
+async fn get_update_and_remove_send_a_numeric_or_prefixed_id_as_one_path_segment() {
+    let cases: [(Vec<&str>, &str, &str); 6] = [
+        (
+            vec!["connection", "gitlab", "get", "42"],
+            "GET",
+            "/gitlab-connections/42",
+        ),
+        (
+            vec![
+                "connection",
+                "aws",
+                "get",
+                "roleArn:arn:aws:iam::123456789012:role/DrataAuditRole",
+            ],
+            "GET",
+            "/aws-connections/roleArn:arn:aws:iam::123456789012:role%2FDrataAuditRole",
+        ),
+        (
+            vec![
+                "connection",
+                "azure",
+                "update",
+                "subscriptionId:28ffcc9b-be6d-4bbf-b53a-057049debc38",
+                "--data",
+                table::CONNECTION_DATA,
+            ],
+            "PUT",
+            "/azure-connections/subscriptionId:28ffcc9b-be6d-4bbf-b53a-057049debc38",
+        ),
+        (
+            vec!["connection", "gcp", "remove", "projectId:my-project"],
+            "DELETE",
+            "/gcp-connections/projectId:my-project",
+        ),
+        (
+            vec!["connection", "aws", "remove", "10"],
+            "DELETE",
+            "/aws-connections/10",
+        ),
+        (
+            vec!["connection", "gcp", "update", "7", "--data", table::CONNECTION_DATA],
+            "PUT",
+            "/gcp-connections/7",
+        ),
+    ];
+    for (argv, method, path) in cases {
+        let (result, requests) = dispatch(&argv, true).await;
+        result.unwrap_or_else(|e| panic!("{argv:?}: {e:#}"));
+        assert_eq!(requests.len(), 1, "{argv:?}");
+        assert_eq!(requests[0].method.as_str(), method, "{argv:?}");
+        assert_eq!(requests[0].url.path(), path, "{argv:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_id_outside_the_providers_forms_is_refused_before_any_request() {
+    for argv in [
+        vec!["connection", "gitlab", "get", "projectId:my-project"],
+        vec!["connection", "aws", "remove", "projectId:my-project"],
+        vec![
+            "connection",
+            "azure",
+            "update",
+            "roleArn:x",
+            "--data",
+            table::CONNECTION_DATA,
+        ],
+    ] {
+        let (result, requests) = dispatch(&argv, true).await;
+        assert!(result.is_err(), "{argv:?}: accepted");
+        assert!(requests.is_empty(), "{argv:?}: server saw {} requests", requests.len());
+    }
+}

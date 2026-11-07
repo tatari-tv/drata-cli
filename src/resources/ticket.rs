@@ -24,8 +24,8 @@ use eyre::{Result, bail};
 use serde_json::{Value, json};
 use tracing::{debug, instrument};
 
-/// Spec `TicketFieldTypePublicV2Enum`.
-const FIELD_TYPES: &[&str] = &[
+/// Spec `TicketFieldTypePublicV2Enum`: the types `--field` accepts.
+pub const FIELD_TYPES: &[&str] = &[
     "datetime",
     "date",
     "label",

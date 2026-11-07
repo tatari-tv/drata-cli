@@ -133,8 +133,10 @@ fn pick_renderer(sample: &Value) -> Option<RowRenderer> {
     if obj.contains_key("source") && obj.contains_key("reviewers") {
         return Some(render_access_review_apps);
     }
-    // User identity rows (infrastructure and version control) carry `identityId`.
-    if obj.contains_key("identityId") {
+    // User identity rows (infrastructure and version control) carry
+    // `identityId` + `serviceAccount`. A custom connection's HRIS identity also
+    // carries `identityId`, but no `serviceAccount`, and keeps its v0.1.5 users table.
+    if obj.contains_key("identityId") && obj.contains_key("serviceAccount") {
         return Some(render_identities);
     }
     // Codebase exclusion rows carry `findingId` + `exclusionDesignatorId`. A

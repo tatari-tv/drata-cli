@@ -1,5 +1,7 @@
 //! Renderer parity with v0.1.5: every op the v0.1.5 tree curated must still
-//! pick the table renderer (or the JSON fallback) that v0.1.5 picked.
+//! pick the table renderer (or the JSON fallback) that v0.1.5 picked, and so
+//! must every op of the v0.1.5 spec, which `drata raw ... --output table`
+//! rendered through the same sniff.
 //!
 //! The expected renderer comes from `v015_pick_renderer`, a verbatim copy of
 //! the v0.1.5 sniff order (`git show 165c6cf:src/output/table.rs`), applied to
@@ -111,6 +113,260 @@ const V015_CURATED: &[(&str, &str)] = &[
     ("PUT", "/workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}"),
     ("PUT", "/workspaces/{workspaceId}/frameworks/{frameworkId}"),
     ("PUT", "/workspaces/{workspaceId}/monitoring-tests/{testId}"),
+];
+
+/// Every op in the v0.1.5 spec (`git show 165c6cf:spec/drata-openapi-v2.json`),
+/// all reachable through `drata raw`, which renders through the same sniff.
+const V015_SPEC_OPS: &[(&str, &str)] = &[
+    ("DELETE", "/assets/{assetId}"),
+    ("DELETE", "/custom-connections/{connectionId}"),
+    ("DELETE", "/custom-connections/{connectionId}/devices/{deviceId}"),
+    (
+        "DELETE",
+        "/custom-connections/{connectionId}/hris-user-identities/{userIdentityId}",
+    ),
+    (
+        "DELETE",
+        "/custom-connections/{connectionId}/resources/{resourceId}/records/{recordId}",
+    ),
+    ("DELETE", "/devices/{deviceId}/documents/{documentId}"),
+    (
+        "DELETE",
+        "/policies/{policyId}/approval-configuration/{approvalConfigurationTier}",
+    ),
+    ("DELETE", "/risk-registers/{riskRegisterId}"),
+    (
+        "DELETE",
+        "/risk-registers/{riskRegisterId}/risks/{riskId}/documents/{documentId}",
+    ),
+    (
+        "DELETE",
+        "/risk-registers/{riskRegisterId}/risks/{riskId}/notes/{noteId}",
+    ),
+    ("DELETE", "/users/{userId}/documents/{documentId}"),
+    ("DELETE", "/vendor-types/{vendorTypeId}"),
+    ("DELETE", "/vendors/{vendorId}"),
+    (
+        "DELETE",
+        "/workspaces/{workspaceId}/controls/{controlId}/notes/{noteId}",
+    ),
+    (
+        "DELETE",
+        "/workspaces/{workspaceId}/controls/{controlId}/owners/{ownerId}",
+    ),
+    (
+        "DELETE",
+        "/workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}",
+    ),
+    ("GET", "/assets"),
+    ("GET", "/assets/{assetId}"),
+    ("GET", "/company"),
+    ("GET", "/connections/{connectionId}/devices"),
+    ("GET", "/connections/{connectionId}/vendor-mapping"),
+    ("GET", "/control-library"),
+    ("GET", "/control-library/{templateId}"),
+    ("GET", "/custom-connections"),
+    ("GET", "/custom-connections/{connectionId}"),
+    ("GET", "/custom-connections/{connectionId}/hris-user-identities"),
+    (
+        "GET",
+        "/custom-connections/{connectionId}/hris-user-identities/{userIdentityId}",
+    ),
+    (
+        "GET",
+        "/custom-connections/{connectionId}/resources/{resourceId}/records",
+    ),
+    (
+        "GET",
+        "/custom-connections/{connectionId}/resources/{resourceId}/sessions",
+    ),
+    ("GET", "/devices"),
+    ("GET", "/devices/{deviceId}"),
+    ("GET", "/devices/{deviceId}/apps"),
+    ("GET", "/devices/{deviceId}/documents"),
+    ("GET", "/devices/{deviceId}/documents/{documentId}"),
+    ("GET", "/events"),
+    ("GET", "/events/{eventId}"),
+    ("GET", "/events/{eventId}/download-jobs/{jobId}"),
+    ("GET", "/personnel"),
+    ("GET", "/personnel/{personnelId}"),
+    ("GET", "/personnel/{personnelId}/devices"),
+    ("GET", "/policies"),
+    ("GET", "/policies/{policyId}"),
+    ("GET", "/policies/{policyId}/actions"),
+    ("GET", "/policies/{policyId}/approval-configuration"),
+    ("GET", "/policies/{policyId}/policy-versions"),
+    ("GET", "/policies/{policyId}/policy-versions/{policyVersionId}"),
+    ("GET", "/risk-registers"),
+    ("GET", "/risk-registers/{riskRegisterId}"),
+    ("GET", "/risk-registers/{riskRegisterId}/insights"),
+    ("GET", "/risk-registers/{riskRegisterId}/risk-library"),
+    ("GET", "/risk-registers/{riskRegisterId}/risk-library/{riskLibraryId}"),
+    ("GET", "/risk-registers/{riskRegisterId}/risks"),
+    ("GET", "/risk-registers/{riskRegisterId}/risks/{riskId}"),
+    ("GET", "/risk-registers/{riskRegisterId}/risks/{riskId}/documents"),
+    (
+        "GET",
+        "/risk-registers/{riskRegisterId}/risks/{riskId}/documents/{documentId}",
+    ),
+    ("GET", "/risk-registers/{riskRegisterId}/risks/{riskId}/notes"),
+    ("GET", "/risk-registers/{riskRegisterId}/risks/{riskId}/notes/{noteId}"),
+    ("GET", "/roles"),
+    ("GET", "/roles/{roleId}"),
+    ("GET", "/roles/{roleId}/users"),
+    ("GET", "/users"),
+    ("GET", "/users/{userId}"),
+    ("GET", "/users/{userId}/assigned-policies"),
+    ("GET", "/users/{userId}/documents"),
+    ("GET", "/users/{userId}/documents/{documentId}"),
+    ("GET", "/vendor-types"),
+    ("GET", "/vendors"),
+    ("GET", "/vendors-stats"),
+    ("GET", "/vendors/{vendorId}"),
+    ("GET", "/vendors/{vendorId}/documents"),
+    ("GET", "/vendors/{vendorId}/documents/{documentId}"),
+    ("GET", "/vendors/{vendorId}/questionnaires"),
+    ("GET", "/vendors/{vendorId}/questionnaires/{questionnaireId}"),
+    ("GET", "/vendors/{vendorId}/security-reviews"),
+    ("GET", "/vendors/{vendorId}/security-reviews/{securityReviewId}"),
+    ("GET", "/vendors/{vendorId}/security-reviews/{securityReviewId}/actions"),
+    (
+        "GET",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/security-questionnaires",
+    ),
+    ("GET", "/workspaces"),
+    ("GET", "/workspaces/{workspaceId}/audits"),
+    ("GET", "/workspaces/{workspaceId}/audits/{auditId}"),
+    ("GET", "/workspaces/{workspaceId}/audits/{auditId}/requests"),
+    ("GET", "/workspaces/{workspaceId}/audits/{auditId}/requests/{requestId}"),
+    ("GET", "/workspaces/{workspaceId}/controls"),
+    ("GET", "/workspaces/{workspaceId}/controls-requirement-comparison"),
+    ("GET", "/workspaces/{workspaceId}/controls/{controlId}"),
+    ("GET", "/workspaces/{workspaceId}/controls/{controlId}/notes"),
+    ("GET", "/workspaces/{workspaceId}/controls/{controlId}/notes/{noteId}"),
+    ("GET", "/workspaces/{workspaceId}/controls/{controlId}/owners"),
+    ("GET", "/workspaces/{workspaceId}/controls/{controlId}/requirements"),
+    ("GET", "/workspaces/{workspaceId}/evidence-library"),
+    ("GET", "/workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}"),
+    (
+        "GET",
+        "/workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}/versions/{versionId}",
+    ),
+    ("GET", "/workspaces/{workspaceId}/framework-requirements"),
+    ("GET", "/workspaces/{workspaceId}/frameworks"),
+    ("GET", "/workspaces/{workspaceId}/frameworks/{frameworkId}/requirements"),
+    ("GET", "/workspaces/{workspaceId}/monitoring-tests"),
+    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}"),
+    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}/exclusions"),
+    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}/failures"),
+    ("GET", "/workspaces/{workspaceId}/monitoring-tests/{testId}/passes"),
+    ("GET", "/workspaces/{workspaceId}/tasks"),
+    ("GET", "/workspaces/{workspaceId}/tasks/{taskId}"),
+    ("GET", "/workspaces/{workspaceId}/upcoming-tasks"),
+    ("POST", "/assets"),
+    ("POST", "/background-checks"),
+    ("POST", "/control-library/action-import"),
+    ("POST", "/custom-connections"),
+    ("POST", "/custom-connections/{connectionId}/devices"),
+    ("POST", "/custom-connections/{connectionId}/hris-user-identities"),
+    (
+        "POST",
+        "/custom-connections/{connectionId}/resources/{resourceId}/records",
+    ),
+    (
+        "POST",
+        "/custom-connections/{connectionId}/resources/{resourceId}/sessions/{sessionId}",
+    ),
+    (
+        "POST",
+        "/custom-connections/{connectionId}/resources/{resourceId}/sessions/{sessionId}/actions",
+    ),
+    ("POST", "/devices/{deviceId}/documents"),
+    ("POST", "/events/{eventId}/download-jobs"),
+    ("POST", "/personnel/actions"),
+    ("POST", "/policies"),
+    ("POST", "/policies/{policyId}/actions"),
+    ("POST", "/policies/{policyId}/approval-configuration"),
+    ("POST", "/risk-library/action-copy"),
+    ("POST", "/risk-registers"),
+    ("POST", "/risk-registers/{riskRegisterId}/risks"),
+    ("POST", "/risk-registers/{riskRegisterId}/risks/{riskId}/documents"),
+    ("POST", "/risk-registers/{riskRegisterId}/risks/{riskId}/notes"),
+    (
+        "POST",
+        "/users/{userId}/assigned-policies/{policyId}/action-acknowledge",
+    ),
+    ("POST", "/users/{userId}/documents"),
+    ("POST", "/vendor-types"),
+    ("POST", "/vendors"),
+    ("POST", "/vendors/{vendorId}/documents"),
+    ("POST", "/vendors/{vendorId}/questionnaires"),
+    ("POST", "/vendors/{vendorId}/security-questionnaires"),
+    ("POST", "/vendors/{vendorId}/security-reviews"),
+    ("POST", "/vendors/{vendorId}/security-reviews/with-file"),
+    (
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/actions",
+    ),
+    (
+        "POST",
+        "/vendors/{vendorId}/security-reviews/{securityReviewId}/security-questionnaires",
+    ),
+    ("POST", "/workspaces/{workspaceId}/controls"),
+    ("POST", "/workspaces/{workspaceId}/controls/action-reset-mappings"),
+    ("POST", "/workspaces/{workspaceId}/controls/{controlId}/actions"),
+    ("POST", "/workspaces/{workspaceId}/controls/{controlId}/notes"),
+    ("POST", "/workspaces/{workspaceId}/controls/{controlId}/owners"),
+    ("POST", "/workspaces/{workspaceId}/evidence-library"),
+    ("POST", "/workspaces/{workspaceId}/frameworks"),
+    (
+        "POST",
+        "/workspaces/{workspaceId}/frameworks/{frameworkId}/requirements",
+    ),
+    ("POST", "/workspaces/{workspaceId}/tasks"),
+    ("POST", "/workspaces/{workspaceId}/tasks/{taskId}/actions"),
+    ("PUT", "/assets/{assetId}"),
+    ("PUT", "/connections/{connectionId}/vendor-mapping"),
+    ("PUT", "/custom-connections/{connectionId}"),
+    (
+        "PUT",
+        "/custom-connections/{connectionId}/resources/{resourceId}/records/{recordId}",
+    ),
+    ("PUT", "/personnel/{personnelId}"),
+    ("PUT", "/policies/{policyId}"),
+    (
+        "PUT",
+        "/policies/{policyId}/approval-configuration/{approvalConfigurationTier}",
+    ),
+    ("PUT", "/policies/{policyId}/owner"),
+    ("PUT", "/risk-registers/{riskRegisterId}"),
+    ("PUT", "/risk-registers/{riskRegisterId}/risks/{riskId}"),
+    ("PUT", "/risk-registers/{riskRegisterId}/risks/{riskId}/notes/{noteId}"),
+    ("PUT", "/vendor-types/{vendorTypeId}"),
+    ("PUT", "/vendors/{vendorId}"),
+    ("PUT", "/vendors/{vendorId}/security-reviews/{securityReviewId}"),
+    ("PUT", "/workspaces/{workspaceId}/controls/{controlId}"),
+    ("PUT", "/workspaces/{workspaceId}/controls/{controlId}/notes/{noteId}"),
+    ("PUT", "/workspaces/{workspaceId}/controls/{controlId}/owners"),
+    ("PUT", "/workspaces/{workspaceId}/evidence-library/{evidenceLibraryId}"),
+    (
+        "PUT",
+        "/workspaces/{workspaceId}/framework-requirements/{frameworkRequirementId}",
+    ),
+    ("PUT", "/workspaces/{workspaceId}/frameworks/{frameworkId}"),
+    (
+        "PUT",
+        "/workspaces/{workspaceId}/frameworks/{frameworkId}/requirements/{requirementId}",
+    ),
+    ("PUT", "/workspaces/{workspaceId}/monitoring-tests/{testId}"),
+    ("PUT", "/workspaces/{workspaceId}/tasks/{taskId}"),
+];
+
+/// The v0.1.5 spec ops the current spec no longer has: no row to sniff.
+const V015_SPEC_OPS_GONE: &[(&str, &str)] = &[
+    ("GET", "/control-library"),
+    ("GET", "/control-library/{templateId}"),
+    ("POST", "/control-library/action-import"),
 ];
 
 /// The v0.1.5 sniff order, verbatim from 165c6cf. Do not edit to match today's
@@ -269,13 +525,20 @@ fn rendered(pick: fn(&Value) -> Option<RowRenderer>, row: &Value) -> Option<Stri
 fn every_v015_curated_op_keeps_its_v015_renderer() {
     let spec: Value = serde_json::from_str(SPEC).unwrap();
     assert_eq!(V015_CURATED.len(), 83);
+    let (checked, drift) = drift_from_v015(&spec, V015_CURATED);
+    // The four DELETEs answer 204 and render nothing; the other 79 ops are
+    // sniffed twice, once per `Keys`.
+    assert_eq!(checked, 2 * 79, "ops with a JSON 2xx body");
+    assert!(drift.is_empty(), "renderer drift from v0.1.5:\n{}", drift.join("\n"));
+}
+
+/// Ops in `ops` whose sample row picks a different table now than v0.1.5 did,
+/// each sniffed with both `Keys`, and how many rows were sniffed.
+fn drift_from_v015(spec: &Value, ops: &[(&str, &str)]) -> (usize, Vec<String>) {
     let mut checked = 0;
     let mut drift = Vec::new();
-    for ((method, path), keys) in V015_CURATED
-        .iter()
-        .flat_map(|op| [(op, Keys::Every), (op, Keys::Examples)])
-    {
-        let Some(row) = sample_row(&spec, method, path, keys) else {
+    for ((method, path), keys) in ops.iter().flat_map(|op| [(op, Keys::Every), (op, Keys::Examples)]) {
+        let Some(row) = sample_row(spec, method, path, keys) else {
             continue;
         };
         checked += 1;
@@ -294,10 +557,33 @@ fn every_v015_curated_op_keeps_its_v015_renderer() {
             ));
         }
     }
-    // The four DELETEs answer 204 and render nothing; the other 79 ops are
-    // sniffed twice, once per `Keys`.
-    assert_eq!(checked, 2 * 79, "ops with a JSON 2xx body");
-    assert!(drift.is_empty(), "renderer drift from v0.1.5:\n{}", drift.join("\n"));
+    (checked, drift)
+}
+
+/// The v0.1.5 spec ops the current spec still has and answers with a JSON
+/// 2xx body; the rest answer 204 or are gone.
+const RAW_OPS_WITH_A_BODY: usize = 148;
+
+#[test]
+fn every_v015_spec_op_keeps_its_v015_renderer_through_raw() {
+    let spec: Value = serde_json::from_str(SPEC).unwrap();
+    assert_eq!(V015_SPEC_OPS.len(), 167);
+    for op in V015_CURATED.iter().chain(V015_SPEC_OPS_GONE) {
+        assert!(V015_SPEC_OPS.contains(op), "{op:?} is not a v0.1.5 spec op");
+    }
+    for (method, path) in V015_SPEC_OPS_GONE {
+        assert!(
+            spec.pointer(&format!("/paths/{}", path.replace('/', "~1"))).is_none(),
+            "{method} {path} is back in the spec: drop it from V015_SPEC_OPS_GONE"
+        );
+    }
+    let (checked, drift) = drift_from_v015(&spec, V015_SPEC_OPS);
+    assert_eq!(checked, 2 * RAW_OPS_WITH_A_BODY, "v0.1.5 spec ops with a JSON 2xx body");
+    assert!(
+        drift.is_empty(),
+        "raw renderer drift from v0.1.5:\n{}",
+        drift.join("\n")
+    );
 }
 
 #[test]

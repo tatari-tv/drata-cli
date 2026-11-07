@@ -20,8 +20,10 @@ pub struct ConnectionListArgs {
 
 #[derive(Args, Clone, Debug)]
 pub struct ConnectionGetArgs {
-    /// Connection ID
-    pub connection_id: u64,
+    /// Connection ID: numeric, or the provider's prefixed form (aws `roleArn:<role ARN>`,
+    /// azure `subscriptionId:<subscription ID>`, gcp `projectId:<project ID>`; gitlab is
+    /// numeric only). Pass an ARN unencoded: drata percent-encodes its `/`
+    pub connection_id: String,
     /// Sub-collections to expand (space-separated)
     #[arg(long, num_args = 1.., value_enum, ignore_case = true)]
     pub expand: Vec<ConnectionExpand>,
@@ -50,16 +52,20 @@ pub enum ConnectionVerb {
     Create(ConnectionBodyArgs),
     /// Update a connection (--data @file or - only; a new credential re-validates it)
     Update {
-        /// Connection ID
+        /// Connection ID: numeric, or the provider's prefixed form (aws `roleArn:<role ARN>`,
+        /// azure `subscriptionId:<subscription ID>`, gcp `projectId:<project ID>`; gitlab is
+        /// numeric only). Pass an ARN unencoded: drata percent-encodes its `/`
         #[arg(required_unless_present = "example")]
-        connection_id: Option<u64>,
+        connection_id: Option<String>,
         #[command(flatten)]
         body: ConnectionBodyArgs,
     },
     /// Delete a connection
     Remove {
-        /// Connection ID
-        connection_id: u64,
+        /// Connection ID: numeric, or the provider's prefixed form (aws `roleArn:<role ARN>`,
+        /// azure `subscriptionId:<subscription ID>`, gcp `projectId:<project ID>`; gitlab is
+        /// numeric only). Pass an ARN unencoded: drata percent-encodes its `/`
+        connection_id: String,
     },
 }
 

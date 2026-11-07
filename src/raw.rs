@@ -65,7 +65,8 @@ fn example_skeleton(method: &str, path: &str) -> Result<String> {
 /// the body if any, and send through the client's generic `raw` verb. Non-GET
 /// requests prompt for confirmation unless `--yes` was passed (confirm is
 /// already baked into the `ConfirmFn`).
-#[instrument(skip(client, config, confirm), fields(method = %args.method, path = %args.path))]
+// skip_all: `args` carries the inline `--data` body and `--field` values.
+#[instrument(skip_all, fields(method = %args.method, path = %args.path))]
 pub async fn handle(args: &RawArgs, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     debug!(
         method = %args.method,
