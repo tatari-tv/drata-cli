@@ -20,8 +20,9 @@ const OBJECT_KEY: &str = "acct/evidence-library/1/uuid/zzz-clitest.txt";
 
 fn test_config() -> Config {
     Config {
+        backend: Backend::Drata,
         api_key: "test-key".to_string(),
-        region: "us".to_string(),
+        region: Some("us".to_string()),
         allow_writes: true,
         profile: "test".to_string(),
         output_format: OutputFormat::Json,
@@ -70,7 +71,7 @@ async fn run(servers: &Servers, file: &std::path::Path) -> eyre::Result<()> {
     ])
     .expect("argv parses");
     let config = test_config();
-    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), Some(&config.region), true)
+    let client = DrataClient::new(Backend::Drata, config.api_key.clone(), config.region.as_deref(), true)
         .expect("client builds")
         .with_base_url(servers.drata.uri());
     drata_cli::dispatch(&cli, &client, &config, &default_confirm(cli.yes)).await

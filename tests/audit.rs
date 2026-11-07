@@ -15,8 +15,9 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn test_config() -> Config {
     Config {
+        backend: Backend::Drata,
         api_key: "test-key".to_string(),
-        region: "us".to_string(),
+        region: Some("us".to_string()),
         allow_writes: true,
         profile: "test".to_string(),
         output_format: OutputFormat::Json,
@@ -37,7 +38,7 @@ async fn run(argv: &[&str], response: ResponseTemplate, allow_writes: bool, conf
     let client = DrataClient::new(
         Backend::Drata,
         config.api_key.clone(),
-        Some(&config.region),
+        config.region.as_deref(),
         allow_writes,
     )
     .expect("client builds")

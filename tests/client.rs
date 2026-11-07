@@ -6,7 +6,7 @@ use drata_cli::backend::Backend;
 use drata_cli::client::{ApiError, DrataClient, EnvelopeError, Multipart, WriteGuardError};
 use reqwest::StatusCode;
 use serde_json::json;
-use wiremock::matchers::{body_json, header, method, path, query_param};
+use wiremock::matchers::{any, body_json, header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 async fn ro_client(server: &MockServer) -> DrataClient {
@@ -206,6 +206,47 @@ async fn patch_sends_method_and_body() {
         .await
         .expect("patch ok");
     assert_eq!(resp["name"], "y");
+}
+
+#[tokio::test]
+async fn safebase_write_guard_sends_no_request() {
+    let server = MockServer::start().await;
+    Mock::given(any())
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let client = DrataClient::new(Backend::Safebase, "sb-read-only".to_string(), None, false)
+        .expect("client builds")
+        .with_base_url(server.uri());
+
+    let err = client
+        .patch("/document/1", json!({"name": "x"}))
+        .await
+        .expect_err("a read-only SafeBase key must not PATCH");
+    let guard = err.downcast_ref::<WriteGuardError>().expect("WriteGuardError");
+    assert_eq!(guard.backend, Backend::Safebase);
+    assert!(
+        err.to_string()
+            .starts_with("write blocked: the active SafeBase credential is not write-enabled."),
+        "{err}"
+    );
+    assert!(server.received_requests().await.unwrap_or_default().is_empty());
+}
+
+#[tokio::test]
+async fn drata_write_guard_names_drata() {
+    let server = MockServer::start().await;
+    let err = ro_client(&server)
+        .await
+        .delete("/vendors/1", None)
+        .await
+        .expect_err("blocked");
+    assert!(
+        err.to_string()
+            .starts_with("write blocked: the active Drata credential is not write-enabled."),
+        "{err}"
+    );
 }
 
 #[tokio::test]

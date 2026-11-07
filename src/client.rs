@@ -61,13 +61,15 @@ pub struct EnvelopeError {
 
 /// Raised when a non-GET request is attempted on a client whose resolved
 /// credential is not write-enabled. Fails closed: writes are off by default.
+/// Names the backend whose credential blocked the write.
 #[derive(Debug, Error)]
 #[error(
-    "write blocked: the active Drata credential is not write-enabled.\n\
+    "write blocked: the active {backend} credential is not write-enabled.\n\
      Non-GET requests ({method} {path}) require a credential with `allow-writes: true`.\n\
      Set it on the active profile in credentials.json, or pass --allow-writes."
 )]
 pub struct WriteGuardError {
+    pub backend: Backend,
     pub method: String,
     pub path: String,
 }
@@ -286,8 +288,9 @@ impl DrataClient {
     #[instrument(skip(self, body), fields(%method, %path, ?retry))]
     async fn send_inner(&self, method: Method, path: &str, body: Option<Value>, retry: Retry429) -> Result<Value> {
         if method != Method::GET && !self.allow_writes {
-            warn!(%method, %path, "write blocked: credential not write-enabled");
+            warn!(backend = %self.backend, %method, %path, "write blocked: credential not write-enabled");
             return Err(WriteGuardError {
+                backend: self.backend,
                 method: method.to_string(),
                 path: path.to_string(),
             }
@@ -365,8 +368,9 @@ impl DrataClient {
         debug!(%method, path, files = form.files.len(), fields = form.fields.len(), "multipart request");
 
         if !self.allow_writes {
-            warn!(%method, %path, "write blocked: credential not write-enabled");
+            warn!(backend = %self.backend, %method, %path, "write blocked: credential not write-enabled");
             return Err(WriteGuardError {
+                backend: self.backend,
                 method: method.to_string(),
                 path: path.to_string(),
             }
