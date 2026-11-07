@@ -72,8 +72,8 @@ fn every_operation_is_reachable() {
     );
 }
 
-/// SafeBase has no curated commands yet: `drata safebase raw` is the only
-/// route, so every op must be routable through it. Unlike Drata's, one op
+/// `drata safebase raw` reaches every SafeBase op, so every op must be
+/// routable through it. Unlike Drata's, one op
 /// (`PATCH /accounts/{id}`) has no `operationId`, so none is required.
 #[test]
 fn every_safebase_operation_is_reachable_through_raw() {
@@ -96,6 +96,41 @@ fn every_safebase_operation_is_reachable_through_raw() {
         ops.iter().any(|op| op.method == "PATCH"),
         "SafeBase has PATCH operations; raw must reach them"
     );
+}
+
+/// The SafeBase ops the curated `drata safebase` reads reach, one per verb
+/// (`tests/safebase_reads.rs` sends each and asserts it on the wire):
+/// `account list|get|url`, `member list`, `document list|get|types`,
+/// `request list`, `kb search`.
+const CURATED: &[(&str, &str)] = &[
+    ("GET", "/accounts"),
+    ("GET", "/accounts/{id}"),
+    ("GET", "/accounts/{id}/url"),
+    ("GET", "/accounts/members"),
+    ("GET", "/documents"),
+    ("GET", "/document/{id}"),
+    ("GET", "/document-types"),
+    ("GET", "/requests"),
+    ("GET", "/kb/search"),
+];
+
+#[test]
+fn every_curated_safebase_entry_matches_a_spec_operation() {
+    let ops = spec::operations(Backend::Safebase).expect("spec operations parse");
+    for (method, path) in CURATED {
+        assert!(
+            ops.iter().any(|op| op.method == *method && op.path == *path),
+            "curated SafeBase entry `{method} {path}` has no matching spec operation"
+        );
+    }
+}
+
+#[test]
+fn curated_safebase_entries_are_unique() {
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in CURATED {
+        assert!(seen.insert(entry), "duplicate curated SafeBase entry {entry:?}");
+    }
 }
 
 #[test]

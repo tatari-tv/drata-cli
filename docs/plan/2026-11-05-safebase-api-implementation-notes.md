@@ -110,3 +110,29 @@ Design doc: `docs/plan/2026-11-05-safebase-api.md`
 
 ### Open questions
 - None.
+
+## Phase 5: Curated SafeBase reads
+
+### Design decisions
+- Reads split into fetch and print. `resources::safebase::fetch(action, client, stream)` returns a `Reply` (`Ok | Text | Rows | One | Streamed`); `handle` is the thin shell that prints it (`src/resources/safebase.rs`). Wiremock tests assert the rendered rows through `Reply::table_text` and the NDJSON through the `stream` writer, with no stdout capture
+- One module per noun under `src/resources/safebase/` (`account`, `member`, `document`, `request`, `kb`), each with a pure path builder that has a unit test
+- Named tables, not sniffed: `Table::SafebaseAccounts | Members | Documents | DocumentTypes | Requests | KbEntries`, renderers in `src/output/table/safebase.rs`. SafeBase rows share keys (`id`, `name`, `type`) with Drata rows, so a sniff would collide. New `output::render_text` exposes the named render for tests
+- Lists print `{"data": [...]}` in JSON mode, as Drata lists do; `get` prints the `result` object. The envelope is not echoed
+- Verbs map to ops, params checked against `spec/safebase-openapi-v1.json`: `account list` `GET /accounts`, `get` `GET /accounts/{id}`, `url` `GET /accounts/{id}/url`; `member list` `GET /accounts/members` (`email`, `sfdcAccountId`); `document list` `GET /documents` (`query`), `get` `GET /document/{id}` (`type=external`), `types` `GET /document-types`; `request list` `GET /requests` (`status` enum); `kb search` `GET /kb/search` (`query`)
+- Path ids go through `encode_path_segment`; the status filter is a `ValueEnum` (`SafebaseRequestStatus`, lower-case wire names), so an out-of-enum value fails in clap
+- A 2xx whose `result` lacks the expected list or string (`document types` `result.items`, `account url` `result`) is an error naming it, never an empty table
+- An `{ok}`-only response maps to `Reply::Ok` and prints `ok`. No curated read hits such an op, and the mapping is covered by `ok_only_response_prints_ok`
+- `tests/coverage.rs` gains `CURATED` (9 `(method, path)` entries) with `every_curated_safebase_entry_matches_a_spec_operation` and a uniqueness test. Break-to-prove: a misspelled entry fails the first test; a wrong `companyName` field in the requests renderer fails `request_list_sends_status_and_renders_rows`. Both reverted
+
+### Deviations
+- `account url` prints the bare URL as plain text, even in JSON mode, not a JSON-quoted string: it is a single scalar for `$(...)` use
+- No account-list filters (`name`, `domain`, ...) and no `document list` filters beyond `--query` (`orderBy`, `tags`, ...): the doc's command list has only `--all` and `--query`. Raw reaches the rest
+- `document types` reads `result.items` (the spec's shape) and ignores `count`
+- `tests/commands.rs` is untouched: its `UNCURATED` already lists `safebase`, and SafeBase verbs are proven in `tests/safebase_reads.rs` instead (that table is Drata ops)
+
+### Tradeoffs
+- `Reply` enum plus `fetch` over printing inside each handler: one extra type, but the rendered output becomes testable data
+- Table-per-command variants on `Table` over a generic key-based SafeBase renderer: explicit columns per noun, matching how Drata tables read
+
+### Open questions
+- None.

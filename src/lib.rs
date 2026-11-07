@@ -172,7 +172,12 @@ pub fn run_auth(cli: &Cli, diag: &AuthDiagnostic) -> Result<()> {
                 resources::auth::safebase_login(&profile, api_key, *allow_writes)
             }
             SafebaseAction::Logout => resources::auth::logout(&profile, Backend::Safebase),
-            SafebaseAction::Raw(_) => Err(eyre::eyre!("run_auth called on non-auth command")),
+            SafebaseAction::Raw(_)
+            | SafebaseAction::Account { .. }
+            | SafebaseAction::Member { .. }
+            | SafebaseAction::Document { .. }
+            | SafebaseAction::Request { .. }
+            | SafebaseAction::Kb { .. } => Err(eyre::eyre!("run_auth called on non-auth command")),
         },
         Commands::Whoami => resources::auth::whoami(diag),
         Commands::Auth => resources::auth::auth(diag),
@@ -323,6 +328,16 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
             action: SafebaseAction::Raw(args),
         } => {
             raw::handle(args, client, config, confirm).await?;
+        }
+        Commands::Safebase {
+            action:
+                action @ (SafebaseAction::Account { .. }
+                | SafebaseAction::Member { .. }
+                | SafebaseAction::Document { .. }
+                | SafebaseAction::Request { .. }
+                | SafebaseAction::Kb { .. }),
+        } => {
+            resources::safebase::handle(action, client, config).await?;
         }
         Commands::Login { .. }
         | Commands::Logout
