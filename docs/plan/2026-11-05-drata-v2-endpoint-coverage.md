@@ -330,7 +330,7 @@ Observed on branch `drata-v2-endpoint-coverage` (HEAD 371c13f), 2026-11-05, `tar
 
 ## Open Questions
 
-- (none)
+- Gated on the shakedown: does `vendor security-review create-with-file` succeed as multipart? Both the June and current specs list only `application/json` for that op, yet its body requires `file` as a binary string, which JSON cannot carry. v0.1.5 already sent multipart, so this is not a change in this plan (implementation notes, Phase 1; round-2 audit finding D1). Settling it takes one live write on a `zzz-clitest-` vendor. The CLI has no DELETE for a security review, so that write needs explicit approval before the shakedown runs it.
 
 ## Review Log
 
