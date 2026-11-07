@@ -28,6 +28,7 @@ fn example_only_for_create_with_flag() {
 
     let list = AssetAction::List {
         all: false,
+        limit: None,
         expand: vec![],
     };
     assert!(example_if_requested(&list).is_none());

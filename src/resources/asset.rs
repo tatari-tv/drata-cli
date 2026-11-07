@@ -33,7 +33,7 @@ fn example_skeleton(method: &str, path: &str) -> Result<String> {
 
 pub async fn handle(action: &AssetAction, client: &DrataClient, config: &Config, confirm: &ConfirmFn) -> Result<()> {
     match action {
-        AssetAction::List { all, expand } => list(client, config, *all, expand).await,
+        AssetAction::List { all, limit, expand } => list(client, config, *all, *limit, expand).await,
         AssetAction::Get { asset_id, expand } => get(client, config, asset_id, expand).await,
         AssetAction::Create {
             name,
@@ -85,14 +85,15 @@ pub async fn handle(action: &AssetAction, client: &DrataClient, config: &Config,
 // ---------------------------------------------------------------------------
 
 #[instrument(skip(client, config))]
-async fn list(client: &DrataClient, config: &Config, all: bool, expand: &[String]) -> Result<()> {
-    debug!(all, expand_len = expand.len(), "asset list");
+async fn list(client: &DrataClient, config: &Config, all: bool, limit: Option<u64>, expand: &[String]) -> Result<()> {
+    debug!(all, ?limit, expand_len = expand.len(), "asset list");
+    let limit = limit.map(|n| n as usize);
     let base = append_expand("/assets", expand);
     if all {
         let mut stdout = io::stdout();
-        client.stream_all(&base, &mut stdout).await?;
+        client.stream_all_limited(&base, limit, &mut stdout).await?;
     } else {
-        let items = client.get_all(&base).await?;
+        let items = client.get_all_limited(&base, limit).await?;
         let result = json!({ "data": items });
         print_value(&result, &config.output_format);
     }

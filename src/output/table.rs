@@ -1036,10 +1036,12 @@ fn render_roles(rows: &[Value], width: usize) -> String {
 
 fn render_monitors(rows: &[Value], width: usize) -> String {
     render_table(
-        &["ID", "NAME", "CHECK_STATUS", "RESULT_STATUS", "LAST_PASSED"],
+        &["TEST_ID", "NAME", "CHECK_STATUS", "RESULT_STATUS", "LAST_PASSED"],
         rows,
         &[
-            |r| scalar_field(r, "id"),
+            // Every `monitor` verb addresses a test by `testId`; the row's `id`
+            // is a different key that 404s when fed back (v0.2.0 shakedown).
+            |r| scalar_field(r, "testId"),
             |r| str_field(r, "name"),
             |r| str_field(r, "checkStatus"),
             |r| str_field(r, "checkResultStatus"),

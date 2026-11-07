@@ -398,3 +398,81 @@ fn plain_errors_carry_no_agent_guidance() {
     );
     assert!(!msg.contains("Blocker") && !msg.contains("Available actions"), "{msg}");
 }
+
+#[test]
+fn retry_delay_honors_a_long_retry_after_up_to_the_cap() {
+    // Drata's edge sent 162 during the v0.2.0 shakedown; a 60s cap wasted every retry.
+    assert_eq!(retry_delay(Some("162")), 162);
+    assert_eq!(retry_delay(Some("99999")), MAX_RETRY_DELAY_SECS);
+    assert_eq!(retry_delay(None), DEFAULT_RETRY_DELAY_SECS);
+    assert_eq!(retry_delay(Some("soon")), DEFAULT_RETRY_DELAY_SECS);
+}
+
+async fn three_page_server(route: &str) -> MockServer {
+    let server = MockServer::start().await;
+    for (cursor_in, cursor_out, ids) in [
+        (None, Some("p2"), [1, 2]),
+        (Some("p2"), Some("p3"), [3, 4]),
+        (Some("p3"), None, [5, 6]),
+    ] {
+        let mut m = Mock::given(method("GET")).and(path(route));
+        m = match cursor_in {
+            Some(c) => m.and(query_param("cursor", c)),
+            None => m.and(query_param_is_missing("cursor")),
+        };
+        m.respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": ids.iter().map(|i| serde_json::json!({"id": i})).collect::<Vec<_>>(),
+            "pagination": {"cursor": cursor_out}
+        })))
+        .mount(&server)
+        .await;
+    }
+    server
+}
+
+#[tokio::test]
+async fn get_all_limited_stops_fetching_once_the_limit_is_reached() {
+    let server = three_page_server("/assets").await;
+    let client = ro_client_for_stream(&server).await;
+    let items = client.get_all_limited("/assets", Some(3)).await.unwrap();
+    let ids: Vec<i64> = items.iter().map(|v| v["id"].as_i64().unwrap()).collect();
+    assert_eq!(ids, vec![1, 2, 3]);
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(reqs.len(), 2, "page 3 must not be fetched");
+    assert!(
+        reqs[0].url.query().unwrap().contains("size=3"),
+        "page size shrinks to the limit: {}",
+        reqs[0].url
+    );
+}
+
+#[tokio::test]
+async fn stream_all_limited_writes_exactly_limit_lines() {
+    let server = three_page_server("/events").await;
+    let client = ro_client_for_stream(&server).await;
+    let mut out: Vec<u8> = Vec::new();
+    let n = client.stream_all_limited("/events", Some(1), &mut out).await.unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(String::from_utf8(out).unwrap().lines().count(), 1);
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn page_requests_are_paced_under_the_rate_limit() {
+    // Local request latency alone runs into the hundreds of ms in a debug build,
+    // so a 150ms floor is not measurable here; a 1s interval is, and the drain
+    // uses the same code path whatever the interval.
+    assert_eq!(MIN_PAGE_INTERVAL, Duration::from_millis(150));
+    let server = three_page_server("/events").await;
+    let interval = Duration::from_secs(1);
+    let client = ro_client_for_stream(&server).await.with_page_interval(interval);
+    let start = std::time::Instant::now();
+    let items = client.get_all("/events").await.unwrap();
+    assert_eq!(items.len(), 6);
+    assert!(
+        start.elapsed() >= interval * 2,
+        "3 pages took {:?}, under two {:?} intervals",
+        start.elapsed(),
+        interval
+    );
+}

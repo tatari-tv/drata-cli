@@ -932,6 +932,9 @@ pub enum AssetAction {
         /// Stream all pages as NDJSON instead of buffering
         #[arg(long)]
         all: bool,
+        /// Stop after this many items (pages stop as soon as it is reached)
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        limit: Option<u64>,
         /// Sub-collections to expand (space-separated, repeatable)
         #[arg(long, num_args = 1..)]
         expand: Vec<String>,
@@ -1111,6 +1114,9 @@ pub enum EventAction {
         /// Stream all pages as NDJSON instead of buffering
         #[arg(long)]
         all: bool,
+        /// Stop after this many items (pages stop as soon as it is reached)
+        #[arg(long, value_parser = clap::value_parser!(u64).range(1..))]
+        limit: Option<u64>,
     },
     /// Get an event by ID
     Get {

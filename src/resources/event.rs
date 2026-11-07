@@ -17,7 +17,7 @@ use tracing::{debug, instrument};
 
 pub async fn handle(action: &EventAction, client: &DrataClient, config: &Config) -> Result<()> {
     match action {
-        EventAction::List { all } => list(client, config, *all).await,
+        EventAction::List { all, limit } => list(client, config, *all, *limit).await,
         EventAction::Get { event_id } => get(client, config, event_id).await,
     }
 }
@@ -27,13 +27,14 @@ pub async fn handle(action: &EventAction, client: &DrataClient, config: &Config)
 // ---------------------------------------------------------------------------
 
 #[instrument(skip(client, config))]
-async fn list(client: &DrataClient, config: &Config, all: bool) -> Result<()> {
-    debug!(all, "event list");
+async fn list(client: &DrataClient, config: &Config, all: bool, limit: Option<u64>) -> Result<()> {
+    debug!(all, ?limit, "event list");
+    let limit = limit.map(|n| n as usize);
     if all {
         let mut stdout = std::io::stdout();
-        client.stream_all("/events", &mut stdout).await?;
+        client.stream_all_limited("/events", limit, &mut stdout).await?;
     } else {
-        let items = client.get_all("/events").await?;
+        let items = client.get_all_limited("/events", limit).await?;
         let result = json!({ "data": items });
         print_value(&result, &config.output_format);
     }
