@@ -4,7 +4,7 @@ version = "0.2.1"
 edition = "2024"
 authors = ["Scott Idler <scott.idler@tatari.tv>"]
 build = "build.rs"
-description = "Drata compliance API CLI: curated typed commands plus a spec-driven raw passthrough"
+description = "Drata and SafeBase CLI: curated typed commands plus spec-driven raw passthrough for the Drata GRC API and the SafeBase Trust Center API"
 
 # The crate is `drata-cli` but the installed binary is `drata`.
 [[bin]]

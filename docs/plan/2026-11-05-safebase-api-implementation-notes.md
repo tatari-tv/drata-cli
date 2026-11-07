@@ -173,3 +173,22 @@ Design doc: `docs/plan/2026-11-05-safebase-api.md`
 ### Open questions
 - Step 2 timeout: keep the presigned transport's 300 s bound (current), or pass the API client's 30 s as the doc literally says?
 - Tags across `--replace` remain untested (Phase 0 had no tags); the help text says so. Worth a shakedown check once the tenant has a tag?
+
+## Phase 7: Docs and help
+
+### Design decisions
+- One `## SafeBase` README section with `###` subsections (credential, write gate, `credentials.json` shape, raw, curated reads, curated writes, document upload), placed after the raw namespace (`README.md`). It describes what shipped: Phase 6's PUT signed URL, the observed `--replace` behavior, `account url` printing a bare URL, `--notify`
+- Prose is bullets with no line numbers, counts or version pins, per the durable-doc rule. The intro, Authentication and Spec coverage sections were reworded to name both backends
+- Top-level `about` and `after_help` name both APIs and the SafeBase credential (`src/cli.rs:Cli`); the `safebase` subtree gets its own `after_help` (credential sources, write gate, `--region` Drata-only, `raw --example`) on the `Commands::Safebase` variant
+- `drata-cli.yml` sample shows the nested per-backend shape and the SafeBase login and env var; Cargo.toml `description` names Drata and SafeBase
+
+### Deviations
+- `drata-cli <command>` examples became `drata <command>`; the one install sentence now says "The crate is `drata-cli`; the binary is named `drata`" and the title heading keeps the crate name, since neither matches the `drata-cli [a-z]` criterion
+- The Write gate prose said `allow_writes: true`; corrected to the real key `allow-writes`
+- One pre-existing "real tenant" in the Live verification section became "live tenant" (prose rule)
+
+### Tradeoffs
+- Reusing the Phase 6 option wording in README vs restating from the design doc: the notes record the shipped behavior, so the README follows them
+
+### Open questions
+- None.

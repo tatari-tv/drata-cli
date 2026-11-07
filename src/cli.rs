@@ -42,10 +42,11 @@ pub use vendor::*;
 #[derive(Parser, Debug)]
 #[command(
     name = "drata",
-    about = "Drata compliance CLI",
+    about = "Drata and SafeBase CLI: the Drata GRC API and the SafeBase Trust Center API",
     version = env!("GIT_DESCRIBE"),
     after_help = "Credentials: ~/.config/drata/credentials.json (profiles), \
                   or DRATA_API_KEY / DRATA_REGION / DRATA_PROFILE env vars, or --api-key.\n\
+                  SafeBase has its own credential: `drata safebase login`, or SAFEBASE_API_KEY.\n\
                   Logs: ~/.local/share/drata/logs/drata.log"
 )]
 pub struct Cli {
@@ -303,6 +304,12 @@ pub enum Commands {
     /// Generic passthrough to any operation: `raw <METHOD> <path> ...`
     Raw(RawArgs),
     /// SafeBase Trust Center API (its own credential: `drata safebase login`)
+    #[command(
+        after_help = "Credential: `drata safebase login --api-key <key>`, or SAFEBASE_API_KEY, or --api-key.\n\
+                  Writes: a SafeBase credential is read-only unless it was saved with --allow-writes\n\
+                  (or --allow-writes is passed). --region applies to Drata only.\n\
+                  Any operation without a curated verb: `drata safebase raw --example <METHOD> <path>`."
+    )]
     Safebase {
         #[command(subcommand)]
         action: SafebaseAction,

@@ -6,14 +6,22 @@
 # Example credentials.json:
 #   {
 #     "profiles": {
-#       "default": { "api-key": "<your-key>", "region": "us", "allow-writes": false },
-#       "prod":    { "api-key": "<your-key>", "region": "us", "allow-writes": true  }
+#       "default": {
+#         "drata":    { "api-key": "<your-key>", "region": "us", "allow-writes": false },
+#         "safebase": { "api-key": "<your-key>", "allow-writes": false }
+#       },
+#       "prod": {
+#         "drata":    { "api-key": "<your-key>", "region": "us", "allow-writes": true }
+#       }
 #     }
 #   }
+# Each block is optional; a profile needs at least one. An older flat profile
+# ({ "api-key", "region", "allow-writes" }) still reads as the "drata" block.
 #
-# Create or update a profile with:
+# Create or update a block with:
 #   drata login --api-key <your-key> --region us [--allow-writes]
+#   drata safebase login --api-key <your-key> [--allow-writes]
 #
-# Precedence: CLI flags > env vars (DRATA_API_KEY / DRATA_REGION / DRATA_PROFILE)
-# > credentials file. Writes fail closed: a non-GET request requires a
+# Precedence, per backend: CLI flags > env vars (DRATA_API_KEY / DRATA_REGION /
+# SAFEBASE_API_KEY; DRATA_PROFILE picks the profile) > credentials file. Writes fail closed: a non-GET request requires a
 # write-enabled credential (allow-writes: true) or the --allow-writes flag.
