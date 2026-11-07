@@ -129,17 +129,19 @@ pub fn pick_mime(path: &Path, allowed: &[String]) -> Result<String> {
 }
 
 /// Read `path` and check it against the spec: size at most the spec maximum
-/// (checked on the metadata first, so an oversized file is never read) and a
-/// MIME type in the spec enum.
+/// and a MIME type in the spec enum. The file is opened once and the read is
+/// capped at `max + 1` bytes, so a swapped path or a FIFO/device reporting
+/// length 0 can never be read past the limit.
 #[instrument]
 pub fn load(path: &Path) -> Result<LocalFile> {
     let (max, allowed) = upload_limits()?;
-    let len = std::fs::metadata(path)
-        .with_context(|| format!("Failed to read upload file `{}`", path.display()))?
-        .len();
+    let read_err = || format!("Failed to read upload file `{}`", path.display());
+    let file = std::fs::File::open(path).with_context(read_err)?;
+    let len = file.metadata().with_context(read_err)?.len();
     check_size(path, len, max)?;
     let mime_type = pick_mime(path, &allowed)?;
-    let bytes = std::fs::read(path).with_context(|| format!("Failed to read upload file `{}`", path.display()))?;
+    let mut bytes = Vec::with_capacity(len as usize);
+    std::io::Read::read_to_end(&mut std::io::Read::take(file, max + 1), &mut bytes).with_context(read_err)?;
     check_size(path, bytes.len() as u64, max)?;
     let file_name = path
         .file_name()
@@ -322,7 +324,11 @@ pub async fn run(args: &UploadArgs, client: &DrataClient, confirm: &ConfirmFn) -
                 table: Table::SafebaseDocuments,
                 row: doc.clone(),
             }),
-            None => bail!("PUT {UPLOAD_PATH} answered with no `result`: {resp}"),
+            None => {
+                let cause = "answered 2xx with no `result`".to_string();
+                warn!(file_id = %ticket.file_id, %external_id, %cause, "upload step 3 returned no result; looking up by externalId");
+                settle(client, &ticket.file_id, &external_id, size, &file.md5b64, cause).await
+            }
         },
         Err(e) if outcome_is_open(&e) => {
             let cause = format!("{e:#}");

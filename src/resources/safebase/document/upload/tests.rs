@@ -111,3 +111,15 @@ fn parse_ticket_failure_carries_the_file_id_when_known() {
 fn outcome_is_open_only_for_transport_errors() {
     assert!(!outcome_is_open(&eyre!("API error 400")));
 }
+
+#[cfg(unix)]
+#[test]
+fn load_caps_the_read_when_the_length_lies() {
+    // /dev/zero reports length 0, so only the capped read stops it: the read
+    // ends at max + 1 bytes and fails the size check instead of never ending.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let link = dir.path().join("zero.pdf");
+    std::os::unix::fs::symlink("/dev/zero", &link).expect("symlink");
+    let err = load(&link).expect_err("an endless file is over the limit");
+    assert!(err.to_string().contains("SafeBase accepts at most"), "{err}");
+}

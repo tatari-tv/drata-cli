@@ -349,6 +349,32 @@ async fn upload_step3_timeout_lookup_429_is_sent_once() {
 }
 
 #[tokio::test]
+async fn upload_step3_ok_with_no_result_looks_up_once_and_is_outcome_unknown() {
+    // SafeBase accepted the PUT but sent no document: the outcome is open, so
+    // one lookup runs and a miss reports both ids, never a plain failure.
+    let up = Upload::start(ResponseTemplate::new(200)).await;
+    up.create_responds(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+        .await;
+    up.lookup_responds(ResponseTemplate::new(404).set_body_json(json!({"statusCode": 404, "message": "Not found"})))
+        .await;
+    let file = fixture();
+    let err = run(
+        &up.api,
+        &upload_argv(file.to_str().expect("utf-8"), &["--external-id", EXTERNAL_ID]),
+    )
+    .await
+    .expect_err("no result and no document is not success");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("outcome unknown"), "{msg}");
+    assert!(msg.contains(FILE_ID) && msg.contains(EXTERNAL_ID), "{msg}");
+    assert!(
+        matches!(err.downcast_ref::<UploadError>(), Some(UploadError::Unknown { .. })),
+        "{err:?}"
+    );
+    assert_one_put_one_lookup(&up).await;
+}
+
+#[tokio::test]
 async fn upload_step3_http_error_is_definite_and_skips_the_lookup() {
     let up = Upload::start(ResponseTemplate::new(200)).await;
     up.create_responds(
