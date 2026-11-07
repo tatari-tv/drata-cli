@@ -134,8 +134,12 @@ pub fn build_replace_file(file: &Path, language: Option<&str>) -> Multipart {
 pub fn example_if_requested(action: &PolicyVersionAction) -> Option<Result<String>> {
     match action {
         PolicyVersionAction::Create(args) if args.example => Some(
-            spec::example_for_operation("POST", "/policies/{policyId}/policy-versions")
-                .and_then(|e| e.ok_or_else(|| eyre!("`POST /policies/{{policyId}}/policy-versions` has no JSON body"))),
+            spec::example_for_operation(
+                crate::backend::Backend::Drata,
+                "POST",
+                "/policies/{policyId}/policy-versions",
+            )
+            .and_then(|e| e.ok_or_else(|| eyre!("`POST /policies/{{policyId}}/policy-versions` has no JSON body"))),
         ),
         _ => None,
     }

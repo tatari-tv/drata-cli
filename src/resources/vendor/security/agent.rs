@@ -353,7 +353,7 @@ pub fn example_if_requested(action: &SecurityReviewAgentAction) -> Option<Result
     };
     let path = format!("{REVIEW_TEMPLATE}/{segment}");
     Some(
-        spec::example_for_operation("POST", &path)
+        spec::example_for_operation(crate::backend::Backend::Drata, "POST", &path)
             .and_then(|s| s.ok_or_else(|| eyre::eyre!("operation `POST {}` has no JSON request body", path))),
     )
 }

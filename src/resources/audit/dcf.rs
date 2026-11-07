@@ -171,7 +171,7 @@ pub fn accept_prompt(path: &str, body: &Value) -> String {
 }
 
 fn example(method: &str, path: &str) -> Result<String> {
-    spec::example_for_operation(method, path)?
+    spec::example_for_operation(crate::backend::Backend::Drata, method, path)?
         .ok_or_else(|| eyre!("operation `{method} {path}` has no JSON request body"))
 }
 

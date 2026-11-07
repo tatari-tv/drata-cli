@@ -345,7 +345,8 @@ fn identity_action_is_per_kind_and_client_type_is_the_spec_enum() {
     assert!(parses(&[&infra[..], &["LINKUSER", "--user-id", "1"]].concat()));
     assert!(!parses(&[&infra[..], &["retractWriteAccess"]].concat()));
     assert!(parses(&[&vc[..], &["retractWriteAccess"]].concat()));
-    let spec_clients = drata_cli::spec::enum_values("ClientTypeEnum").expect("spec has ClientTypeEnum");
+    let spec_clients = drata_cli::spec::enum_values(drata_cli::backend::Backend::Drata, "ClientTypeEnum")
+        .expect("spec has ClientTypeEnum");
     for client in spec_clients {
         assert!(
             parses(&[
@@ -386,7 +387,8 @@ fn policy_language_enums_match_the_spec() {
 
 #[test]
 fn policy_version_language_is_the_spec_enum_and_the_version_command_keeps_its_get_form() {
-    let spec_languages = drata_cli::spec::enum_values("PolicyLanguageEnum").expect("spec has PolicyLanguageEnum");
+    let spec_languages = drata_cli::spec::enum_values(drata_cli::backend::Backend::Drata, "PolicyLanguageEnum")
+        .expect("spec has PolicyLanguageEnum");
     for language in spec_languages {
         assert!(
             parses(&[

@@ -20,6 +20,9 @@ use drata_cli::spec::{self, Operation};
 /// so a refresh is a deliberate, reviewed change.
 const EXPECTED_OPERATIONS: usize = 308;
 
+/// Operation count of the committed SafeBase spec (`spec/safebase-openapi-v1.json`).
+const EXPECTED_SAFEBASE_OPERATIONS: usize = 47;
+
 /// The command table (`tests/commands/table.rs`). Only `method` and `path`
 /// are read here; `tests/commands.rs` reads the argv and response of each row.
 #[allow(dead_code)]
@@ -45,7 +48,7 @@ fn is_curated(op: &Operation) -> bool {
 /// An operation is reachable via `raw` iff it is routable: a known upper-cased
 /// method and an absolute path template.
 fn raw_reachable(op: &Operation) -> bool {
-    matches!(op.method.as_str(), "GET" | "POST" | "PUT" | "DELETE") && op.path.starts_with('/')
+    matches!(op.method.as_str(), "GET" | "POST" | "PUT" | "PATCH" | "DELETE") && op.path.starts_with('/')
 }
 
 #[test]
@@ -67,6 +70,41 @@ fn every_operation_is_reachable() {
             .map(|op| format!("{} {}", op.method, op.path))
             .collect::<Vec<_>>()
     );
+}
+
+/// SafeBase has no curated commands yet: `drata safebase raw` is the only
+/// route, so every op must be routable through it. Unlike Drata's, one op
+/// (`PATCH /accounts/{id}`) has no `operationId`, so none is required.
+#[test]
+fn every_safebase_operation_is_reachable_through_raw() {
+    let ops = spec::operations(Backend::Safebase).expect("spec operations parse");
+    assert_eq!(
+        ops.len(),
+        EXPECTED_SAFEBASE_OPERATIONS,
+        "expected {EXPECTED_SAFEBASE_OPERATIONS} SafeBase operations"
+    );
+    let unreachable: Vec<String> = ops
+        .iter()
+        .filter(|op| !raw_reachable(op))
+        .map(|op| format!("{} {}", op.method, op.path))
+        .collect();
+    assert!(
+        unreachable.is_empty(),
+        "unreachable SafeBase operations: {unreachable:#?}"
+    );
+    assert!(
+        ops.iter().any(|op| op.method == "PATCH"),
+        "SafeBase has PATCH operations; raw must reach them"
+    );
+}
+
+#[test]
+fn safebase_questionnaire_upload_matches_the_documented_multipart_fields() {
+    let spec = Backend::Safebase.spec().expect("spec parses");
+    let schema = &spec["paths"]["/questionnaires"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"]["properties"];
+    for field in ["qnr", "accountId", "productId", "dueDate", "notes"] {
+        assert!(schema.get(field).is_some(), "POST /questionnaires lacks field {field}");
+    }
 }
 
 #[test]

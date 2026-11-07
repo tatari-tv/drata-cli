@@ -70,7 +70,9 @@ fn find_by_method_path_returns_none_for_unknown() {
 
 #[test]
 fn example_for_create_vendor_includes_required_name() {
-    let example = example_for_operation("post", "/vendors").unwrap().unwrap();
+    let example = example_for_operation(Backend::Drata, "post", "/vendors")
+        .unwrap()
+        .unwrap();
     let parsed: Value = serde_json::from_str(&example).unwrap();
     // `name` is a required property of the create-vendor schema.
     assert!(
@@ -86,7 +88,9 @@ fn example_resolves_enum_refs_to_a_real_value() {
     // `risk` resolves through allOf -> $ref VendorRiskEnum; the skeleton should
     // carry one of the enum's allowed values (or its declared example), never a
     // dangling $ref.
-    let example = example_for_operation("post", "/vendors").unwrap().unwrap();
+    let example = example_for_operation(Backend::Drata, "post", "/vendors")
+        .unwrap()
+        .unwrap();
     assert!(
         !example.contains("$ref"),
         "skeleton must not leak a raw $ref: {example}"
@@ -96,26 +100,26 @@ fn example_resolves_enum_refs_to_a_real_value() {
 #[test]
 fn example_for_get_operation_is_none() {
     // A GET has no request body, so no skeleton.
-    let example = example_for_operation("get", "/vendors").unwrap();
+    let example = example_for_operation(Backend::Drata, "get", "/vendors").unwrap();
     assert!(example.is_none());
 }
 
 #[test]
 fn example_for_unknown_operation_is_none() {
-    let example = example_for_operation("post", "/no/such/path").unwrap();
+    let example = example_for_operation(Backend::Drata, "post", "/no/such/path").unwrap();
     assert!(example.is_none());
 }
 
 #[test]
 fn example_for_schema_builds_a_named_component() {
-    let resource = example_for_schema("CustomTestRecipeResourcePublicV2Dto").unwrap();
+    let resource = example_for_schema(Backend::Drata, "CustomTestRecipeResourcePublicV2Dto").unwrap();
     assert_eq!(resource["resource"], json!("Employees"));
     assert!(resource["evaluator"]["all"].is_array(), "{resource}");
 }
 
 #[test]
 fn example_for_unknown_schema_is_an_error() {
-    let err = example_for_schema("NoSuchSchemaDto").unwrap_err();
+    let err = example_for_schema(Backend::Drata, "NoSuchSchemaDto").unwrap_err();
     assert!(err.to_string().contains("NoSuchSchemaDto"), "{err}");
 }
 
@@ -195,4 +199,27 @@ fn skeleton_reads_a_type_list_from_the_safebase_spec() {
         .unwrap();
     assert_eq!(expires["type"], json!(["string", "null"]));
     assert_eq!(build_skeleton(spec, expires, 0), json!("string"));
+}
+
+#[test]
+fn example_for_safebase_patch_reads_the_safebase_spec() {
+    // A skeleton carries required fields only, so pick an op that has some.
+    let example = example_for_operation(Backend::Safebase, "post", "/documents/upload")
+        .unwrap()
+        .unwrap();
+    let value: Value = serde_json::from_str(&example).unwrap();
+    assert!(value.get("fileName").is_some(), "{value}");
+    // The same method+path is not in the Drata spec.
+    assert!(
+        example_for_operation(Backend::Drata, "post", "/documents/upload")
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[test]
+fn example_for_safebase_schema_and_enum_values_take_the_backend() {
+    assert!(example_for_schema(Backend::Safebase, "NoSuchSchemaDto").is_err());
+    assert!(enum_values(Backend::Safebase, "ClientTypeEnum").is_err());
+    assert!(enum_values(Backend::Drata, "ClientTypeEnum").is_ok());
 }

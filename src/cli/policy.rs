@@ -42,7 +42,8 @@ pub enum PolicyLanguageVersionExpand {
 /// case-insensitively. The embedded spec is the list: the organization's
 /// languages come from `drata policy-language settings`, and Drata adds codes.
 pub fn policy_language(raw: &str) -> Result<String, String> {
-    let values = crate::spec::enum_values("PolicyLanguageEnum").map_err(|e| e.to_string())?;
+    let values =
+        crate::spec::enum_values(crate::backend::Backend::Drata, "PolicyLanguageEnum").map_err(|e| e.to_string())?;
     values
         .into_iter()
         .find(|v| v.eq_ignore_ascii_case(raw))

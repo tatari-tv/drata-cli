@@ -140,9 +140,9 @@ pub fn find_by_method_path(backend: Backend, method: &str, path: &str) -> Result
 /// Generate a `--example` request-body skeleton for an operation identified by
 /// HTTP method + path template. Returns `None` when the operation has no
 /// JSON request body (e.g. a GET or a multipart upload).
-#[instrument(skip_all, fields(%method, %path))]
-pub fn example_for_operation(method: &str, path: &str) -> Result<Option<String>> {
-    let spec = Backend::Drata.spec()?;
+#[instrument(skip_all, fields(%backend, %method, %path))]
+pub fn example_for_operation(backend: Backend, method: &str, path: &str) -> Result<Option<String>> {
+    let spec = backend.spec()?;
     let schema = match request_schema(spec, method, path)? {
         Some(s) => s,
         None => {
@@ -160,9 +160,9 @@ pub fn example_for_operation(method: &str, path: &str) -> Result<Option<String>>
 /// built the same way as an operation's. For bodies nested deeper than
 /// `MAX_DEPTH`, a caller assembles the skeleton from its component parts.
 /// `Err` when the spec has no such schema.
-#[instrument(skip_all, fields(%name))]
-pub fn example_for_schema(name: &str) -> Result<Value> {
-    let spec = Backend::Drata.spec()?;
+#[instrument(skip_all, fields(%backend, %name))]
+pub fn example_for_schema(backend: Backend, name: &str) -> Result<Value> {
+    let spec = backend.spec()?;
     let schema = spec
         .get("components")
         .and_then(|c| c.get("schemas"))
@@ -173,8 +173,8 @@ pub fn example_for_schema(name: &str) -> Result<Value> {
 
 /// The values of a string enum component schema (`#/components/schemas/<name>`).
 /// `Err` when the spec has no such schema or it is not a string enum.
-pub fn enum_values(name: &str) -> Result<Vec<String>> {
-    let schema = Backend::Drata
+pub fn enum_values(backend: Backend, name: &str) -> Result<Vec<String>> {
+    let schema = backend
         .spec()?
         .get("components")
         .and_then(|c| c.get("schemas"))

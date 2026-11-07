@@ -318,7 +318,7 @@ pub enum Commands {
 /// guardrail enforced in the client.
 #[derive(clap::Args, Debug)]
 pub struct RawArgs {
-    /// HTTP method (GET, POST, PUT, DELETE; case-insensitive)
+    /// HTTP method (GET, POST, PUT, PATCH, DELETE; case-insensitive)
     pub method: String,
     /// Path template under the API base, e.g. /vendors or /vendors/123
     pub path: String,

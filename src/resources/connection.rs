@@ -153,7 +153,7 @@ fn json_kind(value: &Value) -> &'static str {
 }
 
 fn example(method: &str, template: &str) -> Result<String> {
-    spec::example_for_operation(method, template)?
+    spec::example_for_operation(crate::backend::Backend::Drata, method, template)?
         .ok_or_else(|| eyre::eyre!("operation `{method} {template}` has no JSON request body"))
 }
 

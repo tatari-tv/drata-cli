@@ -335,7 +335,7 @@ pub fn example_if_requested(
         ("POST", kind.create_spec_path())
     };
     Some(
-        spec::example_for_operation(method, path)
+        spec::example_for_operation(crate::backend::Backend::Drata, method, path)
             .and_then(|s| s.ok_or_else(|| eyre::eyre!("operation `{} {}` has no JSON request body", method, path))),
     )
 }

@@ -1,5 +1,6 @@
 //! clap types for `drata safebase`, the SafeBase Trust Center API namespace.
 
+use super::RawArgs;
 use clap::Subcommand;
 
 #[derive(Subcommand, Debug)]
@@ -16,4 +17,7 @@ pub enum SafebaseAction {
     },
     /// Remove the profile's SafeBase credential; its Drata credential stays
     Logout,
+    /// Generic passthrough to any SafeBase operation: `raw <METHOD> <path> ...`
+    /// (same flags as `drata raw`; GET, POST, PUT, PATCH, DELETE)
+    Raw(RawArgs),
 }

@@ -61,3 +61,25 @@ Design doc: `docs/plan/2026-11-05-safebase-api.md`
 ### Open questions
 - `drata auth` now shows SafeBase setup help to every Drata-only user. Keep it, or show it only when the profile has a `safebase` block or `SAFEBASE_API_KEY` is set?
 - The legacy single-key migration now also leaves a `.pre-safebase` copy (the legacy file). Fine, or should that path skip the backup?
+
+## Phase 3: `drata safebase raw`
+
+### Design decisions
+- `SafebaseAction::Raw(RawArgs)` reuses the existing `RawArgs` and `raw::handle`, no fork (`src/cli/safebase.rs`, `src/lib.rs:dispatch`). `handle` already takes the backend from `Config`/client, so the only change inside it is the spec-validation lookup, which now reads `config.backend` instead of `Backend::Drata` (`src/raw.rs:handle`). The confirm prompt and write guard are the same code paths as `drata raw`
+- `--example` takes the backend from the caller: `raw::example_if_requested(backend, args)`; `lib.rs:example_if_requested` passes `Backend::Drata` for `Commands::Raw` and `Backend::Safebase` for `safebase raw`. It runs before config load, so no key is needed
+- `spec::example_for_operation`, `example_for_schema`, `enum_values` gained a leading `backend: Backend` argument, as Phase 1 deferred. Every Drata caller passes `Backend::Drata` explicitly; no default shim
+- The "no operation" error names the spec (`in the SafeBase spec`), so a Drata path typed under `safebase raw --example` says which spec was searched
+- `tests/coverage.rs` gained a SafeBase test with `EXPECTED_SAFEBASE_OPERATIONS = 47`, `raw_reachable` accepts PATCH, and no `operationId` is required (`PATCH /accounts/{id}` has none). A second test pins the `POST /questionnaires` multipart field names (`qnr`, `accountId`, `productId`, `dueDate`, `notes`) to the committed spec
+- Wiremock tests live in a new `tests/safebase.rs`, driving `raw::handle` from parsed argv
+
+### Deviations
+- `--example PATCH '/document/{id}'` prints `{}`, not a populated object. `build_skeleton` emits required fields (and fields with an example/default) only, and every `PATCH /document/{id}` field is optional. That is the shared Drata behavior and still satisfies "prints a JSON object, exit 0"; I did not change the skeleton rule for SafeBase. The skeleton tests use `POST /documents/upload`, which has required fields
+- `raw` multipart stays POST and PUT only, as for `drata raw`: no SafeBase op takes a multipart PATCH, so none was added
+- `run_auth` gets an unreachable `SafebaseAction::Raw(_)` error arm, because the `Commands::Safebase` match there is now non-exhaustive in spirit; `is_auth_command` already excludes it
+
+### Tradeoffs
+- Reusing `RawArgs` unchanged over a SafeBase-specific struct: identical flags are the requirement, so one struct keeps the two namespaces from drifting. The `--help` text for the flags still reads "under the API base", which is true for both
+- A required-fields-only `{}` skeleton vs listing optional fields for SafeBase: changing it would fork `build_skeleton`'s contract for one backend
+
+### Open questions
+- Should `--example` skeletons include optional fields (commented or as nulls) so `PATCH /document/{id}` shows its fields? It applies to Drata too, so it is a separate change

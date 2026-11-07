@@ -52,7 +52,10 @@ pub fn example_if_requested(cli: &Cli) -> Option<Result<String>> {
             resources::identity::example_if_requested_version_control(action)
         }
         Commands::Connection { action } => resources::connection::example_if_requested(action),
-        Commands::Raw(args) => raw::example_if_requested(args),
+        Commands::Raw(args) => raw::example_if_requested(Backend::Drata, args),
+        Commands::Safebase {
+            action: SafebaseAction::Raw(args),
+        } => raw::example_if_requested(Backend::Safebase, args),
         _ => None,
     }
 }
@@ -169,6 +172,7 @@ pub fn run_auth(cli: &Cli, diag: &AuthDiagnostic) -> Result<()> {
                 resources::auth::safebase_login(&profile, api_key, *allow_writes)
             }
             SafebaseAction::Logout => resources::auth::logout(&profile, Backend::Safebase),
+            SafebaseAction::Raw(_) => Err(eyre::eyre!("run_auth called on non-auth command")),
         },
         Commands::Whoami => resources::auth::whoami(diag),
         Commands::Auth => resources::auth::auth(diag),
@@ -315,7 +319,18 @@ pub async fn dispatch(cli: &Cli, client: &DrataClient, config: &Config, confirm:
         }
         // Auth commands normally take the no-key bypass in main; if they reach
         // `run`, a key is configured. Re-derive the diagnostic to report source.
-        Commands::Login { .. } | Commands::Logout | Commands::Whoami | Commands::Auth | Commands::Safebase { .. } => {
+        Commands::Safebase {
+            action: SafebaseAction::Raw(args),
+        } => {
+            raw::handle(args, client, config, confirm).await?;
+        }
+        Commands::Login { .. }
+        | Commands::Logout
+        | Commands::Whoami
+        | Commands::Auth
+        | Commands::Safebase {
+            action: SafebaseAction::Login { .. } | SafebaseAction::Logout,
+        } => {
             let diag = AuthDiagnostic::load(cli)?;
             run_auth(cli, &diag)?;
         }

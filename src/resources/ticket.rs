@@ -174,7 +174,7 @@ pub fn create_example(args: &TicketCreateArgs, spec_path: &str) -> Option<Result
         return None;
     }
     Some(
-        spec::example_for_operation("POST", spec_path)
+        spec::example_for_operation(crate::backend::Backend::Drata, "POST", spec_path)
             .and_then(|s| s.ok_or_else(|| eyre::eyre!("operation `POST {}` has no JSON request body", spec_path))),
     )
 }

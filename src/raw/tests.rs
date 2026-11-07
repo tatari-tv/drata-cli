@@ -40,20 +40,20 @@ fn build_path_rejects_entry_without_equals() {
 
 #[test]
 fn example_skeleton_known_op_returns_json() {
-    let out = example_skeleton("post", "/vendors").unwrap();
+    let out = example_skeleton(Backend::Drata, "post", "/vendors").unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert!(parsed.get("name").is_some());
 }
 
 #[test]
 fn example_skeleton_unknown_op_errors() {
-    let err = example_skeleton("post", "/no/such/path").unwrap_err();
+    let err = example_skeleton(Backend::Drata, "post", "/no/such/path").unwrap_err();
     assert!(err.to_string().contains("no operation"));
 }
 
 #[test]
 fn example_skeleton_get_has_no_body() {
-    let err = example_skeleton("get", "/vendors").unwrap_err();
+    let err = example_skeleton(Backend::Drata, "get", "/vendors").unwrap_err();
     assert!(err.to_string().contains("no JSON request body"));
 }
 
@@ -69,7 +69,7 @@ fn example_if_requested_none_without_flag() {
         field: vec![],
         example: false,
     };
-    assert!(example_if_requested(&args).is_none());
+    assert!(example_if_requested(Backend::Drata, &args).is_none());
 }
 
 #[test]
@@ -84,6 +84,15 @@ fn example_if_requested_some_with_flag() {
         field: vec![],
         example: true,
     };
-    let out = example_if_requested(&args).unwrap().unwrap();
+    let out = example_if_requested(Backend::Drata, &args).unwrap().unwrap();
     assert!(out.contains("name"));
+}
+
+#[test]
+fn example_skeleton_safebase_reads_the_safebase_spec() {
+    let out = example_skeleton(Backend::Safebase, "patch", "/document/{id}").unwrap();
+    assert!(serde_json::from_str::<serde_json::Value>(&out).unwrap().is_object());
+    // A Drata path is unknown to the SafeBase spec, and the error says which spec.
+    let err = example_skeleton(Backend::Safebase, "post", "/vendors").unwrap_err();
+    assert!(err.to_string().contains("SafeBase spec"), "{err}");
 }

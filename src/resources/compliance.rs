@@ -29,7 +29,7 @@ const TEMPLATE: &str = "/workspaces/{workspaceId}/compliance-check-exclusions";
 pub fn example_if_requested(action: &ComplianceCheckExclusionAction) -> Option<Result<String>> {
     match action {
         ComplianceCheckExclusionAction::Create { example: true, .. } => Some(
-            spec::example_for_operation("POST", TEMPLATE)
+            spec::example_for_operation(crate::backend::Backend::Drata, "POST", TEMPLATE)
                 .and_then(|s| s.ok_or_else(|| eyre::eyre!("operation `POST {TEMPLATE}` has no JSON request body"))),
         ),
         _ => None,
