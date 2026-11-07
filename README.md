@@ -622,7 +622,7 @@ drata safebase raw POST /questionnaires --file ./qnr.xlsx --file-field qnr --fie
 drata safebase account list [--all]
 drata safebase account get <id>
 drata safebase account url <id>
-drata safebase member list [--email <e>] [--sfdc-account-id <id>]
+drata safebase member list --email <e> [--sfdc-account-id <id>]
 drata safebase document list [--all] [--query <q>]
 drata safebase document get <id> [--external]
 drata safebase document types
