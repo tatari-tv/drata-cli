@@ -1,6 +1,6 @@
 [package]
 name = "drata-cli"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2024"
 authors = ["Scott Idler <scott.idler@tatari.tv>"]
 description = "Drata and SafeBase CLI: curated typed commands plus spec-driven raw passthrough for the Drata GRC API and the SafeBase Trust Center API"
