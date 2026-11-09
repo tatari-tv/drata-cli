@@ -43,7 +43,7 @@ pub use vendor::*;
 #[command(
     name = "drata",
     about = "Drata and SafeBase CLI: the Drata GRC API and the SafeBase Trust Center API",
-    version = env!("GIT_DESCRIBE"),
+    version = concat!("v", env!("CARGO_PKG_VERSION")),
     after_help = "Credentials: ~/.config/drata/credentials.json (profiles), \
                   or DRATA_API_KEY / DRATA_REGION / DRATA_PROFILE env vars, or --api-key.\n\
                   SafeBase has its own credential: `drata safebase login`, or SAFEBASE_API_KEY.\n\
